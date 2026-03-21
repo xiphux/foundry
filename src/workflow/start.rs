@@ -6,6 +6,7 @@ use std::process::Command;
 use crate::config::{self, ResolvedConfig, TemplateVars};
 use crate::git;
 use crate::state::{Workspace, WorkspaceState};
+use crate::terminal;
 
 pub fn run(
     name: &str,
@@ -75,7 +76,12 @@ pub fn run(
         agent_command: config.agent_command.clone(),
     };
 
-    for script in &config.setup_scripts {
+    // Split scripts into immediate (blocking) and deferred (run in terminal pane)
+    let (immediate, deferred): (Vec<_>, Vec<_>) =
+        config.setup_scripts.iter().partition(|s| !s.deferred);
+
+    // Run immediate scripts before opening the workspace
+    for script in &immediate {
         let resolved_command = config::resolve_template(&script.command, &template_vars)
             .with_context(|| format!("failed to resolve template in script '{}'", script.name))?;
 
@@ -108,6 +114,7 @@ pub fn run(
         }
     }
 
+    // Open the workspace
     super::open::open_workspace(
         project_name,
         name,
@@ -116,5 +123,38 @@ pub fn run(
         state,
         state_path,
         verbose,
-    )
+    )?;
+
+    // Run deferred scripts in the shell pane (first pane with no command)
+    if !deferred.is_empty() {
+        let shell_pane_index = config
+            .panes
+            .iter()
+            .position(|p| p.command.is_none())
+            .unwrap_or(0);
+
+        // Build a chained command for all deferred scripts
+        let mut deferred_commands = Vec::new();
+        for script in &deferred {
+            let resolved_command = config::resolve_template(&script.command, &template_vars)
+                .with_context(|| {
+                    format!("failed to resolve template in script '{}'", script.name)
+                })?;
+
+            if verbose {
+                eprintln!("Deferring setup script to shell pane: {}...", script.name);
+            }
+
+            deferred_commands.push(resolved_command);
+        }
+
+        let chained = deferred_commands.join(" && ");
+        let tab_id = worktree_path.to_string_lossy().to_string();
+
+        if let Ok(backend) = terminal::detect_terminal() {
+            backend.run_in_pane(&tab_id, shell_pane_index, &chained)?;
+        }
+    }
+
+    Ok(())
 }

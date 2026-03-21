@@ -183,6 +183,7 @@ command = "cp {source}/.env {worktree}/.env"
 name = "Install dependencies"
 command = "npm install"
 working_dir = "{worktree}"
+deferred = true  # runs in the shell pane after the workspace opens
 
 # Teardown scripts run before worktree deletion (in order)
 [[scripts.teardown]]
@@ -204,6 +205,12 @@ agent_command = "codex"
 # Override the merge strategy for this project
 merge_strategy = "merge"
 ```
+
+### Deferred Setup Scripts
+
+Setup scripts marked with `deferred = true` run in the shell pane **after** the workspace opens, rather than blocking before it opens. This lets you start working while slower scripts (like `npm install`) run in the background.
+
+Deferred scripts are chained together with `&&` and sent to the first pane that has no command configured (typically the "shell" pane). Non-deferred scripts run in order before the workspace opens, as usual.
 
 ### Template Variables
 

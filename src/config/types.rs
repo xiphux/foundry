@@ -33,6 +33,10 @@ pub struct ScriptConfig {
     pub name: String,
     pub command: String,
     pub working_dir: Option<String>,
+    /// If true, this script runs in a terminal pane after the workspace is
+    /// opened, rather than blocking before the workspace opens.
+    #[serde(default)]
+    pub deferred: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

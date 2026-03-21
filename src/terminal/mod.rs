@@ -49,4 +49,9 @@ pub trait TerminalBackend {
     /// Focus/switch to the tab identified by the given tab_id.
     /// Returns true if the tab was found and focused, false if not found.
     fn focus_tab(&self, tab_id: &str) -> Result<bool>;
+
+    /// Run a command in a specific pane of an already-open workspace.
+    /// The pane is identified by name — the backend finds the terminal
+    /// whose working directory matches the tab_id and selects the right pane.
+    fn run_in_pane(&self, tab_id: &str, pane_index: usize, command: &str) -> Result<()>;
 }

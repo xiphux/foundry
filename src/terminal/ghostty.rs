@@ -245,6 +245,38 @@ end tell"#
         Ok(())
     }
 
+    fn run_in_pane(&self, tab_id: &str, pane_index: usize, command: &str) -> Result<()> {
+        if tab_id.is_empty() {
+            return Ok(());
+        }
+
+        let escaped_path = Self::escape_applescript(tab_id);
+        let escaped_cmd = Self::escape_applescript(command);
+        // AppleScript uses 1-based indexing
+        let as_index = pane_index + 1;
+
+        let script = format!(
+            r#"tell application "Ghostty"
+    repeat with w in windows
+        repeat with t in tabs of w
+            set terms to terminals of t
+            repeat with term in terms
+                if working directory of term contains "{escaped_path}" then
+                    set targetTerm to item {as_index} of terms
+                    input text "{escaped_cmd}" to targetTerm
+                    send key "enter" to targetTerm
+                    return
+                end if
+            end repeat
+        end repeat
+    end repeat
+end tell"#
+        );
+
+        Self::run_applescript(&script)?;
+        Ok(())
+    }
+
     fn focus_tab(&self, tab_id: &str) -> Result<bool> {
         if tab_id.is_empty() {
             return Ok(false);
