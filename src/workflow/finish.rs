@@ -42,15 +42,6 @@ pub fn run(
         );
     }
 
-    if !tab_id.is_empty() {
-        if verbose {
-            eprintln!("Closing terminal tab...");
-        }
-        if let Ok(backend) = terminal::detect_terminal() {
-            let _ = backend.close_tab(&tab_id);
-        }
-    }
-
     let template_vars = TemplateVars {
         source: source_path.to_string_lossy().into(),
         worktree: worktree_path.to_string_lossy().into(),
@@ -146,6 +137,17 @@ pub fn run(
 
     state.remove(project_name, name);
     state.save_to(state_path)?;
+
+    // Close the terminal tab LAST — if we're running from inside the worktree's
+    // tab, this will kill our own process. All cleanup must be done before this.
+    if !tab_id.is_empty() {
+        if verbose {
+            eprintln!("Closing terminal tab...");
+        }
+        if let Ok(backend) = terminal::detect_terminal() {
+            let _ = backend.close_tab(&tab_id);
+        }
+    }
 
     Ok(())
 }

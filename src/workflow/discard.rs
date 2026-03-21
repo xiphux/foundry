@@ -42,15 +42,9 @@ pub fn run(
         }
     }
 
-    if !tab_id.is_empty() {
-        if verbose {
-            eprintln!("Closing terminal tab...");
-        }
-        if let Ok(backend) = terminal::detect_terminal() {
-            let _ = backend.close_tab(&tab_id);
-        }
-    }
-
+    // Run teardown scripts BEFORE closing the tab — they may need processes
+    // in the panes to still be running, and closing the tab would kill our
+    // own process if we're running from inside the worktree's tab.
     let template_vars = TemplateVars {
         source: source_path.to_string_lossy().into(),
         worktree: worktree_path.to_string_lossy().into(),
@@ -88,12 +82,12 @@ pub fn run(
         }
     }
 
+    // Remove worktree and clean up branch
     if verbose {
         eprintln!("Removing worktree...");
     }
     git::remove_worktree(source_path, &worktree_path, true)?;
 
-    // Archive if the branch had commits, otherwise just delete it
     let main_branch = git::detect_main_branch(source_path)?;
     if git::branch_has_commits(source_path, &branch, &main_branch).unwrap_or(true) {
         if verbose {
@@ -111,6 +105,17 @@ pub fn run(
 
     state.remove(project_name, name);
     state.save_to(state_path)?;
+
+    // Close the terminal tab LAST — if we're running from inside the worktree's
+    // tab, this will kill our own process. All cleanup must be done before this.
+    if !tab_id.is_empty() {
+        if verbose {
+            eprintln!("Closing terminal tab...");
+        }
+        if let Ok(backend) = terminal::detect_terminal() {
+            let _ = backend.close_tab(&tab_id);
+        }
+    }
 
     Ok(())
 }
