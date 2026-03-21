@@ -45,4 +45,8 @@ pub trait TerminalBackend {
     /// Close a tab identified by the given tab_id (from a previous open_workspace call).
     /// Should be a no-op if the tab no longer exists.
     fn close_tab(&self, tab_id: &str) -> Result<()>;
+
+    /// Focus/switch to the tab identified by the given tab_id.
+    /// Returns true if the tab was found and focused, false if not found.
+    fn focus_tab(&self, tab_id: &str) -> Result<bool>;
 }

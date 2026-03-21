@@ -43,6 +43,11 @@ pub enum Commands {
         /// Worktree name (inferred from cwd if omitted)
         name: Option<String>,
     },
+    /// Switch to an existing workspace's terminal tab
+    Switch {
+        /// Worktree name (lists active worktrees if omitted)
+        name: Option<String>,
+    },
     /// Restore a workspace from an archived branch
     Restore {
         /// Archived branch name (lists archived branches if omitted)

@@ -244,4 +244,32 @@ end tell"#
         let _ = Self::run_applescript(&script);
         Ok(())
     }
+
+    fn focus_tab(&self, tab_id: &str) -> Result<bool> {
+        if tab_id.is_empty() {
+            return Ok(false);
+        }
+
+        let escaped_path = Self::escape_applescript(tab_id);
+        let script = format!(
+            r#"tell application "Ghostty"
+    activate
+    repeat with w in windows
+        repeat with t in tabs of w
+            set terms to terminals of t
+            repeat with term in terms
+                if working directory of term contains "{escaped_path}" then
+                    select tab t
+                    return "found"
+                end if
+            end repeat
+        end repeat
+    end repeat
+    return "not_found"
+end tell"#
+        );
+
+        let result = Self::run_applescript(&script)?;
+        Ok(result.contains("found") && !result.contains("not_found"))
+    }
 }

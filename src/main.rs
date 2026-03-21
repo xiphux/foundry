@@ -74,6 +74,41 @@ fn main() -> Result<()> {
                 workflow::open::list_workspaces(&state, &project_name);
             }
         }
+        cli::Commands::Switch { name } => {
+            let mut state = WorkspaceState::load_from(&state_path)?;
+            state.prune_stale();
+
+            if let Some(name) = name {
+                let mut registry = Registry::load_from(&registry_path)?;
+                let (project_name, source_path) = workflow::resolve_project(
+                    cli.project.as_deref(),
+                    &mut registry,
+                    &registry_path,
+                )?;
+                let global_config = config::load_global_config()?;
+                let project_config = config::load_project_config(&source_path)?;
+                let resolved = config::merge_configs(&global_config, project_config.as_ref());
+
+                let worktree_path = resolved.worktree_dir.join(&project_name).join(&name);
+                let tab_id = worktree_path.to_string_lossy().to_string();
+
+                let backend = foundry::terminal::detect_terminal()?;
+                if !backend.focus_tab(&tab_id)? {
+                    anyhow::bail!(
+                        "could not find terminal tab for workspace '{name}'. \
+                         Use `foundry open {name}` to open it."
+                    );
+                }
+            } else {
+                let mut registry = Registry::load_from(&registry_path)?;
+                let (project_name, _) = workflow::resolve_project(
+                    cli.project.as_deref(),
+                    &mut registry,
+                    &registry_path,
+                )?;
+                workflow::open::list_workspaces(&state, &project_name);
+            }
+        }
         cli::Commands::Finish { name } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
 
