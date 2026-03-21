@@ -17,6 +17,14 @@ cargo fmt -- --check                 # Check formatting without modifying
 
 CI runs: fmt check, clippy, test, release build — on both Ubuntu and macOS.
 
+## Code Quality Rules
+
+**Before committing or after completing a set of changes**, always run:
+```bash
+cargo fmt && cargo clippy -- -D warnings
+```
+This is mandatory — CI will reject unformatted code. Since there is no editor format-on-save in the Claude Code workflow, `cargo fmt` must be run explicitly before commits to avoid delayed CI failures.
+
 ## Architecture
 
 Foundry is a CLI that manages AI agent workspaces using git worktrees and terminal automation. It shells out to the `git` CLI (not libgit2) for all git operations.
