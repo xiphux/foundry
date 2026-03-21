@@ -1,17 +1,12 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum MergeStrategy {
+    #[default]
     FfOnly,
     Merge,
-}
-
-impl Default for MergeStrategy {
-    fn default() -> Self {
-        Self::FfOnly
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]

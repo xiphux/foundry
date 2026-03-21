@@ -8,6 +8,7 @@ use crate::git;
 use crate::state::WorkspaceState;
 use crate::terminal;
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     name: &str,
     project_name: &str,
