@@ -62,11 +62,62 @@ fn main() -> Result<()> {
                 workflow::open::list_workspaces(&state, &project_name);
             }
         }
-        cli::Commands::Finish { name: _ } => {
-            println!("Finish: not yet implemented");
+        cli::Commands::Finish { name } => {
+            let mut state = WorkspaceState::load_from(&state_path)?;
+
+            let name = match name {
+                Some(n) => n,
+                None => {
+                    let cwd = std::env::current_dir()?;
+                    let cwd_str = cwd.to_string_lossy();
+                    state
+                        .find_by_worktree_path(&cwd_str)
+                        .map(|w| w.name.clone())
+                        .ok_or_else(|| anyhow::anyhow!(
+                            "could not infer workspace from current directory. Provide a name: `foundry finish <name>`"
+                        ))?
+                }
+            };
+
+            let mut registry = Registry::load_from(&registry_path)?;
+            let (project_name, source_path) =
+                workflow::resolve_project(cli.project.as_deref(), &mut registry, &registry_path)?;
+            let global_config = config::load_global_config()?;
+            let project_config = config::load_project_config(&source_path)?;
+            let resolved = config::merge_configs(&global_config, project_config.as_ref());
+
+            workflow::finish::run(
+                &name, &project_name, &source_path, &resolved, &mut state, &state_path, cli.verbose,
+            )?;
         }
-        cli::Commands::Discard { name: _ } => {
-            println!("Discard: not yet implemented");
+        cli::Commands::Discard { name } => {
+            let mut state = WorkspaceState::load_from(&state_path)?;
+
+            let name = match name {
+                Some(n) => n,
+                None => {
+                    let cwd = std::env::current_dir()?;
+                    let cwd_str = cwd.to_string_lossy();
+                    state
+                        .find_by_worktree_path(&cwd_str)
+                        .map(|w| w.name.clone())
+                        .ok_or_else(|| anyhow::anyhow!(
+                            "could not infer workspace from current directory. Provide a name: `foundry discard <name>`"
+                        ))?
+                }
+            };
+
+            let mut registry = Registry::load_from(&registry_path)?;
+            let (project_name, source_path) =
+                workflow::resolve_project(cli.project.as_deref(), &mut registry, &registry_path)?;
+            let global_config = config::load_global_config()?;
+            let project_config = config::load_project_config(&source_path)?;
+            let resolved = config::merge_configs(&global_config, project_config.as_ref());
+
+            workflow::discard::run(
+                &name, &project_name, &source_path, &resolved, &mut state, &state_path,
+                cli.verbose, cli.yes,
+            )?;
         }
         cli::Commands::Projects(cmd) => match cmd {
             cli::ProjectsCommands::List => {
