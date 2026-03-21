@@ -101,6 +101,23 @@ pub fn archive_branch(repo_path: &Path, branch: &str, prefix: &str) -> Result<()
     Ok(())
 }
 
+/// List branches matching a prefix (e.g., "archive/").
+pub fn list_branches_with_prefix(repo_path: &Path, prefix: &str) -> Result<Vec<String>> {
+    let pattern = format!("{prefix}*");
+    let output = run_git(repo_path, &["branch", "--list", "--format=%(refname:short)", &pattern])?;
+    Ok(output
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.to_string())
+        .collect())
+}
+
+/// Check if a branch exists.
+pub fn branch_exists(repo_path: &Path, name: &str) -> Result<bool> {
+    let output = run_git(repo_path, &["branch", "--list", "--format=%(refname:short)", name])?;
+    Ok(!output.is_empty())
+}
+
 pub fn has_uncommitted_changes(repo_path: &Path) -> Result<bool> {
     let output = run_git(repo_path, &["status", "--porcelain"])?;
     Ok(!output.is_empty())

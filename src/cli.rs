@@ -43,6 +43,11 @@ pub enum Commands {
         /// Worktree name (inferred from cwd if omitted)
         name: Option<String>,
     },
+    /// Restore a workspace from an archived branch
+    Restore {
+        /// Archived branch name (lists archived branches if omitted)
+        branch: Option<String>,
+    },
     /// Manage project registry
     #[command(subcommand)]
     Projects(ProjectsCommands),

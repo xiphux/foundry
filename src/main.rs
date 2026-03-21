@@ -128,6 +128,25 @@ fn main() -> Result<()> {
                 cli.verbose, cli.yes,
             )?;
         }
+        cli::Commands::Restore { branch } => {
+            let mut registry = Registry::load_from(&registry_path)?;
+            let (project_name, source_path) =
+                workflow::resolve_project(cli.project.as_deref(), &mut registry, &registry_path)?;
+
+            let global_config = config::load_global_config()?;
+            let project_config = config::load_project_config(&source_path)?;
+            let resolved = config::merge_configs(&global_config, project_config.as_ref());
+
+            if let Some(branch) = branch {
+                let mut state = WorkspaceState::load_from(&state_path)?;
+                workflow::restore::run(
+                    &branch, &project_name, &source_path, &resolved, &mut state, &state_path,
+                    cli.verbose,
+                )?;
+            } else {
+                workflow::restore::list_archived(&source_path, &resolved.archive_prefix)?;
+            }
+        }
         cli::Commands::Projects(cmd) => match cmd {
             cli::ProjectsCommands::List => {
                 let registry = Registry::load_from(&registry_path)?;

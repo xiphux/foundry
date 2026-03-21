@@ -2,6 +2,7 @@ pub mod start;
 pub mod open;
 pub mod finish;
 pub mod discard;
+pub mod restore;
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
