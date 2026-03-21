@@ -69,13 +69,12 @@ impl GhosttyBackend {
 
         if panes.is_empty() {
             // No pane config — just open a new tab
-            lines.push("    set win to front window".to_string());
-            lines.push("    set newTab to new tab in win with configuration cfg".to_string());
+            lines.push("    new tab with configuration cfg".to_string());
             lines.push("end tell".to_string());
             return Ok(lines.join("\n"));
         }
 
-        // First pane: create a new tab in the front window
+        // First pane: create a new tab (defaults to front window)
         let first = &panes[0];
         let first_var = Self::pane_var(&first.name);
 
@@ -87,12 +86,9 @@ impl GhosttyBackend {
             ));
         }
 
-        lines.push("    set win to front window".to_string());
-        lines.push(
-            "    set newTab to new tab in win with configuration cfg".to_string()
-        );
+        lines.push("    set newTab to new tab with configuration cfg".to_string());
         lines.push(format!(
-            "    set {first_var} to terminal 1 of selected tab of win"
+            "    set {first_var} to terminal 1 of newTab"
         ));
 
         // Process remaining panes
