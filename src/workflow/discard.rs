@@ -22,7 +22,10 @@ pub fn run(
     let worktree_path = config.worktree_dir.join(project_name).join(name);
 
     if !worktree_path.exists() {
-        anyhow::bail!("worktree '{name}' does not exist at {}", worktree_path.display());
+        anyhow::bail!(
+            "worktree '{name}' does not exist at {}",
+            worktree_path.display()
+        );
     }
 
     let workspace = state

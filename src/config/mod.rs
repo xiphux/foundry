@@ -34,7 +34,14 @@ pub struct TemplateVars {
 }
 
 /// The set of known template variable names.
-const KNOWN_VARS: &[&str] = &["source", "worktree", "branch", "name", "project", "agent_command"];
+const KNOWN_VARS: &[&str] = &[
+    "source",
+    "worktree",
+    "branch",
+    "name",
+    "project",
+    "agent_command",
+];
 
 /// Validate that a template string only uses known variable names.
 /// Called at config parse time. Does NOT resolve values.
@@ -95,8 +102,7 @@ pub fn load_global_config() -> Result<GlobalConfig> {
     // Validate template variables in pane commands at parse time
     for pane in &config.panes {
         if let Some(ref cmd) = pane.command {
-            validate_template(cmd)
-                .with_context(|| format!("in pane '{}' command", pane.name))?;
+            validate_template(cmd).with_context(|| format!("in pane '{}' command", pane.name))?;
         }
     }
 
@@ -184,9 +190,7 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
             .unwrap_or_else(|| global.merge_strategy.clone()),
         worktree_dir,
         panes,
-        setup_scripts: project
-            .map(|p| p.scripts.setup.clone())
-            .unwrap_or_default(),
+        setup_scripts: project.map(|p| p.scripts.setup.clone()).unwrap_or_default(),
         teardown_scripts: project
             .map(|p| p.scripts.teardown.clone())
             .unwrap_or_default(),

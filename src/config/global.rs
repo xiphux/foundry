@@ -1,5 +1,5 @@
-use serde::Deserialize;
 use super::types::{MergeStrategy, PaneConfig, SplitDirection};
+use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]

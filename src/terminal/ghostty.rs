@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
-use crate::config::types::SplitDirection;
 use super::{PaneSpec, TerminalBackend};
+use crate::config::types::SplitDirection;
 
 pub struct GhosttyBackend;
 
@@ -61,10 +61,7 @@ impl GhosttyBackend {
 
     /// Build the main AppleScript that sets up splits and runs commands.
     /// This runs AFTER the tab has already been created via a separate call.
-    fn build_layout_script(
-        path: &Path,
-        panes: &[PaneSpec],
-    ) -> Result<String> {
+    fn build_layout_script(path: &Path, panes: &[PaneSpec]) -> Result<String> {
         let path_str = path.to_str().context("invalid worktree path")?;
         let mut lines = Vec::new();
 
@@ -72,13 +69,9 @@ impl GhosttyBackend {
 
         if panes.is_empty() {
             // No panes to configure — just cd to the directory
-            lines.push(
-                "    set t to focused terminal of selected tab of front window".to_string(),
-            );
+            lines.push("    set t to focused terminal of selected tab of front window".to_string());
             let escaped_path = Self::escape_applescript(path_str);
-            lines.push(format!(
-                "    input text \"cd {escaped_path}\" to t"
-            ));
+            lines.push(format!("    input text \"cd {escaped_path}\" to t"));
             lines.push("    send key \"enter\" to t".to_string());
             lines.push("end tell".to_string());
             return Ok(lines.join("\n"));
@@ -126,7 +119,9 @@ impl GhosttyBackend {
             // If this pane has env vars, create a custom config
             if !pane.env.is_empty() {
                 let pane_cfg_var = format!("cfg_{}", Self::pane_var(&pane.name));
-                lines.push(format!("    set {pane_cfg_var} to new surface configuration"));
+                lines.push(format!(
+                    "    set {pane_cfg_var} to new surface configuration"
+                ));
                 lines.push(format!(
                     "    set initial working directory of {pane_cfg_var} to \"{}\"",
                     Self::escape_applescript(path_str)
@@ -163,9 +158,7 @@ impl GhosttyBackend {
                         }
                     }
                     let escaped_cmd = Self::escape_applescript(cmd);
-                    lines.push(format!(
-                        "    input text \"{escaped_cmd}\" to {pane_var}"
-                    ));
+                    lines.push(format!("    input text \"{escaped_cmd}\" to {pane_var}"));
                     lines.push(format!("    send key \"enter\" to {pane_var}"));
                 }
             }
@@ -203,9 +196,7 @@ impl TerminalBackend for GhosttyBackend {
         if verbose {
             eprintln!("Opening new Ghostty tab...");
         }
-        Self::run_applescript_ignoring_errors(
-            r#"tell application "Ghostty" to new tab"#,
-        )?;
+        Self::run_applescript_ignoring_errors(r#"tell application "Ghostty" to new tab"#)?;
 
         // Brief pause to let the tab finish creating
         std::thread::sleep(std::time::Duration::from_millis(500));

@@ -18,8 +18,7 @@ pub fn open_workspace(
     let backend = terminal::detect_terminal()?;
 
     // Build template vars for pane commands from workspace state
-    let workspace = state
-        .find_by_worktree_path(&worktree_path.to_string_lossy());
+    let workspace = state.find_by_worktree_path(&worktree_path.to_string_lossy());
     let source_path = workspace.map(|w| w.source_path.clone()).unwrap_or_default();
     let branch = workspace.map(|w| w.branch.clone()).unwrap_or_default();
 
@@ -37,7 +36,11 @@ pub fn open_workspace(
     for pane in &config.panes {
         let resolved_command = if let Some(ref cmd) = pane.command {
             let resolved = config::resolve_template(cmd, &template_vars)?;
-            if resolved.is_empty() { None } else { Some(resolved) }
+            if resolved.is_empty() {
+                None
+            } else {
+                Some(resolved)
+            }
         } else {
             None
         };
@@ -70,6 +73,9 @@ pub fn list_workspaces(state: &WorkspaceState, project: &str) {
     }
     println!("Active workspaces for '{project}':");
     for ws in workspaces {
-        println!("  {} (branch: {}, path: {})", ws.name, ws.branch, ws.worktree_path);
+        println!(
+            "  {} (branch: {}, path: {})",
+            ws.name, ws.branch, ws.worktree_path
+        );
     }
 }

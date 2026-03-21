@@ -83,5 +83,8 @@ fn test_archive_branch_collision() {
         .unwrap();
     let branches = String::from_utf8_lossy(&output.stdout);
     let count = branches.lines().filter(|l| !l.trim().is_empty()).count();
-    assert!(count >= 2, "expected at least 2 archived branches, got {count}: {branches}");
+    assert!(
+        count >= 2,
+        "expected at least 2 archived branches, got {count}: {branches}"
+    );
 }

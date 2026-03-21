@@ -8,8 +8,12 @@ fn test_resolve_template_variables() {
         project: "myapp".into(),
         agent_command: "claude".into(),
     };
-    let result = foundry::config::resolve_template("cp {source}/.env {worktree}/.env", &vars).unwrap();
-    assert_eq!(result, "cp /Users/me/code/myapp/.env /Users/me/.foundry/worktrees/myapp/feat/.env");
+    let result =
+        foundry::config::resolve_template("cp {source}/.env {worktree}/.env", &vars).unwrap();
+    assert_eq!(
+        result,
+        "cp /Users/me/code/myapp/.env /Users/me/.foundry/worktrees/myapp/feat/.env"
+    );
 }
 
 #[test]

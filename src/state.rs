@@ -29,7 +29,9 @@ pub struct WorkspaceState {
 impl WorkspaceState {
     pub fn load_from(path: &Path) -> Result<Self> {
         if !path.exists() {
-            return Ok(Self { inner: StateFile::default() });
+            return Ok(Self {
+                inner: StateFile::default(),
+            });
         }
         let contents = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
@@ -54,7 +56,9 @@ impl WorkspaceState {
     }
 
     pub fn remove(&mut self, project: &str, name: &str) {
-        self.inner.workspaces.retain(|w| !(w.project == project && w.name == name));
+        self.inner
+            .workspaces
+            .retain(|w| !(w.project == project && w.name == name));
     }
 
     pub fn list(&self) -> &[Workspace] {
@@ -62,22 +66,34 @@ impl WorkspaceState {
     }
 
     pub fn find_by_project(&self, project: &str) -> Vec<&Workspace> {
-        self.inner.workspaces.iter().filter(|w| w.project == project).collect()
+        self.inner
+            .workspaces
+            .iter()
+            .filter(|w| w.project == project)
+            .collect()
     }
 
     pub fn find_by_worktree_path(&self, path: &str) -> Option<&Workspace> {
-        self.inner.workspaces.iter().find(|w| {
-            path == w.worktree_path || path.starts_with(&format!("{}/", w.worktree_path))
-        })
+        self.inner
+            .workspaces
+            .iter()
+            .find(|w| path == w.worktree_path || path.starts_with(&format!("{}/", w.worktree_path)))
     }
 
     pub fn set_terminal_tab_id(&mut self, project: &str, name: &str, tab_id: String) {
-        if let Some(ws) = self.inner.workspaces.iter_mut().find(|w| w.project == project && w.name == name) {
+        if let Some(ws) = self
+            .inner
+            .workspaces
+            .iter_mut()
+            .find(|w| w.project == project && w.name == name)
+        {
             ws.terminal_tab_id = tab_id;
         }
     }
 
     pub fn prune_stale(&mut self) {
-        self.inner.workspaces.retain(|w| Path::new(&w.worktree_path).exists());
+        self.inner
+            .workspaces
+            .retain(|w| Path::new(&w.worktree_path).exists());
     }
 }

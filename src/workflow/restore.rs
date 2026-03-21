@@ -49,10 +49,7 @@ fn derive_worktree_name(branch: &str, archive_prefix: &str, branch_prefix: Optio
 }
 
 /// List archived branches for a project.
-pub fn list_archived(
-    source_path: &Path,
-    archive_prefix: &str,
-) -> Result<()> {
+pub fn list_archived(source_path: &Path, archive_prefix: &str) -> Result<()> {
     let branches = git::list_branches_with_prefix(source_path, &format!("{archive_prefix}/"))?;
 
     if branches.is_empty() {
@@ -83,7 +80,15 @@ pub fn run(
         // Try prepending the archive prefix if not already present
         let with_prefix = format!("{}/{branch}", config.archive_prefix);
         if git::branch_exists(source_path, &with_prefix)? {
-            return run(&with_prefix, project_name, source_path, config, state, state_path, verbose);
+            return run(
+                &with_prefix,
+                project_name,
+                source_path,
+                config,
+                state,
+                state_path,
+                verbose,
+            );
         }
         anyhow::bail!("branch '{branch}' not found. Run `foundry restore` with no arguments to see archived branches.");
     }
@@ -99,10 +104,19 @@ pub fn run(
     // Check if worktree already exists
     if worktree_path.exists() {
         if verbose {
-            eprintln!("Worktree already exists at {}, opening workspace...", worktree_path.display());
+            eprintln!(
+                "Worktree already exists at {}, opening workspace...",
+                worktree_path.display()
+            );
         }
         return super::open::open_workspace(
-            project_name, &name, &worktree_path, config, state, state_path, verbose,
+            project_name,
+            &name,
+            &worktree_path,
+            config,
+            state,
+            state_path,
+            verbose,
         );
     }
 
@@ -114,7 +128,10 @@ pub fn run(
 
     // Create worktree from the archived branch
     if verbose {
-        eprintln!("Creating worktree at {} from branch '{branch}'...", worktree_path.display());
+        eprintln!(
+            "Creating worktree at {} from branch '{branch}'...",
+            worktree_path.display()
+        );
     }
     git::create_worktree(source_path, &worktree_path, branch)
         .with_context(|| "failed to create worktree")?;
@@ -178,7 +195,13 @@ pub fn run(
 
     // Open workspace
     super::open::open_workspace(
-        project_name, &name, &worktree_path, config, state, state_path, verbose,
+        project_name,
+        &name,
+        &worktree_path,
+        config,
+        state,
+        state_path,
+        verbose,
     )
 }
 
@@ -205,7 +228,11 @@ mod tests {
     #[test]
     fn test_derive_worktree_name_with_branch_prefix() {
         assert_eq!(
-            derive_worktree_name("archive/xiphux/my-feature-20260321", "archive", Some("xiphux")),
+            derive_worktree_name(
+                "archive/xiphux/my-feature-20260321",
+                "archive",
+                Some("xiphux")
+            ),
             "my-feature"
         );
     }

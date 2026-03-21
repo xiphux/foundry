@@ -19,7 +19,10 @@ pub fn run(
     let worktree_path = config.worktree_dir.join(project_name).join(name);
 
     if !worktree_path.exists() {
-        anyhow::bail!("worktree '{name}' does not exist at {}", worktree_path.display());
+        anyhow::bail!(
+            "worktree '{name}' does not exist at {}",
+            worktree_path.display()
+        );
     }
 
     let workspace = state
@@ -90,8 +93,7 @@ pub fn run(
     }
 
     // Check for commits BEFORE merging (after merge, branch matches main)
-    let has_commits = git::branch_has_commits(source_path, &branch, &main_branch)
-        .unwrap_or(true);
+    let has_commits = git::branch_has_commits(source_path, &branch, &main_branch).unwrap_or(true);
 
     if verbose {
         eprintln!("Merging '{branch}' into '{main_branch}'...");

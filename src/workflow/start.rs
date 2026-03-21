@@ -21,9 +21,20 @@ pub fn run(
 
     if worktree_path.exists() {
         if verbose {
-            eprintln!("Worktree already exists at {}, opening workspace...", worktree_path.display());
+            eprintln!(
+                "Worktree already exists at {}, opening workspace...",
+                worktree_path.display()
+            );
         }
-        return super::open::open_workspace(project_name, name, &worktree_path, config, state, state_path, verbose);
+        return super::open::open_workspace(
+            project_name,
+            name,
+            &worktree_path,
+            config,
+            state,
+            state_path,
+            verbose,
+        );
     }
 
     if verbose {
@@ -97,5 +108,13 @@ pub fn run(
         }
     }
 
-    super::open::open_workspace(project_name, name, &worktree_path, config, state, state_path, verbose)
+    super::open::open_workspace(
+        project_name,
+        name,
+        &worktree_path,
+        config,
+        state,
+        state_path,
+        verbose,
+    )
 }

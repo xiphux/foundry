@@ -22,7 +22,9 @@ pub struct Registry {
 impl Registry {
     pub fn load_from(path: &Path) -> Result<Self> {
         if !path.exists() {
-            return Ok(Self { inner: RegistryFile::default() });
+            return Ok(Self {
+                inner: RegistryFile::default(),
+            });
         }
         let contents = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
@@ -36,7 +38,8 @@ impl Registry {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
-        let contents = toml::to_string_pretty(&self.inner).context("failed to serialize registry")?;
+        let contents =
+            toml::to_string_pretty(&self.inner).context("failed to serialize registry")?;
         std::fs::write(path, contents)
             .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(())
@@ -46,7 +49,9 @@ impl Registry {
         if self.inner.projects.contains_key(name) {
             bail!("project '{name}' already exists. Use `foundry projects remove` first, or choose a different name.");
         }
-        self.inner.projects.insert(name.to_string(), ProjectEntry { path });
+        self.inner
+            .projects
+            .insert(name.to_string(), ProjectEntry { path });
         Ok(())
     }
 
@@ -62,10 +67,18 @@ impl Registry {
     }
 
     pub fn list(&self) -> Vec<(String, PathBuf)> {
-        self.inner.projects.iter().map(|(k, v)| (k.clone(), v.path.clone())).collect()
+        self.inner
+            .projects
+            .iter()
+            .map(|(k, v)| (k.clone(), v.path.clone()))
+            .collect()
     }
 
     pub fn find_by_path(&self, path: &Path) -> Option<String> {
-        self.inner.projects.iter().find(|(_, v)| v.path == path).map(|(k, _)| k.clone())
+        self.inner
+            .projects
+            .iter()
+            .find(|(_, v)| v.path == path)
+            .map(|(k, _)| k.clone())
     }
 }

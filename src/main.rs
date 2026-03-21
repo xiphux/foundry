@@ -1,7 +1,7 @@
 mod cli;
 
 use anyhow::Result;
-use clap::{Parser, CommandFactory};
+use clap::{CommandFactory, Parser};
 use cli::Cli;
 use foundry::config;
 use foundry::registry::Registry;
@@ -41,8 +41,11 @@ fn main() -> Result<()> {
 
             if let Some(name) = name {
                 let mut registry = Registry::load_from(&registry_path)?;
-                let (project_name, source_path) =
-                    workflow::resolve_project(cli.project.as_deref(), &mut registry, &registry_path)?;
+                let (project_name, source_path) = workflow::resolve_project(
+                    cli.project.as_deref(),
+                    &mut registry,
+                    &registry_path,
+                )?;
                 let global_config = config::load_global_config()?;
                 let project_config = config::load_project_config(&source_path)?;
                 let resolved = config::merge_configs(&global_config, project_config.as_ref());
@@ -53,12 +56,21 @@ fn main() -> Result<()> {
                 }
 
                 workflow::open::open_workspace(
-                    &project_name, &name, &worktree_path, &resolved, &mut state, &state_path, cli.verbose,
+                    &project_name,
+                    &name,
+                    &worktree_path,
+                    &resolved,
+                    &mut state,
+                    &state_path,
+                    cli.verbose,
                 )?;
             } else {
                 let mut registry = Registry::load_from(&registry_path)?;
-                let (project_name, _) =
-                    workflow::resolve_project(cli.project.as_deref(), &mut registry, &registry_path)?;
+                let (project_name, _) = workflow::resolve_project(
+                    cli.project.as_deref(),
+                    &mut registry,
+                    &registry_path,
+                )?;
                 workflow::open::list_workspaces(&state, &project_name);
             }
         }
@@ -72,7 +84,9 @@ fn main() -> Result<()> {
                 Some(n) => {
                     let mut registry = Registry::load_from(&registry_path)?;
                     let (pn, sp) = workflow::resolve_project(
-                        cli.project.as_deref(), &mut registry, &registry_path,
+                        cli.project.as_deref(),
+                        &mut registry,
+                        &registry_path,
                     )?;
                     (n, pn, sp)
                 }
@@ -84,7 +98,11 @@ fn main() -> Result<()> {
                         .ok_or_else(|| anyhow::anyhow!(
                             "could not infer workspace from current directory. Provide a name: `foundry finish <name>`"
                         ))?;
-                    (ws.name.clone(), ws.project.clone(), std::path::PathBuf::from(&ws.source_path))
+                    (
+                        ws.name.clone(),
+                        ws.project.clone(),
+                        std::path::PathBuf::from(&ws.source_path),
+                    )
                 }
             };
 
@@ -93,7 +111,13 @@ fn main() -> Result<()> {
             let resolved = config::merge_configs(&global_config, project_config.as_ref());
 
             workflow::finish::run(
-                &name, &project_name, &source_path, &resolved, &mut state, &state_path, cli.verbose,
+                &name,
+                &project_name,
+                &source_path,
+                &resolved,
+                &mut state,
+                &state_path,
+                cli.verbose,
             )?;
         }
         cli::Commands::Discard { name } => {
@@ -103,7 +127,9 @@ fn main() -> Result<()> {
                 Some(n) => {
                     let mut registry = Registry::load_from(&registry_path)?;
                     let (pn, sp) = workflow::resolve_project(
-                        cli.project.as_deref(), &mut registry, &registry_path,
+                        cli.project.as_deref(),
+                        &mut registry,
+                        &registry_path,
                     )?;
                     (n, pn, sp)
                 }
@@ -115,7 +141,11 @@ fn main() -> Result<()> {
                         .ok_or_else(|| anyhow::anyhow!(
                             "could not infer workspace from current directory. Provide a name: `foundry discard <name>`"
                         ))?;
-                    (ws.name.clone(), ws.project.clone(), std::path::PathBuf::from(&ws.source_path))
+                    (
+                        ws.name.clone(),
+                        ws.project.clone(),
+                        std::path::PathBuf::from(&ws.source_path),
+                    )
                 }
             };
 
@@ -124,8 +154,14 @@ fn main() -> Result<()> {
             let resolved = config::merge_configs(&global_config, project_config.as_ref());
 
             workflow::discard::run(
-                &name, &project_name, &source_path, &resolved, &mut state, &state_path,
-                cli.verbose, cli.yes,
+                &name,
+                &project_name,
+                &source_path,
+                &resolved,
+                &mut state,
+                &state_path,
+                cli.verbose,
+                cli.yes,
             )?;
         }
         cli::Commands::Restore { branch } => {
@@ -140,7 +176,12 @@ fn main() -> Result<()> {
             if let Some(branch) = branch {
                 let mut state = WorkspaceState::load_from(&state_path)?;
                 workflow::restore::run(
-                    &branch, &project_name, &source_path, &resolved, &mut state, &state_path,
+                    &branch,
+                    &project_name,
+                    &source_path,
+                    &resolved,
+                    &mut state,
+                    &state_path,
                     cli.verbose,
                 )?;
             } else {

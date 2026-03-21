@@ -31,7 +31,10 @@ optional = true
     let config: foundry::config::GlobalConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(config.branch_prefix.as_deref(), Some("xiphux"));
     assert_eq!(config.agent_command, "claude");
-    assert_eq!(config.merge_strategy, foundry::config::MergeStrategy::FfOnly);
+    assert_eq!(
+        config.merge_strategy,
+        foundry::config::MergeStrategy::FfOnly
+    );
     assert_eq!(config.panes.len(), 4);
     assert!(config.panes[3].optional);
 }
@@ -43,7 +46,10 @@ fn test_global_config_defaults() {
     assert_eq!(config.branch_prefix, None);
     assert_eq!(config.agent_command, "claude");
     assert_eq!(config.archive_prefix, "archive");
-    assert_eq!(config.merge_strategy, foundry::config::MergeStrategy::FfOnly);
+    assert_eq!(
+        config.merge_strategy,
+        foundry::config::MergeStrategy::FfOnly
+    );
 }
 
 #[test]

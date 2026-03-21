@@ -1,8 +1,8 @@
-pub mod start;
-pub mod open;
-pub mod finish;
 pub mod discard;
+pub mod finish;
+pub mod open;
 pub mod restore;
+pub mod start;
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -17,9 +17,9 @@ pub fn resolve_project(
     registry_path: &Path,
 ) -> Result<(String, PathBuf)> {
     if let Some(name) = project_flag {
-        let path = registry
-            .get(name)
-            .with_context(|| format!("project '{name}' not found. Register it with `foundry projects add`."))?;
+        let path = registry.get(name).with_context(|| {
+            format!("project '{name}' not found. Register it with `foundry projects add`.")
+        })?;
         return Ok((name.to_string(), path));
     }
 
@@ -45,7 +45,10 @@ pub fn resolve_project(
         );
     }
 
-    eprintln!("Auto-registering project '{name}' at {}", repo_root.display());
+    eprintln!(
+        "Auto-registering project '{name}' at {}",
+        repo_root.display()
+    );
     registry.add(&name, repo_root.clone())?;
     registry.save_to(registry_path)?;
 

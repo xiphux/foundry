@@ -24,7 +24,10 @@ pub fn detect_main_branch(repo_path: &Path) -> Result<String> {
             return Ok(branch.to_string());
         }
     }
-    let branches = run_git(repo_path, &["branch", "--list", "--format=%(refname:short)"])?;
+    let branches = run_git(
+        repo_path,
+        &["branch", "--list", "--format=%(refname:short)"],
+    )?;
     for candidate in ["main", "master"] {
         if branches.lines().any(|b| b == candidate) {
             return Ok(candidate.to_string());
@@ -71,7 +74,10 @@ pub fn merge(repo_path: &Path, branch: &str) -> Result<()> {
 /// Check if a branch has any commits that aren't on the base branch.
 /// Returns true if the branch has unique commits worth preserving.
 pub fn branch_has_commits(repo_path: &Path, branch: &str, base: &str) -> Result<bool> {
-    let output = run_git(repo_path, &["rev-list", "--count", &format!("{base}..{branch}")])?;
+    let output = run_git(
+        repo_path,
+        &["rev-list", "--count", &format!("{base}..{branch}")],
+    )?;
     let count: u64 = output.parse().unwrap_or(0);
     Ok(count > 0)
 }
@@ -104,7 +110,10 @@ pub fn archive_branch(repo_path: &Path, branch: &str, prefix: &str) -> Result<()
 /// List branches matching a prefix (e.g., "archive/").
 pub fn list_branches_with_prefix(repo_path: &Path, prefix: &str) -> Result<Vec<String>> {
     let pattern = format!("{prefix}*");
-    let output = run_git(repo_path, &["branch", "--list", "--format=%(refname:short)", &pattern])?;
+    let output = run_git(
+        repo_path,
+        &["branch", "--list", "--format=%(refname:short)", &pattern],
+    )?;
     Ok(output
         .lines()
         .filter(|l| !l.is_empty())
@@ -114,7 +123,10 @@ pub fn list_branches_with_prefix(repo_path: &Path, prefix: &str) -> Result<Vec<S
 
 /// Check if a branch exists.
 pub fn branch_exists(repo_path: &Path, name: &str) -> Result<bool> {
-    let output = run_git(repo_path, &["branch", "--list", "--format=%(refname:short)", name])?;
+    let output = run_git(
+        repo_path,
+        &["branch", "--list", "--format=%(refname:short)", name],
+    )?;
     Ok(!output.is_empty())
 }
 

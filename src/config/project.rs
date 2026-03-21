@@ -1,6 +1,6 @@
+use super::types::{PaneOverride, ScriptsConfig};
 use serde::Deserialize;
 use std::collections::HashMap;
-use super::types::{PaneOverride, ScriptsConfig};
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]

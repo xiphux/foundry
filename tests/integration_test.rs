@@ -2,9 +2,21 @@ use std::process::Command;
 use tempfile::TempDir;
 
 fn init_test_repo(dir: &std::path::Path) {
-    Command::new("git").args(["init"]).current_dir(dir).output().unwrap();
-    Command::new("git").args(["commit", "--allow-empty", "-m", "initial"]).current_dir(dir).output().unwrap();
-    Command::new("git").args(["branch", "-M", "main"]).current_dir(dir).output().unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "--allow-empty", "-m", "initial"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["branch", "-M", "main"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
 }
 
 #[test]
@@ -23,8 +35,16 @@ fn test_git_workflow_start_to_finish() {
 
     // Make a commit in the worktree
     std::fs::write(worktree_path.join("feature.txt"), "hello").unwrap();
-    Command::new("git").args(["add", "."]).current_dir(&worktree_path).output().unwrap();
-    Command::new("git").args(["commit", "-m", "add feature"]).current_dir(&worktree_path).output().unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&worktree_path)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "add feature"])
+        .current_dir(&worktree_path)
+        .output()
+        .unwrap();
 
     // Verify no uncommitted changes
     assert!(!foundry::git::has_uncommitted_changes(&worktree_path).unwrap());
@@ -55,5 +75,8 @@ fn test_git_workflow_start_to_finish() {
         .output()
         .unwrap();
     let branches = String::from_utf8_lossy(&output.stdout);
-    assert!(!branches.trim().is_empty(), "expected archived branch, got empty");
+    assert!(
+        !branches.trim().is_empty(),
+        "expected archived branch, got empty"
+    );
 }
