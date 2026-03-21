@@ -1,11 +1,11 @@
 use anyhow::Result;
-use std::collections::HashMap;
 use std::path::Path;
 
 use crate::config::{self, ResolvedConfig, TemplateVars};
 use crate::state::WorkspaceState;
-use crate::terminal;
+use crate::terminal::{self, PaneSpec};
 
+/// Open the terminal workspace for an existing worktree.
 pub fn open_workspace(
     project_name: &str,
     name: &str,
@@ -17,6 +17,7 @@ pub fn open_workspace(
 ) -> Result<()> {
     let backend = terminal::detect_terminal()?;
 
+    // Build template vars for pane commands from workspace state
     let workspace = state
         .find_by_worktree_path(&worktree_path.to_string_lossy());
     let source_path = workspace.map(|w| w.source_path.clone()).unwrap_or_default();
@@ -31,70 +32,36 @@ pub fn open_workspace(
         agent_command: config.agent_command.clone(),
     };
 
-    let mut pane_handles: HashMap<String, String> = HashMap::new();
-
-    if config.panes.is_empty() {
-        backend.open_tab(worktree_path)?;
-        return Ok(());
-    }
-
-    let first = &config.panes[0];
-    if verbose {
-        eprintln!("Opening tab for pane '{}'...", first.name);
-    }
-    let handle = backend.open_tab(worktree_path)?;
-
-    if let Some(ref cmd) = first.command {
-        let resolved = config::resolve_template(cmd, &template_vars)?;
-        if !resolved.is_empty() {
-            backend.run_command(&handle, &resolved, &first.env)?;
-        }
-    }
-    pane_handles.insert(first.name.clone(), handle.clone());
-
-    for pane in &config.panes[1..] {
-        let split_from = pane
-            .split_from
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("pane '{}' has no split_from", pane.name))?;
-
-        let parent_handle = pane_handles
-            .get(split_from)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "pane '{}' references unknown split_from '{}'",
-                    pane.name,
-                    split_from
-                )
-            })?;
-
-        let direction = pane
-            .direction
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("pane '{}' has no direction", pane.name))?;
-
-        if verbose {
-            eprintln!("Splitting pane '{}'...", pane.name);
-        }
-
-        let new_handle = backend.split_pane(parent_handle, direction)?;
-
-        if let Some(ref cmd) = pane.command {
+    // Build PaneSpecs from the resolved config, resolving template variables
+    let mut pane_specs = Vec::new();
+    for pane in &config.panes {
+        let resolved_command = if let Some(ref cmd) = pane.command {
             let resolved = config::resolve_template(cmd, &template_vars)?;
-            if !resolved.is_empty() {
-                backend.run_command(&new_handle, &resolved, &pane.env)?;
-            }
-        }
+            if resolved.is_empty() { None } else { Some(resolved) }
+        } else {
+            None
+        };
 
-        pane_handles.insert(pane.name.clone(), new_handle);
+        pane_specs.push(PaneSpec {
+            name: pane.name.clone(),
+            split_from: pane.split_from.clone(),
+            direction: pane.direction.clone(),
+            command: resolved_command,
+            env: pane.env.clone(),
+        });
     }
 
-    state.set_terminal_tab_id(project_name, name, handle);
+    // Open the workspace — the backend builds the entire layout in one shot
+    let tab_id = backend.open_workspace(worktree_path, &pane_specs, verbose)?;
+
+    // Persist tab ID in state for later close_tab
+    state.set_terminal_tab_id(project_name, name, tab_id);
     state.save_to(state_path)?;
 
     Ok(())
 }
 
+/// List active worktrees for a project.
 pub fn list_workspaces(state: &WorkspaceState, project: &str) {
     let workspaces = state.find_by_project(project);
     if workspaces.is_empty() {

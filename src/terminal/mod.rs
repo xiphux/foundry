@@ -6,6 +6,21 @@ use std::path::Path;
 
 use crate::config::types::SplitDirection;
 
+/// A pane to be opened in the terminal workspace.
+#[derive(Debug, Clone)]
+pub struct PaneSpec {
+    /// Unique name for this pane (used for split_from references).
+    pub name: String,
+    /// Which pane to split from (None = first pane, becomes the tab).
+    pub split_from: Option<String>,
+    /// Split direction (required if split_from is Some).
+    pub direction: Option<SplitDirection>,
+    /// Command to run in this pane (None = just a shell).
+    pub command: Option<String>,
+    /// Environment variables to set for this pane.
+    pub env: HashMap<String, String>,
+}
+
 /// Detect the current terminal and return a boxed automation backend.
 pub fn detect_terminal() -> Result<Box<dyn TerminalBackend>> {
     if let Some(term) = ghostty::GhosttyBackend::detect() {
@@ -19,9 +34,17 @@ pub fn detect_terminal() -> Result<Box<dyn TerminalBackend>> {
 }
 
 /// Object-safe trait for terminal automation backends.
+///
+/// The primary method is `open_workspace` which builds the entire terminal
+/// layout in one shot. This is necessary because some terminals (like Ghostty)
+/// need all pane references within a single script execution — object handles
+/// cannot be passed between separate script invocations.
 pub trait TerminalBackend {
-    fn open_tab(&self, path: &Path) -> Result<String>;
-    fn split_pane(&self, target: &str, direction: &SplitDirection) -> Result<String>;
-    fn run_command(&self, target: &str, command: &str, env: &HashMap<String, String>) -> Result<()>;
+    /// Open a complete workspace layout with multiple panes.
+    /// Returns an identifier for the tab that can be used with `close_tab`.
+    fn open_workspace(&self, path: &Path, panes: &[PaneSpec], verbose: bool) -> Result<String>;
+
+    /// Close a tab identified by the given tab_id (from a previous open_workspace call).
+    /// Should be a no-op if the tab no longer exists.
     fn close_tab(&self, tab_id: &str) -> Result<()>;
 }
