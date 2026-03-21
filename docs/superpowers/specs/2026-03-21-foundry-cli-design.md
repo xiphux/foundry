@@ -195,7 +195,10 @@ branch = "xiphux/my-feature"
 worktree_path = "/Users/xiphux/.foundry/worktrees/myapp/my-feature"
 source_path = "/Users/xiphux/code/myapp"
 created_at = "2026-03-21T10:30:00Z"
+terminal_tab_id = ""  # terminal-specific identifier, set when workspace is opened
 ```
+
+The `terminal_tab_id` field stores a terminal-backend-specific identifier (e.g., a Ghostty window/tab reference) that allows `close_tab` to target the correct tab across separate CLI invocations. It is set by `foundry start` and `foundry open` after opening the workspace, and cleared by `foundry finish` and `foundry discard`. If the identifier is empty or stale (tab was closed manually), `close_tab` is a no-op.
 
 This file is the source of truth for which worktrees are foundry-managed (vs. manually created git worktrees). It enables:
 
@@ -204,7 +207,7 @@ This file is the source of truth for which worktrees are foundry-managed (vs. ma
 - Shell completions to enumerate valid workspace names.
 - Inferring the workspace from the current working directory.
 
-Entries are added by `foundry start` and removed by `foundry finish` and `foundry discard`. On startup, foundry can optionally validate that listed worktrees still exist on disk and prune stale entries.
+Entries are added by `foundry start` and removed by `foundry finish` and `foundry discard`. On every invocation that reads state (e.g., `list`, `open`, completions), foundry validates that listed worktrees still exist on disk and prunes stale entries.
 
 ## Git Operations
 
@@ -234,32 +237,37 @@ All operations shell out to the `git` CLI via `std::process::Command`. All comma
 ### Trait
 
 ```rust
-/// Opaque handle to a terminal pane, returned by open_tab and split_pane.
-/// Implementations use this to target specific panes for commands and splits.
-struct PaneHandle(/* implementation-specific identifier */);
-
 trait TerminalAutomation {
-    /// Check if this terminal backend is available in the current environment.
-    fn detect() -> bool;
+    /// Backend-specific handle to a terminal pane.
+    type PaneHandle;
+
+    /// Detect the terminal and return an instance if available.
+    /// Returns None if this backend is not available in the current environment.
+    fn detect() -> Option<Self> where Self: Sized;
 
     /// Open a new tab with working directory set to `path`. Returns a handle
     /// to the initial pane in the new tab.
-    fn open_tab(&self, path: &Path) -> Result<PaneHandle>;
+    fn open_tab(&self, path: &Path) -> Result<Self::PaneHandle>;
 
     /// Split an existing pane in the given direction. The new pane inherits
     /// the working directory. Returns a handle to the newly created pane.
-    fn split_pane(&self, target: &PaneHandle, direction: SplitDirection) -> Result<PaneHandle>;
+    fn split_pane(&self, target: &Self::PaneHandle, direction: SplitDirection) -> Result<Self::PaneHandle>;
 
     /// Run a command in a specific pane. If env vars are provided, they are
     /// set before the command (e.g., `export K=V && command`).
-    fn run_command(&self, target: &PaneHandle, command: &str, env: &HashMap<String, String>) -> Result<()>;
+    fn run_command(&self, target: &Self::PaneHandle, command: &str, env: &HashMap<String, String>) -> Result<()>;
 
-    /// Close the tab associated with the given pane handle.
-    fn close_tab(&self, target: &PaneHandle) -> Result<()>;
+    /// Close the tab identified by a stored tab ID string (from state.toml).
+    /// Returns Ok(()) even if the tab no longer exists (already closed manually).
+    fn close_tab(&self, tab_id: &str) -> Result<()>;
+
+    /// Return a string identifier for the tab, suitable for persisting in state.toml
+    /// so that a future CLI invocation can target this tab with close_tab.
+    fn tab_id(&self, pane: &Self::PaneHandle) -> Result<String>;
 }
 ```
 
-During workspace opening, each pane's `PaneHandle` is stored in a map keyed by pane name, so that subsequent `split_from` references can look up the correct handle.
+During workspace opening, each pane's `PaneHandle` is stored in a map keyed by pane name, so that subsequent `split_from` references can look up the correct handle. After all panes are opened, `tab_id()` is called to persist the tab identifier in `state.toml`.
 
 ### Detection
 
