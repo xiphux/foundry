@@ -98,6 +98,10 @@ pub fn run(
         );
     }
 
+    // Check for commits BEFORE merging (after merge, branch matches main)
+    let has_commits = git::branch_has_commits(source_path, &branch, &main_branch)
+        .unwrap_or(true);
+
     if verbose {
         eprintln!("Merging '{branch}' into '{main_branch}'...");
     }
@@ -125,15 +129,23 @@ pub fn run(
     }
     git::remove_worktree(source_path, &worktree_path, false)?;
 
-    if verbose {
-        eprintln!("Archiving branch '{branch}'...");
+    // Archive if the branch had commits, otherwise just delete it
+    if has_commits {
+        if verbose {
+            eprintln!("Archiving branch '{branch}'...");
+        }
+        git::archive_branch(source_path, &branch, &config.archive_prefix)?;
+        eprintln!("Finished workspace '{name}'. Branch '{branch}' archived.");
+    } else {
+        if verbose {
+            eprintln!("Deleting branch '{branch}' (no commits)...");
+        }
+        git::delete_branch(source_path, &branch)?;
+        eprintln!("Finished workspace '{name}'. Branch '{branch}' deleted (no commits).");
     }
-    git::archive_branch(source_path, &branch, &config.archive_prefix)?;
 
     state.remove(project_name, name);
     state.save_to(state_path)?;
-
-    eprintln!("Finished workspace '{name}'. Branch '{branch}' archived.");
 
     Ok(())
 }

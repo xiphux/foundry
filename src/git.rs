@@ -68,6 +68,20 @@ pub fn merge(repo_path: &Path, branch: &str) -> Result<()> {
     Ok(())
 }
 
+/// Check if a branch has any commits that aren't on the base branch.
+/// Returns true if the branch has unique commits worth preserving.
+pub fn branch_has_commits(repo_path: &Path, branch: &str, base: &str) -> Result<bool> {
+    let output = run_git(repo_path, &["rev-list", "--count", &format!("{base}..{branch}")])?;
+    let count: u64 = output.parse().unwrap_or(0);
+    Ok(count > 0)
+}
+
+/// Delete a branch.
+pub fn delete_branch(repo_path: &Path, branch: &str) -> Result<()> {
+    run_git(repo_path, &["branch", "-D", branch])?;
+    Ok(())
+}
+
 pub fn archive_branch(repo_path: &Path, branch: &str, prefix: &str) -> Result<()> {
     let date = chrono::Utc::now().format("%Y%m%d").to_string();
     let archived = format!("{prefix}/{branch}-{date}");
