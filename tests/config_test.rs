@@ -91,6 +91,7 @@ fn test_config_merge_optional_pane_skipped() {
                 direction: None,
                 optional: false,
                 env: Default::default(),
+                deferred: false,
             },
             foundry::config::PaneConfig {
                 name: "server".into(),
@@ -99,6 +100,7 @@ fn test_config_merge_optional_pane_skipped() {
                 direction: Some(foundry::config::SplitDirection::Right),
                 optional: true,
                 env: Default::default(),
+                deferred: false,
             },
         ],
         ..Default::default()
@@ -119,6 +121,7 @@ fn test_config_merge_optional_pane_opted_in() {
                 direction: None,
                 optional: false,
                 env: Default::default(),
+                deferred: false,
             },
             foundry::config::PaneConfig {
                 name: "server".into(),
@@ -127,6 +130,7 @@ fn test_config_merge_optional_pane_opted_in() {
                 direction: Some(foundry::config::SplitDirection::Right),
                 optional: true,
                 env: Default::default(),
+                deferred: false,
             },
         ],
         ..Default::default()
@@ -137,6 +141,7 @@ fn test_config_merge_optional_pane_opted_in() {
             foundry::config::PaneOverride {
                 command: Some("npm run serve".into()),
                 env: Default::default(),
+                deferred: false,
             },
         )]),
         ..Default::default()

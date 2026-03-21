@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
+use std::collections::HashSet;
 use std::path::Path;
 use std::process::Command;
 
@@ -35,6 +36,7 @@ pub fn run(
             state,
             state_path,
             verbose,
+            &HashSet::new(),
         );
     }
 
@@ -77,7 +79,7 @@ pub fn run(
     };
 
     // Split scripts into immediate (blocking) and deferred (run in terminal pane)
-    let (immediate, deferred): (Vec<_>, Vec<_>) =
+    let (immediate, deferred_scripts): (Vec<_>, Vec<_>) =
         config.setup_scripts.iter().partition(|s| !s.deferred);
 
     // Run immediate scripts before opening the workspace
@@ -114,7 +116,15 @@ pub fn run(
         }
     }
 
-    // Open the workspace
+    // Collect names of deferred panes — their commands will be sent separately
+    let skip_command_panes: HashSet<String> = config
+        .panes
+        .iter()
+        .filter(|p| p.deferred)
+        .map(|p| p.name.clone())
+        .collect();
+
+    // Open the workspace (deferred pane commands are suppressed)
     super::open::open_workspace(
         project_name,
         name,
@@ -123,35 +133,58 @@ pub fn run(
         state,
         state_path,
         verbose,
+        &skip_command_panes,
     )?;
 
-    // Run deferred scripts in the shell pane (first pane with no command)
-    if !deferred.is_empty() {
-        let shell_pane_index = config
-            .panes
-            .iter()
-            .position(|p| p.command.is_none())
-            .unwrap_or(0);
+    // Handle deferred work: setup scripts + deferred pane commands
+    if deferred_scripts.is_empty() && skip_command_panes.is_empty() {
+        return Ok(());
+    }
 
-        // Build a chained command for all deferred scripts
-        let mut deferred_commands = Vec::new();
-        for script in &deferred {
-            let resolved_command = config::resolve_template(&script.command, &template_vars)
-                .with_context(|| {
-                    format!("failed to resolve template in script '{}'", script.name)
-                })?;
+    // Resolve deferred setup script commands
+    let mut deferred_setup_commands = Vec::new();
+    for script in &deferred_scripts {
+        let resolved_command = config::resolve_template(&script.command, &template_vars)
+            .with_context(|| format!("failed to resolve template in script '{}'", script.name))?;
 
-            if verbose {
-                eprintln!("Deferring setup script to shell pane: {}...", script.name);
-            }
-
-            deferred_commands.push(resolved_command);
+        if verbose {
+            eprintln!("Deferring setup script: {}...", script.name);
         }
 
-        let chained = deferred_commands.join(" && ");
-        let tab_id = worktree_path.to_string_lossy().to_string();
+        deferred_setup_commands.push(resolved_command);
+    }
 
-        if let Ok(backend) = terminal::detect_terminal() {
+    let tab_id = worktree_path.to_string_lossy().to_string();
+    let backend = terminal::detect_terminal();
+
+    if let Ok(backend) = backend {
+        // Find deferred pane (if any) — its command runs after deferred setup scripts
+        let deferred_pane = config.panes.iter().enumerate().find(|(_, p)| p.deferred);
+
+        if let Some((pane_index, pane)) = deferred_pane {
+            // Chain: deferred setup scripts && deferred pane command
+            // All run in the deferred pane (e.g., the server pane)
+            let mut chain = deferred_setup_commands;
+            if let Some(ref cmd) = pane.command {
+                let resolved = config::resolve_template(cmd, &template_vars)?;
+                if !resolved.is_empty() {
+                    chain.push(resolved);
+                }
+            }
+            if !chain.is_empty() {
+                let chained = chain.join(" && ");
+                backend.run_in_pane(&tab_id, pane_index, &chained)?;
+            }
+        } else if !deferred_setup_commands.is_empty() {
+            // No deferred pane — run setup scripts in the shell pane
+            // (first pane with no command)
+            let shell_pane_index = config
+                .panes
+                .iter()
+                .position(|p| p.command.is_none())
+                .unwrap_or(0);
+
+            let chained = deferred_setup_commands.join(" && ");
             backend.run_in_pane(&tab_id, shell_pane_index, &chained)?;
         }
     }

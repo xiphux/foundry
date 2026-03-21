@@ -117,6 +117,7 @@ pub fn run(
             state,
             state_path,
             verbose,
+            &std::collections::HashSet::new(),
         );
     }
 
@@ -202,6 +203,7 @@ pub fn run(
         state,
         state_path,
         verbose,
+        &std::collections::HashSet::new(),
     )
 }
 

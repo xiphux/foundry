@@ -63,6 +63,7 @@ fn main() -> Result<()> {
                     &mut state,
                     &state_path,
                     cli.verbose,
+                    &std::collections::HashSet::new(),
                 )?;
             } else {
                 let mut registry = Registry::load_from(&registry_path)?;

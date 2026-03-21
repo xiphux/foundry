@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::config::{self, ResolvedConfig, TemplateVars};
@@ -6,6 +7,10 @@ use crate::state::WorkspaceState;
 use crate::terminal::{self, PaneSpec};
 
 /// Open the terminal workspace for an existing worktree.
+/// `skip_command_panes` contains pane names whose commands should be suppressed
+/// (the pane is still created, but no command is sent). Used by `start` to
+/// defer certain pane commands until after setup scripts complete.
+#[allow(clippy::too_many_arguments)]
 pub fn open_workspace(
     project_name: &str,
     name: &str,
@@ -14,6 +19,7 @@ pub fn open_workspace(
     state: &mut WorkspaceState,
     state_path: &Path,
     verbose: bool,
+    skip_command_panes: &HashSet<String>,
 ) -> Result<()> {
     let backend = terminal::detect_terminal()?;
 
@@ -34,7 +40,10 @@ pub fn open_workspace(
     // Build PaneSpecs from the resolved config, resolving template variables
     let mut pane_specs = Vec::new();
     for pane in &config.panes {
-        let resolved_command = if let Some(ref cmd) = pane.command {
+        let resolved_command = if skip_command_panes.contains(&pane.name) {
+            // Command will be sent separately (e.g., after deferred setup scripts)
+            None
+        } else if let Some(ref cmd) = pane.command {
             let resolved = config::resolve_template(cmd, &template_vars)?;
             if resolved.is_empty() {
                 None

@@ -170,6 +170,9 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
                 if !ov.env.is_empty() {
                     merged.env.extend(ov.env.clone());
                 }
+                if ov.deferred {
+                    merged.deferred = true;
+                }
             }
             Some(merged)
         })

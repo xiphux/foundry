@@ -26,6 +26,11 @@ pub struct PaneConfig {
     pub optional: bool,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    /// If true, this pane's command is deferred until after deferred setup
+    /// scripts complete. The deferred setup scripts are prepended to this
+    /// pane's command, chained with &&.
+    #[serde(default)]
+    pub deferred: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -52,4 +57,7 @@ pub struct PaneOverride {
     pub command: Option<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    /// If true, defer this pane's command until after deferred setup scripts.
+    #[serde(default)]
+    pub deferred: bool,
 }

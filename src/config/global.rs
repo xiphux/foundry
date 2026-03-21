@@ -22,6 +22,7 @@ fn default_panes() -> Vec<PaneConfig> {
             direction: None,
             optional: false,
             env: Default::default(),
+            deferred: false,
         },
         PaneConfig {
             name: "shell".into(),
@@ -30,6 +31,7 @@ fn default_panes() -> Vec<PaneConfig> {
             direction: Some(SplitDirection::Right),
             optional: false,
             env: Default::default(),
+            deferred: false,
         },
     ]
 }
