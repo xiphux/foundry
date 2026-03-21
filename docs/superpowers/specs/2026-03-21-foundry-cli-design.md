@@ -17,6 +17,13 @@ Setting up a parallel AI agent workspace involves multiple manual steps: creatin
 | `foundry projects list` | List registered projects and their paths. |
 | `foundry projects add <name> <path>` | Manually register a project. |
 | `foundry projects remove <name>` | Unregister a project. |
+| `foundry list` | List all active foundry-managed workspaces across all projects. |
+
+### Global flags
+
+- `--project <name>` — specify the project explicitly (for commands that operate on a project).
+- `--verbose` — show detailed output for each step.
+- `--yes` — skip confirmation prompts (e.g., `discard` with uncommitted changes).
 
 ### Name resolution
 
@@ -152,8 +159,12 @@ Simple string replacement. No expression evaluation.
 ### Config merging
 
 - **Scalar values** (branch_prefix, agent_command, merge_strategy, etc.): project overrides global.
-- **Pane layout**: global defines the layout structure. Project overrides individual panes by name (command, env vars). Project can opt in to optional panes by including a `[panes.<name>]` section. Optional panes without a project section are skipped.
+- **Pane layout**: global defines the full layout structure (pane names, split relationships, directions). Project config can only override `command` and `env` for existing global panes by name, and opt in to optional panes by including a `[panes.<name>]` section. Project config cannot add new panes, remove non-optional panes, or change split relationships. Optional panes without a project section are skipped.
 - **Scripts**: project-only. No global setup/teardown scripts.
+
+### Template variable handling
+
+Variable **names** (e.g., `{source}`, `{worktree}`) are validated at config parse time — an unknown variable name produces an immediate error. Variable **values** are resolved at runtime when the command is executed, since values like `{worktree}` depend on command arguments.
 
 ## Project Registry
 
@@ -172,13 +183,36 @@ path = "/Users/xiphux/code/backend"
 - `foundry projects add <name> <path>` for manual registration.
 - `foundry projects remove <name>` for unregistration (warns if active worktrees exist).
 
+## Workspace State
+
+Foundry tracks active workspaces in `~/.foundry/state.toml`:
+
+```toml
+[[workspaces]]
+project = "myapp"
+name = "my-feature"
+branch = "xiphux/my-feature"
+worktree_path = "/Users/xiphux/.foundry/worktrees/myapp/my-feature"
+source_path = "/Users/xiphux/code/myapp"
+created_at = "2026-03-21T10:30:00Z"
+```
+
+This file is the source of truth for which worktrees are foundry-managed (vs. manually created git worktrees). It enables:
+
+- `foundry list` to show all active workspaces across projects.
+- `foundry open` (no args) to list workspaces for the current project.
+- Shell completions to enumerate valid workspace names.
+- Inferring the workspace from the current working directory.
+
+Entries are added by `foundry start` and removed by `foundry finish` and `foundry discard`. On startup, foundry can optionally validate that listed worktrees still exist on disk and prune stale entries.
+
 ## Git Operations
 
 All operations shell out to the `git` CLI via `std::process::Command`. All commands use `-C <repo_path>` for explicit path targeting.
 
 | Function | Git command |
 |---|---|
-| `detect_main_branch()` | Check local branches for `main`, then `master` |
+| `detect_main_branch()` | Check `git symbolic-ref refs/remotes/origin/HEAD`, fall back to local branches `main` then `master` |
 | `create_branch(name)` | `git branch <name>` |
 | `create_worktree(path, branch)` | `git worktree add <path> <branch>` |
 | `remove_worktree(path)` | `git worktree remove <path>` (with `--force` for discard) |
@@ -200,14 +234,32 @@ All operations shell out to the `git` CLI via `std::process::Command`. All comma
 ### Trait
 
 ```rust
+/// Opaque handle to a terminal pane, returned by open_tab and split_pane.
+/// Implementations use this to target specific panes for commands and splits.
+struct PaneHandle(/* implementation-specific identifier */);
+
 trait TerminalAutomation {
+    /// Check if this terminal backend is available in the current environment.
     fn detect() -> bool;
-    fn open_tab(&self, path: &Path) -> Result<()>;
-    fn split_pane(&self, direction: SplitDirection) -> Result<()>;
-    fn run_command(&self, command: &str) -> Result<()>;
-    fn close_tab(&self) -> Result<()>;
+
+    /// Open a new tab with working directory set to `path`. Returns a handle
+    /// to the initial pane in the new tab.
+    fn open_tab(&self, path: &Path) -> Result<PaneHandle>;
+
+    /// Split an existing pane in the given direction. The new pane inherits
+    /// the working directory. Returns a handle to the newly created pane.
+    fn split_pane(&self, target: &PaneHandle, direction: SplitDirection) -> Result<PaneHandle>;
+
+    /// Run a command in a specific pane. If env vars are provided, they are
+    /// set before the command (e.g., `export K=V && command`).
+    fn run_command(&self, target: &PaneHandle, command: &str, env: &HashMap<String, String>) -> Result<()>;
+
+    /// Close the tab associated with the given pane handle.
+    fn close_tab(&self, target: &PaneHandle) -> Result<()>;
 }
 ```
+
+During workspace opening, each pane's `PaneHandle` is stored in a map keyed by pane name, so that subsequent `split_from` references can look up the correct handle.
 
 ### Detection
 
@@ -259,8 +311,9 @@ The `server` pane only appears if the project opts in.
 5. Create branch from main/master HEAD.
 6. Create worktree at `<worktree_dir>/<project>/<name>`.
 7. Run setup scripts with template variables resolved.
-   - On failure: report error, leave worktree in place, exit.
-8. Detect terminal, open workspace (same flow as `foundry open`).
+   - On failure: report error, leave worktree in place, exit. Workspace is still recorded in state so `finish`/`discard` can clean it up.
+8. Record workspace in `~/.foundry/state.toml`.
+9. Detect terminal, open workspace (same flow as `foundry open`).
 
 ### `foundry open [name]`
 
@@ -278,23 +331,25 @@ The `server` pane only appears if the project opts in.
 3. Verify worktree exists.
 4. Check for uncommitted changes in the worktree → error if found.
 5. Check for uncommitted changes in the main repo checkout → error if found.
-6. Close Ghostty tab/panes for this workspace (if open).
-7. Run teardown scripts.
+6. Close terminal tab/panes for this workspace via terminal automation (if open). This kills any running processes (dev servers, agents) in those panes.
+7. Run teardown scripts via `std::process::Command` (not in terminal panes). These run even if the terminal tab was already closed.
 8. From main repo checkout: merge branch using configured strategy.
    - On conflict or ff-only failure → abort merge, report error, exit. Worktree remains intact for the user to fix and retry.
 9. Remove worktree (`git worktree remove`).
 10. Archive branch (`git branch -m <branch> archive/<branch>`).
+11. Remove workspace entry from `~/.foundry/state.toml`.
 
 ### `foundry discard [name]`
 
 1. If no name given → infer from cwd. Error if inference fails.
 2. Resolve project.
 3. Verify worktree exists.
-4. Check for uncommitted changes → **warn** (not error) with confirmation prompt: "Worktree has uncommitted changes. Discard anyway? [y/N]"
-5. Close Ghostty tab/panes (if open).
-6. Run teardown scripts.
+4. Check for uncommitted changes → **warn** (not error) with confirmation prompt: "Worktree has uncommitted changes. Discard anyway? [y/N]" (skipped with `--yes` flag).
+5. Close terminal tab/panes for this workspace via terminal automation (if open).
+6. Run teardown scripts via `std::process::Command`.
 7. Remove worktree (`git worktree remove --force`).
 8. Archive branch.
+9. Remove workspace entry from `~/.foundry/state.toml`.
 
 ## Error Handling
 
@@ -336,3 +391,6 @@ Generated via `clap`'s built-in completion support for bash, zsh, and fish. Comp
 - **PR workflow**: `foundry pr` to push and create a GitHub PR via `gh`. Separate command to merge the PR and clean up the workspace.
 - **Resumable setup scripts**: track which setup steps completed, retry from point of failure.
 - **Additional terminal backends**: kitty, WezTerm, iTerm2, etc.
+- **`--dry-run` flag**: show what a command would do without executing.
+- **Config schema validation**: strict vs. lenient parsing of unknown keys for forward compatibility.
+- **Interrupted setup recovery**: marker file (e.g., `.foundry-setup-incomplete`) to detect and handle partial setup state.
