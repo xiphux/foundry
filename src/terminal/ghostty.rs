@@ -228,17 +228,24 @@ impl TerminalBackend for GhosttyBackend {
             return Ok(());
         }
 
-        // Find and close the tab containing a terminal whose working directory
-        // matches our worktree path.
+        // Iterate through all tabs in all windows, find the tab containing
+        // a terminal whose working directory matches the worktree path,
+        // and close the entire tab (not just one pane).
         let escaped_path = Self::escape_applescript(tab_id);
         let script = format!(
             r#"tell application "Ghostty"
     try
-        set targetTerms to every terminal whose working directory contains "{escaped_path}"
-        if (count of targetTerms) > 0 then
-            set targetTerm to item 1 of targetTerms
-            close targetTerm
-        end if
+        repeat with w in windows
+            repeat with t in tabs of w
+                set terms to terminals of t
+                repeat with term in terms
+                    if working directory of term contains "{escaped_path}" then
+                        close tab t
+                        return
+                    end if
+                end repeat
+            end repeat
+        end repeat
     end try
 end tell"#
         );
