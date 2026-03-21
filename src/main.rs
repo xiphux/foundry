@@ -65,23 +65,29 @@ fn main() -> Result<()> {
         cli::Commands::Finish { name } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
 
-            let name = match name {
-                Some(n) => n,
+            // Resolve workspace name and project. When inferring from cwd,
+            // use the workspace state to get the project (not git::repo_root,
+            // which would point at the worktree instead of the source repo).
+            let (name, project_name, source_path) = match name {
+                Some(n) => {
+                    let mut registry = Registry::load_from(&registry_path)?;
+                    let (pn, sp) = workflow::resolve_project(
+                        cli.project.as_deref(), &mut registry, &registry_path,
+                    )?;
+                    (n, pn, sp)
+                }
                 None => {
                     let cwd = std::env::current_dir()?;
                     let cwd_str = cwd.to_string_lossy();
-                    state
+                    let ws = state
                         .find_by_worktree_path(&cwd_str)
-                        .map(|w| w.name.clone())
                         .ok_or_else(|| anyhow::anyhow!(
                             "could not infer workspace from current directory. Provide a name: `foundry finish <name>`"
-                        ))?
+                        ))?;
+                    (ws.name.clone(), ws.project.clone(), std::path::PathBuf::from(&ws.source_path))
                 }
             };
 
-            let mut registry = Registry::load_from(&registry_path)?;
-            let (project_name, source_path) =
-                workflow::resolve_project(cli.project.as_deref(), &mut registry, &registry_path)?;
             let global_config = config::load_global_config()?;
             let project_config = config::load_project_config(&source_path)?;
             let resolved = config::merge_configs(&global_config, project_config.as_ref());
@@ -93,23 +99,26 @@ fn main() -> Result<()> {
         cli::Commands::Discard { name } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
 
-            let name = match name {
-                Some(n) => n,
+            let (name, project_name, source_path) = match name {
+                Some(n) => {
+                    let mut registry = Registry::load_from(&registry_path)?;
+                    let (pn, sp) = workflow::resolve_project(
+                        cli.project.as_deref(), &mut registry, &registry_path,
+                    )?;
+                    (n, pn, sp)
+                }
                 None => {
                     let cwd = std::env::current_dir()?;
                     let cwd_str = cwd.to_string_lossy();
-                    state
+                    let ws = state
                         .find_by_worktree_path(&cwd_str)
-                        .map(|w| w.name.clone())
                         .ok_or_else(|| anyhow::anyhow!(
                             "could not infer workspace from current directory. Provide a name: `foundry discard <name>`"
-                        ))?
+                        ))?;
+                    (ws.name.clone(), ws.project.clone(), std::path::PathBuf::from(&ws.source_path))
                 }
             };
 
-            let mut registry = Registry::load_from(&registry_path)?;
-            let (project_name, source_path) =
-                workflow::resolve_project(cli.project.as_deref(), &mut registry, &registry_path)?;
             let global_config = config::load_global_config()?;
             let project_config = config::load_project_config(&source_path)?;
             let resolved = config::merge_configs(&global_config, project_config.as_ref());
