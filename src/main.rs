@@ -1,7 +1,7 @@
 mod cli;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, CommandFactory};
 use cli::Cli;
 use foundry::config;
 use foundry::registry::Registry;
@@ -169,6 +169,14 @@ fn main() -> Result<()> {
                     );
                 }
             }
+        }
+        cli::Commands::Completions { shell } => {
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "foundry",
+                &mut std::io::stdout(),
+            );
         }
     }
 

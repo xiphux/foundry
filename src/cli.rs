@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -47,6 +48,11 @@ pub enum Commands {
     Projects(ProjectsCommands),
     /// List all active workspaces across all projects
     List,
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
+    },
 }
 
 #[derive(Subcommand)]
