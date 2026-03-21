@@ -34,6 +34,17 @@ impl GhosttyBackend {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
+    /// Run an AppleScript, ignoring errors. Used for commands like `new tab`
+    /// which succeed but throw a spurious error in Ghostty 1.x.
+    fn run_applescript_ignoring_errors(script: &str) -> Result<()> {
+        let _ = Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .output()
+            .context("failed to run osascript")?;
+        Ok(())
+    }
+
     /// Escape a string for use inside AppleScript double-quoted strings.
     fn escape_applescript(s: &str) -> String {
         s.replace('\\', "\\\\").replace('"', "\\\"")
@@ -41,7 +52,6 @@ impl GhosttyBackend {
 
     /// Build a variable name for a pane (sanitize the pane name for AppleScript).
     fn pane_var(name: &str) -> String {
-        // Replace non-alphanumeric chars with underscores for valid AppleScript variable names
         let sanitized: String = name
             .chars()
             .map(|c| if c.is_alphanumeric() { c } else { '_' })
@@ -49,8 +59,9 @@ impl GhosttyBackend {
         format!("pane_{sanitized}")
     }
 
-    /// Build the complete AppleScript to create a workspace layout.
-    fn build_workspace_script(
+    /// Build the main AppleScript that sets up splits and runs commands.
+    /// This runs AFTER the tab has already been created via a separate call.
+    fn build_layout_script(
         path: &Path,
         panes: &[PaneSpec],
     ) -> Result<String> {
@@ -58,54 +69,61 @@ impl GhosttyBackend {
         let mut lines = Vec::new();
 
         lines.push(r#"tell application "Ghostty""#.to_string());
-        lines.push("    activate".to_string());
 
-        // Create the base configuration with working directory
+        if panes.is_empty() {
+            // No panes to configure — just cd to the directory
+            lines.push(
+                "    set t to focused terminal of selected tab of front window".to_string(),
+            );
+            let escaped_path = Self::escape_applescript(path_str);
+            lines.push(format!(
+                "    input text \"cd {escaped_path}\" to t"
+            ));
+            lines.push("    send key \"enter\" to t".to_string());
+            lines.push("end tell".to_string());
+            return Ok(lines.join("\n"));
+        }
+
+        // Create the base configuration with working directory (used for splits)
         lines.push("    set cfg to new surface configuration".to_string());
         lines.push(format!(
             "    set initial working directory of cfg to \"{}\"",
             Self::escape_applescript(path_str)
         ));
 
-        if panes.is_empty() {
-            // No pane config — just open a new tab
-            lines.push("    new tab with configuration cfg".to_string());
-            lines.push("end tell".to_string());
-            return Ok(lines.join("\n"));
-        }
-
-        // First pane: create a new tab (defaults to front window)
+        // Get the first pane — it's the terminal in the tab we just created
         let first = &panes[0];
         let first_var = Self::pane_var(&first.name);
-
-        // If the first pane has env vars, set them on the config
-        if !first.env.is_empty() {
-            let env_list = Self::build_env_list(&first.env);
-            lines.push(format!(
-                "    set environment variables of cfg to {env_list}"
-            ));
-        }
-
-        lines.push("    set newTab to new tab with configuration cfg".to_string());
         lines.push(format!(
-            "    set {first_var} to terminal 1 of newTab"
+            "    set {first_var} to focused terminal of selected tab of front window"
         ));
 
-        // Process remaining panes
+        // cd the first pane to the worktree (since new tab didn't get a configuration)
+        let escaped_path = Self::escape_applescript(path_str);
+        lines.push(format!(
+            "    input text \"cd {escaped_path}\" to {first_var}"
+        ));
+        lines.push(format!("    send key \"enter\" to {first_var}"));
+
+        // Process remaining panes — create splits
         for pane in &panes[1..] {
             let pane_var = Self::pane_var(&pane.name);
-            let split_from = pane.split_from.as_ref()
+            let split_from = pane
+                .split_from
+                .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("pane '{}' has no split_from", pane.name))?;
             let parent_var = Self::pane_var(split_from);
 
-            let dir_str = match pane.direction.as_ref()
+            let dir_str = match pane
+                .direction
+                .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("pane '{}' has no direction", pane.name))?
             {
                 SplitDirection::Right => "right",
                 SplitDirection::Down => "down",
             };
 
-            // If this pane has different env vars, create a new config
+            // If this pane has env vars, create a custom config
             if !pane.env.is_empty() {
                 let pane_cfg_var = format!("cfg_{}", Self::pane_var(&pane.name));
                 lines.push(format!("    set {pane_cfg_var} to new surface configuration"));
@@ -127,18 +145,28 @@ impl GhosttyBackend {
             }
         }
 
-        // Now send commands to each pane
+        // Send commands to each pane
         for pane in panes {
             if let Some(ref cmd) = pane.command {
                 if !cmd.is_empty() {
                     let pane_var = Self::pane_var(&pane.name);
+                    // If pane has env vars and it's the first pane (which didn't get
+                    // a surface configuration), export them manually
+                    if pane.split_from.is_none() && !pane.env.is_empty() {
+                        for (k, v) in &pane.env {
+                            let escaped_k = Self::escape_applescript(k);
+                            let escaped_v = Self::escape_applescript(v);
+                            lines.push(format!(
+                                "    input text \"export {escaped_k}='{escaped_v}'\" to {pane_var}"
+                            ));
+                            lines.push(format!("    send key \"enter\" to {pane_var}"));
+                        }
+                    }
                     let escaped_cmd = Self::escape_applescript(cmd);
                     lines.push(format!(
                         "    input text \"{escaped_cmd}\" to {pane_var}"
                     ));
-                    lines.push(format!(
-                        "    send key \"enter\" to {pane_var}"
-                    ));
+                    lines.push(format!("    send key \"enter\" to {pane_var}"));
                 }
             }
         }
@@ -152,11 +180,16 @@ impl GhosttyBackend {
     }
 
     /// Build an AppleScript list literal for environment variables.
-    /// Example: {"KEY1=value1", "KEY2=value2"}
     fn build_env_list(env: &HashMap<String, String>) -> String {
         let items: Vec<String> = env
             .iter()
-            .map(|(k, v)| format!("\"{}={}\"", Self::escape_applescript(k), Self::escape_applescript(v)))
+            .map(|(k, v)| {
+                format!(
+                    "\"{}={}\"",
+                    Self::escape_applescript(k),
+                    Self::escape_applescript(v)
+                )
+            })
             .collect();
         format!("{{{}}}", items.join(", "))
     }
@@ -164,16 +197,29 @@ impl GhosttyBackend {
 
 impl TerminalBackend for GhosttyBackend {
     fn open_workspace(&self, path: &Path, panes: &[PaneSpec], verbose: bool) -> Result<String> {
-        let script = Self::build_workspace_script(path, panes)?;
+        // Step 1: Create a new tab.
+        // Ghostty 1.x has a bug where `new tab` succeeds but throws a spurious error,
+        // so we run it separately and ignore the error.
+        if verbose {
+            eprintln!("Opening new Ghostty tab...");
+        }
+        Self::run_applescript_ignoring_errors(
+            r#"tell application "Ghostty" to new tab"#,
+        )?;
+
+        // Brief pause to let the tab finish creating
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // Step 2: Build and run the layout script (splits, commands)
+        let script = Self::build_layout_script(path, panes)?;
 
         if verbose {
-            eprintln!("Running Ghostty AppleScript...");
+            eprintln!("Setting up workspace layout...");
         }
 
         Self::run_applescript(&script)?;
 
         // Return the worktree path as the tab identifier.
-        // For close_tab, we'll find the tab by matching terminal working directories.
         Ok(path.to_string_lossy().into())
     }
 
@@ -183,8 +229,7 @@ impl TerminalBackend for GhosttyBackend {
         }
 
         // Find and close the tab containing a terminal whose working directory
-        // matches our worktree path. This works across CLI invocations since
-        // we stored the worktree path as the tab_id.
+        // matches our worktree path.
         let escaped_path = Self::escape_applescript(tab_id);
         let script = format!(
             r#"tell application "Ghostty"
@@ -198,7 +243,6 @@ impl TerminalBackend for GhosttyBackend {
 end tell"#
         );
 
-        // Ignore errors — tab may already be closed
         let _ = Self::run_applescript(&script);
         Ok(())
     }
