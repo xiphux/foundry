@@ -981,6 +981,29 @@ fn test_has_uncommitted_changes_dirty() {
     std::fs::write(repo.path().join("file.txt"), "hello").unwrap();
     assert!(foundry::git::has_uncommitted_changes(repo.path()).unwrap());
 }
+
+#[test]
+fn test_archive_branch_collision() {
+    let repo = init_test_repo();
+
+    // Create and archive a branch
+    foundry::git::create_branch(repo.path(), "feat").unwrap();
+    foundry::git::archive_branch(repo.path(), "feat", "archive").unwrap();
+
+    // Create the same branch name again and archive it
+    foundry::git::create_branch(repo.path(), "feat").unwrap();
+    foundry::git::archive_branch(repo.path(), "feat", "archive").unwrap();
+
+    // Both should exist with different timestamps
+    let output = Command::new("git")
+        .args(["branch", "--list", "archive/feat-*"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    let branches = String::from_utf8_lossy(&output.stdout);
+    let count = branches.lines().filter(|l| !l.trim().is_empty()).count();
+    assert!(count >= 2, "expected at least 2 archived branches, got {count}: {branches}");
+}
 ```
 
 - [ ] **Step 2: Add `tempfile` dev dependency**
@@ -1084,10 +1107,27 @@ pub fn merge(repo_path: &Path, branch: &str) -> Result<()> {
     Ok(())
 }
 
-/// Rename a branch to archive/<branch>.
+/// Rename a branch to archive/<branch>-<datestamp>.
+/// Appends a date (YYYYMMDD) to avoid collisions when the same branch name
+/// is reused. Falls back to datetime (YYYYMMDD-HHMMSS) if the date-only
+/// name already exists.
 pub fn archive_branch(repo_path: &Path, branch: &str, prefix: &str) -> Result<()> {
-    let archived = format!("{prefix}/{branch}");
-    run_git(repo_path, &["branch", "-m", branch, &archived])?;
+    let date = chrono::Utc::now().format("%Y%m%d").to_string();
+    let archived = format!("{prefix}/{branch}-{date}");
+
+    // Check if this archive name already exists
+    let exists = run_git(repo_path, &["branch", "--list", &archived])
+        .map(|out| !out.is_empty())
+        .unwrap_or(false);
+
+    let final_name = if exists {
+        let datetime = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
+        format!("{prefix}/{branch}-{datetime}")
+    } else {
+        archived
+    };
+
+    run_git(repo_path, &["branch", "-m", branch, &final_name])?;
     Ok(())
 }
 
@@ -2303,6 +2343,7 @@ fn main() -> Result<()> {
         cli::Commands::List => {
             let mut state = WorkspaceState::load_from(&state_path)?;
             state.prune_stale();
+            state.save_to(&state_path)?;
             let workspaces = state.list();
             if workspaces.is_empty() {
                 println!("No active workspaces.");
@@ -2503,7 +2544,7 @@ pub fn run(
     state.remove(project_name, name);
     state.save_to(state_path)?;
 
-    eprintln!("Finished workspace '{name}'. Branch archived as '{}/{branch}'.", config.archive_prefix);
+    eprintln!("Finished workspace '{name}'. Branch '{branch}' archived.");
 
     Ok(())
 }
@@ -2678,7 +2719,7 @@ pub fn run(
     state.remove(project_name, name);
     state.save_to(state_path)?;
 
-    eprintln!("Discarded workspace '{name}'. Branch archived as '{}/{branch}'.", config.archive_prefix);
+    eprintln!("Discarded workspace '{name}'. Branch '{branch}' archived.");
 
     Ok(())
 }

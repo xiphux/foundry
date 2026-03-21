@@ -230,7 +230,7 @@ All operations shell out to the `git` CLI via `std::process::Command`. All comma
 
 - With `branch_prefix = "xiphux"`: `foundry start my-feature` creates branch `xiphux/my-feature`, worktree directory `my-feature`.
 - Without prefix: branch and directory are both `my-feature`.
-- Archive preserves prefix: `xiphux/my-feature` → `archive/xiphux/my-feature`.
+- Archive preserves prefix and appends a date stamp to avoid collisions: `xiphux/my-feature` → `archive/xiphux/my-feature-20260321`. If the same branch name is reused and archived multiple times, each gets a unique date (or datetime if needed within the same day).
 
 ## Terminal Automation
 
