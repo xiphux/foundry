@@ -98,10 +98,26 @@ merge_strategy = "ff-only"
 
 # Base directory for worktrees (default: "~/.foundry/worktrees")
 worktree_dir = "~/.foundry/worktrees"
+```
 
-# Terminal pane layout
-# The first pane becomes the initial tab. Subsequent panes split from
-# a named parent pane in the given direction.
+### Default Pane Layout
+
+If no `[[panes]]` are configured, foundry uses a simple default layout — the agent on the left and a plain shell on the right:
+
+```
+┌──────────────┬──────────────┐
+│              │              │
+│    agent     │    shell     │
+│              │              │
+└──────────────┴──────────────┘
+```
+
+### Custom Pane Layout
+
+You can define your own layout in the global config. The first pane becomes the initial tab. Subsequent panes split from a named parent pane in the given direction.
+
+```toml
+# ~/.foundry/config.toml
 
 [[panes]]
 name = "agent"
@@ -129,7 +145,7 @@ direction = "right"
 optional = true
 ```
 
-This configuration produces the following layout (with `server` pane only if the project opts in):
+This produces the following layout (with `server` pane only if the project opts in):
 
 ```
 ┌──────────────┬──────────────┐

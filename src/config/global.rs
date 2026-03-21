@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use super::types::{MergeStrategy, PaneConfig};
+use super::types::{MergeStrategy, PaneConfig, SplitDirection};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -9,8 +9,29 @@ pub struct GlobalConfig {
     pub archive_prefix: String,
     pub merge_strategy: MergeStrategy,
     pub worktree_dir: String,
-    #[serde(default)]
+    #[serde(default = "default_panes")]
     pub panes: Vec<PaneConfig>,
+}
+
+fn default_panes() -> Vec<PaneConfig> {
+    vec![
+        PaneConfig {
+            name: "agent".into(),
+            command: Some("{agent_command}".into()),
+            split_from: None,
+            direction: None,
+            optional: false,
+            env: Default::default(),
+        },
+        PaneConfig {
+            name: "shell".into(),
+            command: None,
+            split_from: Some("agent".into()),
+            direction: Some(SplitDirection::Right),
+            optional: false,
+            env: Default::default(),
+        },
+    ]
 }
 
 impl Default for GlobalConfig {
@@ -21,7 +42,7 @@ impl Default for GlobalConfig {
             archive_prefix: "archive".into(),
             merge_strategy: MergeStrategy::default(),
             worktree_dir: "~/.foundry/worktrees".into(),
-            panes: Vec::new(),
+            panes: default_panes(),
         }
     }
 }
