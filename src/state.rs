@@ -1,0 +1,83 @@
+use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workspace {
+    pub project: String,
+    pub name: String,
+    pub branch: String,
+    pub worktree_path: String,
+    pub source_path: String,
+    pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub terminal_tab_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct StateFile {
+    #[serde(default)]
+    workspaces: Vec<Workspace>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceState {
+    inner: StateFile,
+}
+
+impl WorkspaceState {
+    pub fn load_from(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self { inner: StateFile::default() });
+        }
+        let contents = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let inner: StateFile = toml::from_str(&contents)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        Ok(Self { inner })
+    }
+
+    pub fn save_to(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        let contents = toml::to_string_pretty(&self.inner).context("failed to serialize state")?;
+        std::fs::write(path, contents)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        Ok(())
+    }
+
+    pub fn add(&mut self, workspace: Workspace) {
+        self.inner.workspaces.push(workspace);
+    }
+
+    pub fn remove(&mut self, project: &str, name: &str) {
+        self.inner.workspaces.retain(|w| !(w.project == project && w.name == name));
+    }
+
+    pub fn list(&self) -> &[Workspace] {
+        &self.inner.workspaces
+    }
+
+    pub fn find_by_project(&self, project: &str) -> Vec<&Workspace> {
+        self.inner.workspaces.iter().filter(|w| w.project == project).collect()
+    }
+
+    pub fn find_by_worktree_path(&self, path: &str) -> Option<&Workspace> {
+        self.inner.workspaces.iter().find(|w| {
+            path == w.worktree_path || path.starts_with(&format!("{}/", w.worktree_path))
+        })
+    }
+
+    pub fn set_terminal_tab_id(&mut self, project: &str, name: &str, tab_id: String) {
+        if let Some(ws) = self.inner.workspaces.iter_mut().find(|w| w.project == project && w.name == name) {
+            ws.terminal_tab_id = tab_id;
+        }
+    }
+
+    pub fn prune_stale(&mut self) {
+        self.inner.workspaces.retain(|w| Path::new(&w.worktree_path).exists());
+    }
+}
