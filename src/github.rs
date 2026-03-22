@@ -56,11 +56,17 @@ pub fn issue_to_worktree_name(issue: &GitHubIssue) -> String {
 
 /// Build a prompt string from a GitHub issue.
 pub fn issue_to_prompt(issue: &GitHubIssue) -> String {
+    let preamble = "You have been assigned the following GitHub issue to work on. \
+        Please review the issue, understand what needs to be done, and implement the changes.";
+
     if issue.body.is_empty() {
-        format!("GitHub Issue #{}: {}", issue.number, issue.title)
+        format!(
+            "{preamble}\n\nGitHub Issue #{}: {}",
+            issue.number, issue.title
+        )
     } else {
         format!(
-            "GitHub Issue #{}: {}\n\n{}",
+            "{preamble}\n\nGitHub Issue #{}: {}\n\n{}",
             issue.number, issue.title, issue.body
         )
     }
@@ -162,6 +168,7 @@ mod tests {
             body: String::new(),
         };
         let prompt = issue_to_prompt(&issue);
-        assert_eq!(prompt, "GitHub Issue #42: Fix auth timeout");
+        assert!(prompt.contains("assigned the following GitHub issue"));
+        assert!(prompt.contains("GitHub Issue #42: Fix auth timeout"));
     }
 }
