@@ -94,7 +94,7 @@ pub fn setup_agent_hooks(worktree_path: &Path, project: &str, name: &str) -> Res
                         {
                             "type": "command",
                             "command": format!("echo working > '{status_path_str}'"),
-                            "async": true
+                            "timeout": 5
                         }
                     ]
                 }
@@ -106,7 +106,7 @@ pub fn setup_agent_hooks(worktree_path: &Path, project: &str, name: &str) -> Res
                         {
                             "type": "command",
                             "command": format!("echo idle > '{status_path_str}'"),
-                            "async": true
+                            "timeout": 5
                         }
                     ]
                 }
@@ -118,7 +118,7 @@ pub fn setup_agent_hooks(worktree_path: &Path, project: &str, name: &str) -> Res
                         {
                             "type": "command",
                             "command": format!("echo waiting_permission > '{status_path_str}'"),
-                            "async": true
+                            "timeout": 5
                         }
                     ]
                 }
