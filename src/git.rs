@@ -135,6 +135,11 @@ pub fn has_uncommitted_changes(repo_path: &Path) -> Result<bool> {
     Ok(!output.is_empty())
 }
 
+/// Get the porcelain status output listing changed files.
+pub fn status_porcelain(repo_path: &Path) -> Result<String> {
+    run_git(repo_path, &["status", "--porcelain"])
+}
+
 pub fn current_branch(repo_path: &Path) -> Result<String> {
     run_git(repo_path, &["rev-parse", "--abbrev-ref", "HEAD"])
 }
@@ -151,4 +156,50 @@ pub fn last_commit_timestamp(repo_path: &Path) -> Result<Option<i64>> {
 pub fn repo_root(path: &Path) -> Result<std::path::PathBuf> {
     let root = run_git(path, &["rev-parse", "--show-toplevel"])?;
     Ok(std::path::PathBuf::from(root))
+}
+
+/// Get the commit log between base and branch as one-line summaries.
+pub fn log_commits(repo_path: &Path, base: &str, branch: &str) -> Result<String> {
+    run_git(
+        repo_path,
+        &["log", "--oneline", &format!("{base}..{branch}")],
+    )
+}
+
+/// Get the diff of committed changes between base and branch (three-dot merge-base diff).
+/// If `stat` is true, returns `--stat` summary instead of full patch.
+pub fn diff_committed(repo_path: &Path, base: &str, branch: &str, stat: bool) -> Result<String> {
+    let range = format!("{base}...{branch}");
+    if stat {
+        run_git(repo_path, &["diff", "--stat", &range])
+    } else {
+        run_git(repo_path, &["diff", &range])
+    }
+}
+
+/// Get the uncommitted changes (both staged and unstaged) in a worktree.
+/// If `stat` is true, returns `--stat` summary instead of full patch.
+pub fn diff_uncommitted(worktree_path: &Path, stat: bool) -> Result<String> {
+    // Unstaged changes
+    let unstaged = if stat {
+        run_git(worktree_path, &["diff", "--stat"])?
+    } else {
+        run_git(worktree_path, &["diff"])?
+    };
+
+    // Staged changes
+    let staged = if stat {
+        run_git(worktree_path, &["diff", "--cached", "--stat"])?
+    } else {
+        run_git(worktree_path, &["diff", "--cached"])?
+    };
+
+    let mut parts = Vec::new();
+    if !staged.is_empty() {
+        parts.push(staged);
+    }
+    if !unstaged.is_empty() {
+        parts.push(unstaged);
+    }
+    Ok(parts.join("\n"))
 }

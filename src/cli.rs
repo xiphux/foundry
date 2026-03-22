@@ -56,6 +56,15 @@ pub enum Commands {
         /// Worktree name (inferred from cwd if omitted)
         name: Option<String>,
     },
+    /// Show changes in a workspace vs main
+    Diff {
+        /// Worktree name (inferred from cwd if omitted)
+        name: Option<String>,
+
+        /// Show file stats instead of full diff
+        #[arg(long)]
+        stat: bool,
+    },
     /// Switch to an existing workspace's terminal tab
     Switch {
         /// Worktree name (lists active worktrees if omitted)

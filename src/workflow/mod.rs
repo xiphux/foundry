@@ -1,3 +1,4 @@
+pub mod diff;
 pub mod discard;
 pub mod finish;
 pub mod open;

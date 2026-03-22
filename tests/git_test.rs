@@ -207,3 +207,114 @@ fn test_merge_non_ff() {
     assert!(repo.path().join("feature.txt").exists());
     assert!(repo.path().join("main.txt").exists());
 }
+
+#[test]
+fn test_log_commits() {
+    let repo = init_test_repo();
+    Command::new("git")
+        .args(["checkout", "-b", "feature"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "--allow-empty", "-m", "first change"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "--allow-empty", "-m", "second change"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+
+    let log = foundry::git::log_commits(repo.path(), "main", "feature").unwrap();
+    let lines: Vec<&str> = log.lines().filter(|l| !l.is_empty()).collect();
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].contains("second change"));
+    assert!(lines[1].contains("first change"));
+}
+
+#[test]
+fn test_log_commits_no_commits() {
+    let repo = init_test_repo();
+    foundry::git::create_branch(repo.path(), "feature").unwrap();
+
+    let log = foundry::git::log_commits(repo.path(), "main", "feature").unwrap();
+    assert!(log.is_empty());
+}
+
+#[test]
+fn test_diff_committed() {
+    let repo = init_test_repo();
+    Command::new("git")
+        .args(["checkout", "-b", "feature"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    std::fs::write(repo.path().join("new.txt"), "hello").unwrap();
+    Command::new("git")
+        .args(["add", "new.txt"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "add file"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+
+    // Full diff should contain the file content
+    let diff = foundry::git::diff_committed(repo.path(), "main", "feature", false).unwrap();
+    assert!(diff.contains("new.txt"));
+    assert!(diff.contains("+hello"));
+
+    // Stat diff should show file summary
+    let stat = foundry::git::diff_committed(repo.path(), "main", "feature", true).unwrap();
+    assert!(stat.contains("new.txt"));
+    assert!(stat.contains("1 file changed"));
+}
+
+#[test]
+fn test_diff_uncommitted() {
+    let repo = init_test_repo();
+
+    // No uncommitted changes
+    let diff = foundry::git::diff_uncommitted(repo.path(), false).unwrap();
+    assert!(diff.is_empty());
+
+    // Add an unstaged change
+    std::fs::write(repo.path().join("tracked.txt"), "original").unwrap();
+    Command::new("git")
+        .args(["add", "tracked.txt"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "add tracked"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    std::fs::write(repo.path().join("tracked.txt"), "modified").unwrap();
+
+    let diff = foundry::git::diff_uncommitted(repo.path(), false).unwrap();
+    assert!(diff.contains("tracked.txt"));
+    assert!(diff.contains("+modified"));
+
+    // Stat mode
+    let stat = foundry::git::diff_uncommitted(repo.path(), true).unwrap();
+    assert!(stat.contains("tracked.txt"));
+}
+
+#[test]
+fn test_status_porcelain() {
+    let repo = init_test_repo();
+
+    // Clean repo
+    let status = foundry::git::status_porcelain(repo.path()).unwrap();
+    assert!(status.is_empty());
+
+    // Untracked file
+    std::fs::write(repo.path().join("untracked.txt"), "data").unwrap();
+    let status = foundry::git::status_porcelain(repo.path()).unwrap();
+    assert!(status.contains("untracked.txt"));
+}
