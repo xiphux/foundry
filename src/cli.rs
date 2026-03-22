@@ -26,8 +26,12 @@ pub enum Commands {
     /// Create branch, worktree, run setup, open workspace
     #[command(visible_alias = "create")]
     Start {
-        /// Name for the feature branch / worktree
-        name: String,
+        /// Name for the feature branch / worktree (auto-generated if --issue is used)
+        name: Option<String>,
+
+        /// Create workspace from a GitHub issue (number or URL)
+        #[arg(long)]
+        issue: Option<String>,
 
         /// Prompt to pass to the AI agent
         #[arg(long)]
