@@ -132,7 +132,10 @@ fn main() -> Result<()> {
                 let resolved = config::merge_configs(&global_config, project_config.as_ref());
 
                 let worktree_path = resolved.worktree_dir.join(&project_name).join(&name);
-                let tab_id = worktree_path.to_string_lossy().to_string();
+                let tab_id = state
+                    .find_by_worktree_path(&worktree_path.to_string_lossy())
+                    .map(|w| w.terminal_tab_id.clone())
+                    .unwrap_or_else(|| worktree_path.to_string_lossy().to_string());
 
                 let backend = foundry::terminal::detect_terminal()?;
                 if !backend.focus_tab(&tab_id)? {

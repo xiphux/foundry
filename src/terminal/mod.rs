@@ -1,4 +1,6 @@
+mod applescript;
 pub mod ghostty;
+pub mod iterm2;
 
 use anyhow::{bail, Result};
 use std::collections::HashMap;
@@ -27,8 +29,12 @@ pub fn detect_terminal() -> Result<Box<dyn TerminalBackend>> {
         return Ok(Box::new(term));
     }
 
+    if let Some(term) = iterm2::Iterm2Backend::detect() {
+        return Ok(Box::new(term));
+    }
+
     let term_program = std::env::var("TERM_PROGRAM").unwrap_or_else(|_| "unknown".into());
-    bail!("unsupported terminal: '{term_program}'. Supported terminals: Ghostty")
+    bail!("unsupported terminal: '{term_program}'. Supported terminals: Ghostty, iTerm2")
 }
 
 /// Object-safe trait for terminal automation backends.

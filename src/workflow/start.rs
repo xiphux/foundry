@@ -169,7 +169,11 @@ pub fn run(
         deferred_setup_commands.push(resolved_command);
     }
 
-    let tab_id = worktree_path.to_string_lossy().to_string();
+    // Read the tab ID that open_workspace stored in state
+    let tab_id = state
+        .find_by_worktree_path(&worktree_path.to_string_lossy())
+        .map(|w| w.terminal_tab_id.clone())
+        .unwrap_or_default();
     let backend = terminal::detect_terminal();
 
     if let Ok(backend) = backend {
