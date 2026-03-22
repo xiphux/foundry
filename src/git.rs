@@ -139,6 +139,15 @@ pub fn current_branch(repo_path: &Path) -> Result<String> {
     run_git(repo_path, &["rev-parse", "--abbrev-ref", "HEAD"])
 }
 
+/// Get the Unix timestamp of the most recent commit. Returns None if no commits.
+pub fn last_commit_timestamp(repo_path: &Path) -> Result<Option<i64>> {
+    let output = run_git(repo_path, &["log", "-1", "--format=%ct"]);
+    match output {
+        Ok(s) if !s.is_empty() => Ok(s.parse().ok()),
+        _ => Ok(None),
+    }
+}
+
 pub fn repo_root(path: &Path) -> Result<std::path::PathBuf> {
     let root = run_git(path, &["rev-parse", "--show-toplevel"])?;
     Ok(std::path::PathBuf::from(root))

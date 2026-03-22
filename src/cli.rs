@@ -58,6 +58,8 @@ pub enum Commands {
     Projects(ProjectsCommands),
     /// List all active workspaces across all projects
     List,
+    /// Show status dashboard of all active workspaces
+    Status,
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for

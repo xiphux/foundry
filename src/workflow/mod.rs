@@ -3,6 +3,7 @@ pub mod finish;
 pub mod open;
 pub mod restore;
 pub mod start;
+pub mod status;
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};

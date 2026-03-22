@@ -275,6 +275,12 @@ fn main() -> Result<()> {
                 }
             }
         }
+        cli::Commands::Status => {
+            let mut state = WorkspaceState::load_from(&state_path)?;
+            state.prune_stale();
+            state.save_to(&state_path)?;
+            workflow::status::run(&state)?;
+        }
         cli::Commands::Completions { shell } => {
             clap_complete::generate(
                 shell,
