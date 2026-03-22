@@ -41,3 +41,43 @@ pub fn pane_var(name: &str) -> String {
         .collect();
     format!("pane_{sanitized}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_applescript_backslash() {
+        assert_eq!(escape_applescript(r"a\b"), r"a\\b");
+    }
+
+    #[test]
+    fn escape_applescript_double_quote() {
+        assert_eq!(escape_applescript(r#"say "hi""#), r#"say \"hi\""#);
+    }
+
+    #[test]
+    fn escape_applescript_mixed() {
+        assert_eq!(escape_applescript(r#"a\"b"#), r#"a\\\"b"#);
+    }
+
+    #[test]
+    fn escape_applescript_no_escape_needed() {
+        assert_eq!(escape_applescript("hello world"), "hello world");
+    }
+
+    #[test]
+    fn pane_var_alphanumeric() {
+        assert_eq!(pane_var("editor"), "pane_editor");
+    }
+
+    #[test]
+    fn pane_var_special_chars_become_underscores() {
+        assert_eq!(pane_var("my-pane.1"), "pane_my_pane_1");
+    }
+
+    #[test]
+    fn pane_var_spaces() {
+        assert_eq!(pane_var("my pane"), "pane_my_pane");
+    }
+}

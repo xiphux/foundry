@@ -57,6 +57,113 @@ pub fn remove_status(project: &str, name: &str) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn agent_status_label_all_variants() {
+        assert_eq!(AgentStatus::Working.label(), "working");
+        assert_eq!(AgentStatus::Idle.label(), "idle");
+        assert_eq!(
+            AgentStatus::WaitingPermission.label(),
+            "waiting for permission"
+        );
+        assert_eq!(AgentStatus::Unknown.label(), "unknown");
+    }
+
+    #[test]
+    fn status_file_path_construction() {
+        let path = status_file_path("myproject", "my-workspace").unwrap();
+        assert!(path.ends_with("status/myproject/my-workspace.status"));
+        assert!(path.to_string_lossy().contains(".foundry"));
+    }
+
+    #[test]
+    fn read_status_working() {
+        let dir = TempDir::new().unwrap();
+        let status_dir = dir.path().join("status").join("proj");
+        std::fs::create_dir_all(&status_dir).unwrap();
+        std::fs::write(status_dir.join("ws.status"), "working").unwrap();
+
+        // read_status uses the real foundry_dir, so we test via a file directly
+        // Instead, test round-trip through the real path
+        let path = status_file_path("testproj_read", "testws").unwrap();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, "working").unwrap();
+        assert_eq!(read_status("testproj_read", "testws"), AgentStatus::Working);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn read_status_idle() {
+        let path = status_file_path("testproj_idle", "testws").unwrap();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, "idle").unwrap();
+        assert_eq!(read_status("testproj_idle", "testws"), AgentStatus::Idle);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn read_status_waiting_permission() {
+        let path = status_file_path("testproj_wait", "testws").unwrap();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, "waiting_permission").unwrap();
+        assert_eq!(
+            read_status("testproj_wait", "testws"),
+            AgentStatus::WaitingPermission
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn read_status_missing_file() {
+        assert_eq!(
+            read_status("nonexistent_proj_xyz", "nonexistent_ws"),
+            AgentStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn read_status_invalid_content() {
+        let path = status_file_path("testproj_invalid", "testws").unwrap();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, "bogus_value").unwrap();
+        assert_eq!(
+            read_status("testproj_invalid", "testws"),
+            AgentStatus::Unknown
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn remove_status_existing_file() {
+        let path = status_file_path("testproj_rm", "testws").unwrap();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, "idle").unwrap();
+        assert!(path.exists());
+        remove_status("testproj_rm", "testws");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn remove_status_nonexistent_file() {
+        // Should not panic
+        remove_status("nonexistent_proj_rm_xyz", "nonexistent_ws");
+    }
+}
+
 /// Create the .claude/settings.local.json in the worktree with hooks
 /// that write agent status to the foundry status file.
 pub fn setup_agent_hooks(worktree_path: &Path, project: &str, name: &str) -> Result<()> {

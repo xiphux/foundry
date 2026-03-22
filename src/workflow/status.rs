@@ -141,6 +141,68 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_commit_count_no_commits() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "initial"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["branch", "feature"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert_eq!(commit_count(dir.path(), "feature", "main"), 0);
+    }
+
+    #[test]
+    fn test_commit_count_with_commits() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "initial"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["checkout", "-b", "feature"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "feat 1"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "feat 2"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert_eq!(commit_count(dir.path(), "feature", "main"), 2);
+    }
+
+    #[test]
     fn test_format_time_ago() {
         let now = chrono::Utc::now().timestamp();
         assert_eq!(format_time_ago(now), "just now");

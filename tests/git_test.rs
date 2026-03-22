@@ -88,3 +88,122 @@ fn test_archive_branch_collision() {
         "expected at least 2 archived branches, got {count}: {branches}"
     );
 }
+
+#[test]
+fn test_branch_has_commits_true() {
+    let repo = init_test_repo();
+    Command::new("git")
+        .args(["checkout", "-b", "feature"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "--allow-empty", "-m", "feature work"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(foundry::git::branch_has_commits(repo.path(), "feature", "main").unwrap());
+}
+
+#[test]
+fn test_branch_has_commits_false() {
+    let repo = init_test_repo();
+    foundry::git::create_branch(repo.path(), "feature").unwrap();
+    assert!(!foundry::git::branch_has_commits(repo.path(), "feature", "main").unwrap());
+}
+
+#[test]
+fn test_branch_exists_true() {
+    let repo = init_test_repo();
+    foundry::git::create_branch(repo.path(), "my-branch").unwrap();
+    assert!(foundry::git::branch_exists(repo.path(), "my-branch").unwrap());
+}
+
+#[test]
+fn test_branch_exists_false() {
+    let repo = init_test_repo();
+    assert!(!foundry::git::branch_exists(repo.path(), "nonexistent").unwrap());
+}
+
+#[test]
+fn test_current_branch() {
+    let repo = init_test_repo();
+    let branch = foundry::git::current_branch(repo.path()).unwrap();
+    assert_eq!(branch, "main");
+}
+
+#[test]
+fn test_delete_branch() {
+    let repo = init_test_repo();
+    foundry::git::create_branch(repo.path(), "to-delete").unwrap();
+    assert!(foundry::git::branch_exists(repo.path(), "to-delete").unwrap());
+    foundry::git::delete_branch(repo.path(), "to-delete").unwrap();
+    assert!(!foundry::git::branch_exists(repo.path(), "to-delete").unwrap());
+}
+
+#[test]
+fn test_list_branches_with_prefix_matching() {
+    let repo = init_test_repo();
+    foundry::git::create_branch(repo.path(), "feature/one").unwrap();
+    foundry::git::create_branch(repo.path(), "feature/two").unwrap();
+    foundry::git::create_branch(repo.path(), "bugfix/one").unwrap();
+    let branches = foundry::git::list_branches_with_prefix(repo.path(), "feature/").unwrap();
+    assert_eq!(branches.len(), 2);
+    assert!(branches.contains(&"feature/one".to_string()));
+    assert!(branches.contains(&"feature/two".to_string()));
+}
+
+#[test]
+fn test_list_branches_with_prefix_no_match() {
+    let repo = init_test_repo();
+    foundry::git::create_branch(repo.path(), "feature/one").unwrap();
+    let branches = foundry::git::list_branches_with_prefix(repo.path(), "archive/").unwrap();
+    assert!(branches.is_empty());
+}
+
+#[test]
+fn test_merge_non_ff() {
+    let repo = init_test_repo();
+    // Create a feature branch with a commit
+    Command::new("git")
+        .args(["checkout", "-b", "feature"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    std::fs::write(repo.path().join("feature.txt"), "feature content").unwrap();
+    Command::new("git")
+        .args(["add", "feature.txt"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "feature commit"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+
+    // Go back to main and add a diverging commit
+    Command::new("git")
+        .args(["checkout", "main"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    std::fs::write(repo.path().join("main.txt"), "main content").unwrap();
+    Command::new("git")
+        .args(["add", "main.txt"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "main commit"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+
+    // Merge feature into main (non-ff)
+    foundry::git::merge(repo.path(), "feature").unwrap();
+
+    // Verify both files exist after merge
+    assert!(repo.path().join("feature.txt").exists());
+    assert!(repo.path().join("main.txt").exists());
+}

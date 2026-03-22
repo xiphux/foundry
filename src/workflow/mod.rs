@@ -70,3 +70,26 @@ pub fn foundry_paths() -> Result<(PathBuf, PathBuf)> {
         foundry_dir.join("state.toml"),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_branch_name_with_prefix() {
+        assert_eq!(
+            compute_branch_name("my-feature", Some("user")),
+            "user/my-feature"
+        );
+    }
+
+    #[test]
+    fn compute_branch_name_without_prefix() {
+        assert_eq!(compute_branch_name("my-feature", None), "my-feature");
+    }
+
+    #[test]
+    fn compute_branch_name_with_empty_prefix() {
+        assert_eq!(compute_branch_name("my-feature", Some("")), "my-feature");
+    }
+}

@@ -88,3 +88,59 @@ fn test_state_find_by_worktree_path() {
     let found = state.find_by_worktree_path("/tmp/worktrees/myapp/feat-a/src");
     assert!(found.is_some());
 }
+
+#[test]
+fn test_set_terminal_tab_id() {
+    let dir = TempDir::new().unwrap();
+    let state_path = dir.path().join("state.toml");
+    let mut state = foundry::state::WorkspaceState::load_from(&state_path).unwrap();
+    state.add(foundry::state::Workspace {
+        project: "myapp".into(),
+        name: "feat-a".into(),
+        branch: "feat-a".into(),
+        worktree_path: "/tmp/worktrees/myapp/feat-a".into(),
+        source_path: "/code/myapp".into(),
+        created_at: chrono::Utc::now(),
+        terminal_tab_id: String::new(),
+    });
+    state.set_terminal_tab_id("myapp", "feat-a", "tab-123".to_string());
+    state.save_to(&state_path).unwrap();
+
+    let reloaded = foundry::state::WorkspaceState::load_from(&state_path).unwrap();
+    assert_eq!(reloaded.list()[0].terminal_tab_id, "tab-123");
+}
+
+#[test]
+fn test_prune_stale() {
+    let dir = TempDir::new().unwrap();
+    let state_path = dir.path().join("state.toml");
+
+    // Create a real directory for the "valid" workspace
+    let valid_dir = dir.path().join("valid-worktree");
+    std::fs::create_dir(&valid_dir).unwrap();
+
+    let mut state = foundry::state::WorkspaceState::load_from(&state_path).unwrap();
+    state.add(foundry::state::Workspace {
+        project: "myapp".into(),
+        name: "valid".into(),
+        branch: "valid".into(),
+        worktree_path: valid_dir.to_string_lossy().into(),
+        source_path: "/code/myapp".into(),
+        created_at: chrono::Utc::now(),
+        terminal_tab_id: String::new(),
+    });
+    state.add(foundry::state::Workspace {
+        project: "myapp".into(),
+        name: "stale".into(),
+        branch: "stale".into(),
+        worktree_path: "/nonexistent/path/that/does/not/exist".into(),
+        source_path: "/code/myapp".into(),
+        created_at: chrono::Utc::now(),
+        terminal_tab_id: String::new(),
+    });
+
+    assert_eq!(state.list().len(), 2);
+    state.prune_stale();
+    assert_eq!(state.list().len(), 1);
+    assert_eq!(state.list()[0].name, "valid");
+}

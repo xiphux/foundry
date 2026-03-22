@@ -261,3 +261,99 @@ pub fn foundry_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().context("could not determine home directory")?;
     Ok(home.join(".foundry"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expand_tilde_expands_home_dir() {
+        let result = expand_tilde("~/projects");
+        let expected = dirs::home_dir().unwrap().join("projects");
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn expand_tilde_no_tilde_passthrough() {
+        let result = expand_tilde("/absolute/path");
+        assert_eq!(result, PathBuf::from("/absolute/path"));
+    }
+
+    #[test]
+    fn expand_tilde_in_middle_of_path() {
+        let result = expand_tilde("/some/~/path");
+        assert_eq!(result, PathBuf::from("/some/~/path"));
+    }
+
+    #[test]
+    fn resolve_agent_command_claude() {
+        assert_eq!(resolve_agent_command("claude", None), "claude");
+    }
+
+    #[test]
+    fn resolve_agent_command_codex() {
+        assert_eq!(resolve_agent_command("codex", None), "codex");
+    }
+
+    #[test]
+    fn resolve_agent_command_custom_with_command() {
+        assert_eq!(
+            resolve_agent_command("custom", Some("my-agent --flag")),
+            "my-agent --flag"
+        );
+    }
+
+    #[test]
+    fn resolve_agent_command_custom_without_command_defaults_to_claude() {
+        assert_eq!(resolve_agent_command("custom", None), "claude");
+    }
+
+    #[test]
+    fn resolve_agent_command_unknown_passthrough() {
+        assert_eq!(
+            resolve_agent_command("some-other-agent", None),
+            "some-other-agent"
+        );
+    }
+
+    #[test]
+    fn validate_template_empty_string() {
+        assert!(validate_template("").is_ok());
+    }
+
+    #[test]
+    fn validate_template_no_variables() {
+        assert!(validate_template("echo hello world").is_ok());
+    }
+
+    #[test]
+    fn validate_template_valid_variable() {
+        assert!(validate_template("cd {worktree} && ls").is_ok());
+    }
+
+    #[test]
+    fn validate_template_invalid_variable_name() {
+        let result = validate_template("cd {nonexistent}");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("unknown template variable"));
+    }
+
+    #[test]
+    fn validate_template_unclosed_brace_with_unknown_var() {
+        // The parser reads chars until '}', so an unclosed brace consumes
+        // the rest of the string as the variable name. If the resulting
+        // string is not a known variable, it returns an error.
+        let result = validate_template("cd {bogus");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_template_unclosed_brace_with_known_var_succeeds() {
+        // An unclosed brace around a known variable name still succeeds
+        // because the parser treats the remaining text as the var name.
+        assert!(validate_template("cd {worktree").is_ok());
+    }
+}
