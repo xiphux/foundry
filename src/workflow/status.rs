@@ -73,11 +73,13 @@ pub fn run(state: &WorkspaceState) -> Result<()> {
             _ => "-".to_string(),
         };
 
-        // Print with manual padding to avoid ANSI codes breaking alignment.
-        // Color codes add ~9 invisible chars, so we add that to the width.
+        // Pad visible text first, then wrap with color codes so ANSI escapes
+        // don't interfere with column widths.
+        let git_padded = format!("{:<10}", git_label);
+        let agent_padded = format!("{:<26}", agent_label);
         println!(
-            "  {:<30} {}{:<19}\x1b[0m {:<14} {}{:<35}\x1b[0m {}",
-            workspace_name, git_color, git_label, commit_info, agent_color, agent_label, time_ago
+            "  {:<30} {}{}\x1b[0m {:<14} {}{}\x1b[0m {}",
+            workspace_name, git_color, git_padded, commit_info, agent_color, agent_padded, time_ago
         );
     }
 
