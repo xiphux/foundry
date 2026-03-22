@@ -1,6 +1,6 @@
 mod cli;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser};
 use cli::Cli;
 use foundry::config;
@@ -14,7 +14,11 @@ fn main() -> Result<()> {
     let (registry_path, state_path) = workflow::foundry_paths()?;
 
     match cli.command {
-        cli::Commands::Start { name } => {
+        cli::Commands::Start {
+            name,
+            prompt,
+            prompt_file,
+        } => {
             let mut registry = Registry::load_from(&registry_path)?;
             let (project_name, source_path) =
                 workflow::resolve_project(cli.project.as_deref(), &mut registry, &registry_path)?;
@@ -25,6 +29,18 @@ fn main() -> Result<()> {
 
             let mut state = WorkspaceState::load_from(&state_path)?;
 
+            // Resolve prompt from --prompt or --prompt-file
+            let prompt_text =
+                if let Some(p) = prompt {
+                    Some(p)
+                } else if let Some(ref path) = prompt_file {
+                    Some(std::fs::read_to_string(path).with_context(|| {
+                        format!("failed to read prompt file: {}", path.display())
+                    })?)
+                } else {
+                    None
+                };
+
             workflow::start::run(
                 &name,
                 &project_name,
@@ -33,6 +49,7 @@ fn main() -> Result<()> {
                 &mut state,
                 &state_path,
                 cli.verbose,
+                prompt_text.as_deref(),
             )?;
         }
         cli::Commands::Open { name } => {

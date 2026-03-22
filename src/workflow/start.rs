@@ -10,6 +10,7 @@ use crate::git;
 use crate::state::{Workspace, WorkspaceState};
 use crate::terminal;
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     name: &str,
     project_name: &str,
@@ -18,6 +19,7 @@ pub fn run(
     state: &mut WorkspaceState,
     state_path: &Path,
     verbose: bool,
+    prompt: Option<&str>,
 ) -> Result<()> {
     let branch = super::compute_branch_name(name, config.branch_prefix.as_deref());
     let worktree_path = config.worktree_dir.join(project_name).join(name);
@@ -77,13 +79,16 @@ pub fn run(
         }
     }
 
+    // Build the agent command with prompt (if provided)
+    let agent_command = config::build_agent_command(config, prompt);
+
     let template_vars = TemplateVars {
         source: source_path.to_string_lossy().into(),
         worktree: worktree_path.to_string_lossy().into(),
         branch: branch.clone(),
         name: name.into(),
         project: project_name.into(),
-        agent_command: config.agent_command.clone(),
+        agent_command,
     };
 
     // Split scripts into immediate (blocking) and deferred (run in terminal pane)

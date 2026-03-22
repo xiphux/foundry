@@ -6,6 +6,7 @@ use std::collections::HashMap;
 #[serde(default)]
 pub struct ProjectConfig {
     pub branch_prefix: Option<String>,
+    pub agent: Option<String>,
     pub agent_command: Option<String>,
     pub archive_prefix: Option<String>,
     pub merge_strategy: Option<super::types::MergeStrategy>,

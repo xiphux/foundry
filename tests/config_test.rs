@@ -30,7 +30,7 @@ optional = true
 "#;
     let config: foundry::config::GlobalConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(config.branch_prefix.as_deref(), Some("xiphux"));
-    assert_eq!(config.agent_command, "claude");
+    assert_eq!(config.agent, "claude");
     assert_eq!(
         config.merge_strategy,
         foundry::config::MergeStrategy::FfOnly
@@ -44,7 +44,7 @@ fn test_global_config_defaults() {
     let toml_str = "";
     let config: foundry::config::GlobalConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(config.branch_prefix, None);
-    assert_eq!(config.agent_command, "claude");
+    assert_eq!(config.agent, "claude");
     assert_eq!(config.archive_prefix, "archive");
     assert_eq!(
         config.merge_strategy,
@@ -149,4 +149,25 @@ fn test_config_merge_optional_pane_opted_in() {
     let resolved = foundry::config::merge_configs(&global, Some(&project));
     assert_eq!(resolved.panes.len(), 2);
     assert_eq!(resolved.panes[1].command.as_deref(), Some("npm run serve"));
+}
+
+#[test]
+fn test_build_agent_command_claude_with_prompt() {
+    let config = foundry::config::merge_configs(&foundry::config::GlobalConfig::default(), None);
+    let cmd = foundry::config::build_agent_command(&config, Some("fix the auth bug"));
+    assert_eq!(cmd, "claude 'fix the auth bug'");
+}
+
+#[test]
+fn test_build_agent_command_claude_without_prompt() {
+    let config = foundry::config::merge_configs(&foundry::config::GlobalConfig::default(), None);
+    let cmd = foundry::config::build_agent_command(&config, None);
+    assert_eq!(cmd, "claude");
+}
+
+#[test]
+fn test_build_agent_command_prompt_with_quotes() {
+    let config = foundry::config::merge_configs(&foundry::config::GlobalConfig::default(), None);
+    let cmd = foundry::config::build_agent_command(&config, Some("fix the user's auth bug"));
+    assert_eq!(cmd, "claude 'fix the user'\\''s auth bug'");
 }

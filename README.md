@@ -45,10 +45,14 @@ foundry discard
 | Command | Description |
 |---|---|
 | `foundry start <name>` | Create branch, worktree, run setup, open workspace |
+| `foundry start <name> --prompt "..."` | Start with a prompt passed to the AI agent |
+| `foundry start <name> --prompt-file <path>` | Start with a prompt loaded from a file |
 | `foundry open [name]` | Reopen workspace (lists active worktrees if no name) |
 | `foundry finish [name]` | Merge to main/master, teardown, clean up |
 | `foundry discard [name]` | Teardown and clean up without merging |
+| `foundry switch [name]` | Switch to a workspace's terminal tab |
 | `foundry restore [branch]` | Restore workspace from an archived branch |
+| `foundry status` | Show status dashboard of all workspaces |
 | `foundry list` | List all active workspaces across all projects |
 | `foundry projects list` | List registered projects |
 | `foundry projects add <name> <path>` | Register a project |
@@ -87,8 +91,11 @@ Foundry uses two levels of TOML configuration:
 # "my-feature" becomes "xiphux/my-feature"
 branch_prefix = "xiphux"
 
-# Command to launch your AI agent (default: "claude")
-agent_command = "claude"
+# AI agent: "claude" (default), "codex", or "custom"
+agent = "claude"
+
+# Custom agent command (only used when agent = "custom")
+# agent_command = "my-custom-agent --some-flag"
 
 # Prefix for archived branches (default: "archive")
 archive_prefix = "archive"

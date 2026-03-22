@@ -5,7 +5,10 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct GlobalConfig {
     pub branch_prefix: Option<String>,
-    pub agent_command: String,
+    /// Known agent identifier: "claude", "codex", or "custom"
+    pub agent: String,
+    /// Custom agent command (only used when agent = "custom")
+    pub agent_command: Option<String>,
     pub archive_prefix: String,
     pub merge_strategy: MergeStrategy,
     pub worktree_dir: String,
@@ -40,7 +43,8 @@ impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
             branch_prefix: None,
-            agent_command: "claude".into(),
+            agent: "claude".into(),
+            agent_command: None,
             archive_prefix: "archive".into(),
             merge_strategy: MergeStrategy::default(),
             worktree_dir: "~/.foundry/worktrees".into(),

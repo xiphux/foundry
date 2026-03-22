@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     pub branch_prefix: Option<String>,
+    /// The known agent identifier ("claude", "codex", "custom")
+    pub agent: String,
+    /// The base agent command (derived from agent, or custom agent_command)
     pub agent_command: String,
     pub archive_prefix: String,
     pub merge_strategy: MergeStrategy,
@@ -20,6 +23,37 @@ pub struct ResolvedConfig {
     pub panes: Vec<PaneConfig>,
     pub setup_scripts: Vec<ScriptConfig>,
     pub teardown_scripts: Vec<ScriptConfig>,
+}
+
+/// Build the full agent command string, optionally including a prompt.
+/// For known agents (claude, codex), the prompt is passed as a positional argument.
+/// For custom agents, the prompt is not appended (the user's custom command is used as-is).
+pub fn build_agent_command(config: &ResolvedConfig, prompt: Option<&str>) -> String {
+    let base = &config.agent_command;
+
+    match prompt {
+        Some(p) if !p.is_empty() => {
+            // Shell-escape the prompt for safe embedding in a command
+            let escaped = p.replace('\'', "'\\''");
+            match config.agent.as_str() {
+                "claude" | "codex" => format!("{base} '{escaped}'"),
+                _ => base.clone(), // Custom agents: don't append prompt
+            }
+        }
+        _ => base.clone(),
+    }
+}
+
+/// Resolve the base agent command from the agent identifier.
+fn resolve_agent_command(agent: &str, custom_command: Option<&str>) -> String {
+    match agent {
+        "claude" => "claude".to_string(),
+        "codex" => "codex".to_string(),
+        "custom" => custom_command.unwrap_or("claude").to_string(),
+        // If someone puts a command directly in agent (backwards compat),
+        // use it as-is
+        other => other.to_string(),
+    }
 }
 
 /// Values available for template variable substitution.
@@ -178,13 +212,22 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
         })
         .collect();
 
+    let agent = project
+        .and_then(|p| p.agent.clone())
+        .unwrap_or_else(|| global.agent.clone());
+
+    let custom_command = project
+        .and_then(|p| p.agent_command.clone())
+        .or_else(|| global.agent_command.clone());
+
+    let agent_command = resolve_agent_command(&agent, custom_command.as_deref());
+
     ResolvedConfig {
         branch_prefix: project
             .and_then(|p| p.branch_prefix.clone())
             .or_else(|| global.branch_prefix.clone()),
-        agent_command: project
-            .and_then(|p| p.agent_command.clone())
-            .unwrap_or_else(|| global.agent_command.clone()),
+        agent,
+        agent_command,
         archive_prefix: project
             .and_then(|p| p.archive_prefix.clone())
             .unwrap_or_else(|| global.archive_prefix.clone()),
