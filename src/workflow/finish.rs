@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
+use crate::agent_hooks;
 use crate::config::{self, MergeStrategy, ResolvedConfig, TemplateVars};
 use crate::git;
 use crate::state::WorkspaceState;
@@ -139,6 +140,7 @@ pub fn run(
 
     state.remove(project_name, name);
     state.save_to(state_path)?;
+    agent_hooks::remove_status(project_name, name);
 
     // Close the terminal tab LAST — if we're running from inside the worktree's
     // tab, this will kill our own process. All cleanup must be done before this.

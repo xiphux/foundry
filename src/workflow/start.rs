@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::process::Command;
 
+use crate::agent_hooks;
 use crate::config::{self, ResolvedConfig, TemplateVars};
 use crate::git;
 use crate::state::{Workspace, WorkspaceState};
@@ -68,6 +69,13 @@ pub fn run(
         terminal_tab_id: String::new(),
     });
     state.save_to(state_path)?;
+
+    // Set up Claude Code hooks for agent status tracking
+    if let Err(e) = agent_hooks::setup_agent_hooks(&worktree_path, project_name, name) {
+        if verbose {
+            eprintln!("Warning: failed to set up agent hooks: {e}");
+        }
+    }
 
     let template_vars = TemplateVars {
         source: source_path.to_string_lossy().into(),

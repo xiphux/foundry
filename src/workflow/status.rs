@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
 
+use crate::agent_hooks;
 use crate::git;
 use crate::state::WorkspaceState;
 
@@ -13,6 +14,13 @@ pub fn run(state: &WorkspaceState) -> Result<()> {
         return Ok(());
     }
 
+    // Print header
+    println!(
+        "  {:<30} {:<10} {:<14} {:<24} LAST ACTIVITY",
+        "WORKSPACE", "STATUS", "COMMITS", "AGENT"
+    );
+    println!("  {}", "-".repeat(90));
+
     for ws in workspaces {
         let worktree = Path::new(&ws.worktree_path);
         let source = Path::new(&ws.source_path);
@@ -20,25 +28,25 @@ pub fn run(state: &WorkspaceState) -> Result<()> {
         // Check if worktree still exists
         if !worktree.exists() {
             println!(
-                "  {}/{}  \x1b[31m✗ missing\x1b[0m  (worktree no longer exists)",
-                ws.project, ws.name
+                "  {:<30} \x1b[31m{:<10}\x1b[0m",
+                format!("{}/{}", ws.project, ws.name),
+                "✗ missing"
             );
             continue;
         }
 
         // Git status
         let dirty = git::has_uncommitted_changes(worktree).unwrap_or(false);
-        let status_icon = if dirty {
-            "\x1b[33m⚠ dirty\x1b[0m"
+        let status_str = if dirty {
+            format!("\x1b[33m{:<10}\x1b[0m", "⚠ dirty")
         } else {
-            "\x1b[32m✓ clean\x1b[0m"
+            format!("\x1b[32m{:<10}\x1b[0m", "✓ clean")
         };
 
         // Commit count vs main
         let commit_info = if let Ok(main_branch) = git::detect_main_branch(source) {
             match git::branch_has_commits(source, &ws.branch, &main_branch) {
                 Ok(true) => {
-                    // Get actual count
                     let count = commit_count(source, &ws.branch, &main_branch);
                     if count == 1 {
                         "1 commit".to_string()
@@ -53,15 +61,20 @@ pub fn run(state: &WorkspaceState) -> Result<()> {
             "unknown".to_string()
         };
 
+        // Agent status
+        let agent_status = agent_hooks::read_status(&ws.project, &ws.name);
+        let agent_str = agent_status.colored_label();
+
         // Time since last commit
         let time_ago = match git::last_commit_timestamp(worktree) {
             Ok(Some(ts)) => format_time_ago(ts),
-            _ => "no commits".to_string(),
+            _ => "-".to_string(),
         };
 
+        let workspace_name = format!("{}/{}", ws.project, ws.name);
         println!(
-            "  {}/{}  {}  {}  {}",
-            ws.project, ws.name, status_icon, commit_info, time_ago
+            "  {:<30} {} {:<14} {:<24} {}",
+            workspace_name, status_str, commit_info, agent_str, time_ago
         );
     }
 
@@ -126,7 +139,7 @@ mod tests {
     fn test_format_time_ago() {
         let now = chrono::Utc::now().timestamp();
         assert_eq!(format_time_ago(now), "just now");
-        assert_eq!(format_time_ago(now - 30), "just now"); // 30 seconds
+        assert_eq!(format_time_ago(now - 30), "just now");
         assert_eq!(format_time_ago(now - 120), "2m ago");
         assert_eq!(format_time_ago(now - 3600), "1h ago");
         assert_eq!(format_time_ago(now - 7200), "2h ago");

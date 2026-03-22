@@ -253,6 +253,7 @@ dependencies = [
  "clap_complete",
  "dirs",
  "serde",
+ "serde_json",
  "tempfile",
  "toml",
  "which",
