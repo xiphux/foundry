@@ -162,11 +162,299 @@ mod tests {
         // Should not panic
         remove_status("nonexistent_proj_rm_xyz", "nonexistent_ws");
     }
+
+    #[test]
+    fn merge_hooks_adds_to_empty() {
+        let existing = serde_json::json!({});
+        let foundry = serde_json::json!({
+            "Stop": [{"matcher": "*", "hooks": [{"type": "command", "command": "echo idle"}]}]
+        });
+        let merged = merge_hooks(&existing, &foundry);
+        assert!(merged.get("Stop").unwrap().as_array().unwrap().len() == 1);
+    }
+
+    #[test]
+    fn merge_hooks_appends_to_existing() {
+        let existing = serde_json::json!({
+            "Stop": [{"matcher": "*", "hooks": [{"type": "command", "command": "echo user_hook"}]}]
+        });
+        let foundry = serde_json::json!({
+            "Stop": [{"matcher": "*", "hooks": [{"type": "command", "command": "echo idle"}]}]
+        });
+        let merged = merge_hooks(&existing, &foundry);
+        // Should have both hooks
+        assert_eq!(merged.get("Stop").unwrap().as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn merge_hooks_preserves_unrelated_events() {
+        let existing = serde_json::json!({
+            "PostToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "cargo fmt"}]}]
+        });
+        let foundry = serde_json::json!({
+            "Stop": [{"matcher": "*", "hooks": [{"type": "command", "command": "echo idle"}]}]
+        });
+        let merged = merge_hooks(&existing, &foundry);
+        assert!(merged.get("PostToolUse").is_some());
+        assert!(merged.get("Stop").is_some());
+    }
+
+    #[test]
+    fn merge_permissions_adds_new_entries() {
+        let existing = vec![serde_json::json!("Bash(pnpm *)")];
+        let additions = vec!["Read(/tmp/**)".into(), "Edit(/tmp/**)".into()];
+        let merged = merge_permissions(&existing, &additions, &[]);
+        assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn merge_permissions_deduplicates() {
+        let existing = vec![serde_json::json!("Bash(git add:*)")];
+        let additions = vec!["Bash(git add:*)".into()];
+        let merged = merge_permissions(&existing, &additions, &[]);
+        assert_eq!(merged.len(), 1);
+    }
+
+    #[test]
+    fn merge_permissions_strips_patterns() {
+        let existing = vec![
+            serde_json::json!("Bash(git push *)"),
+            serde_json::json!("Bash(pnpm *)"),
+            serde_json::json!("Bash(git push --force)"),
+        ];
+        let merged = merge_permissions(&existing, &[], &["git push"]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0], serde_json::json!("Bash(pnpm *)"));
+    }
+
+    #[test]
+    fn build_worktree_permissions_scoped_to_path() {
+        let path = std::path::PathBuf::from("/tmp/worktrees/myproject/feature");
+        let (allow, deny) = build_worktree_permissions(&path);
+        assert!(allow
+            .iter()
+            .any(|a| a.contains("/tmp/worktrees/myproject/feature/**")));
+        assert!(allow.iter().any(|a| a.starts_with("Read(")));
+        assert!(allow.iter().any(|a| a.starts_with("Edit(")));
+        assert!(allow.iter().any(|a| a.starts_with("Write(")));
+        assert!(deny.iter().any(|d| d.contains("git push")));
+        assert!(deny.iter().any(|d| d.contains("checkout main")));
+    }
+
+    #[test]
+    fn setup_agent_hooks_copies_source_settings() {
+        let source = TempDir::new().unwrap();
+        let worktree = TempDir::new().unwrap();
+
+        // Create source settings.local.json with existing permissions
+        let source_claude = source.path().join(".claude");
+        std::fs::create_dir_all(&source_claude).unwrap();
+        std::fs::write(
+            source_claude.join("settings.local.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "permissions": {
+                    "allow": ["Bash(pnpm *)"]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        setup_agent_hooks(worktree.path(), source.path(), "test_copy", "ws").unwrap();
+
+        let settings_path = worktree.path().join(".claude").join("settings.local.json");
+        let content = std::fs::read_to_string(&settings_path).unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // Should have the copied pnpm permission
+        let allow = settings["permissions"]["allow"].as_array().unwrap();
+        assert!(allow.iter().any(|v| v.as_str() == Some("Bash(pnpm *)")));
+
+        // Should also have worktree-scoped permissions
+        let wt_str = worktree.path().to_string_lossy();
+        assert!(allow.iter().any(|v| {
+            v.as_str()
+                .map(|s| s.contains(&*wt_str) && s.starts_with("Read("))
+                .unwrap_or(false)
+        }));
+
+        // Should have hooks
+        assert!(settings.get("hooks").is_some());
+        assert!(settings["hooks"].get("Stop").is_some());
+
+        // Cleanup
+        let _ = remove_status("test_copy", "ws");
+    }
+
+    #[test]
+    fn setup_agent_hooks_strips_git_push_from_source() {
+        let source = TempDir::new().unwrap();
+        let worktree = TempDir::new().unwrap();
+
+        let source_claude = source.path().join(".claude");
+        std::fs::create_dir_all(&source_claude).unwrap();
+        std::fs::write(
+            source_claude.join("settings.local.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "permissions": {
+                    "allow": ["Bash(git push *)", "Bash(pnpm *)"]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        setup_agent_hooks(worktree.path(), source.path(), "test_strip", "ws").unwrap();
+
+        let settings_path = worktree.path().join(".claude").join("settings.local.json");
+        let content = std::fs::read_to_string(&settings_path).unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        let allow = settings["permissions"]["allow"].as_array().unwrap();
+        // git push should be stripped
+        assert!(!allow
+            .iter()
+            .any(|v| v.as_str().map(|s| s.contains("git push")).unwrap_or(false)));
+        // pnpm should remain
+        assert!(allow.iter().any(|v| v.as_str() == Some("Bash(pnpm *)")));
+
+        let _ = remove_status("test_strip", "ws");
+    }
+}
+
+/// Build the foundry-specific hooks for agent status tracking.
+fn build_status_hooks(status_path_str: &str) -> serde_json::Value {
+    serde_json::json!({
+        "UserPromptSubmit": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": format!("echo working > '{status_path_str}'"),
+                        "timeout": 5
+                    }
+                ]
+            }
+        ],
+        "Stop": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": format!("echo idle > '{status_path_str}'"),
+                        "timeout": 5
+                    }
+                ]
+            }
+        ],
+        "Notification": [
+            {
+                "matcher": "permission_prompt",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": format!("echo waiting_permission > '{status_path_str}'"),
+                        "timeout": 5
+                    }
+                ]
+            }
+        ]
+    })
+}
+
+/// Build worktree-scoped permissions. Allows unrestricted file operations
+/// within the worktree and safe git operations on the current branch.
+/// Denies push and checkout of main/master.
+fn build_worktree_permissions(worktree_path: &Path) -> (Vec<String>, Vec<String>) {
+    let wt = worktree_path.to_string_lossy();
+    let allow = vec![
+        format!("Read({wt}/**)"),
+        format!("Edit({wt}/**)"),
+        format!("Write({wt}/**)"),
+        format!("Glob({wt}/**)"),
+        format!("Grep({wt}/**)"),
+        "Bash(git add:*)".into(),
+        "Bash(git commit:*)".into(),
+        "Bash(git diff:*)".into(),
+        "Bash(git log:*)".into(),
+        "Bash(git stash:*)".into(),
+        "Bash(git status:*)".into(),
+    ];
+    let deny = vec![
+        "Bash(git push*)".into(),
+        "Bash(git checkout main*)".into(),
+        "Bash(git checkout master*)".into(),
+    ];
+    (allow, deny)
+}
+
+/// Merge foundry hooks into an existing hooks object. Appends foundry hook
+/// entries to each event's array without removing existing hooks.
+fn merge_hooks(
+    existing: &serde_json::Value,
+    foundry_hooks: &serde_json::Value,
+) -> serde_json::Value {
+    let mut merged = existing.clone();
+
+    if let (Some(merged_obj), Some(foundry_obj)) =
+        (merged.as_object_mut(), foundry_hooks.as_object())
+    {
+        for (event, foundry_entries) in foundry_obj {
+            if let Some(foundry_arr) = foundry_entries.as_array() {
+                let existing_arr = merged_obj
+                    .entry(event.clone())
+                    .or_insert_with(|| serde_json::json!([]));
+                if let Some(arr) = existing_arr.as_array_mut() {
+                    arr.extend(foundry_arr.clone());
+                }
+            }
+        }
+    }
+
+    merged
+}
+
+/// Merge permission arrays, appending new entries and optionally stripping
+/// patterns that match any deny rule (used to remove git push from copied allows).
+fn merge_permissions(
+    existing: &[serde_json::Value],
+    additions: &[String],
+    strip_patterns: &[&str],
+) -> Vec<serde_json::Value> {
+    let mut result: Vec<serde_json::Value> = existing
+        .iter()
+        .filter(|v| {
+            if let Some(s) = v.as_str() {
+                !strip_patterns.iter().any(|pat| s.contains(pat))
+            } else {
+                true
+            }
+        })
+        .cloned()
+        .collect();
+
+    for addition in additions {
+        let val = serde_json::Value::String(addition.clone());
+        if !result.contains(&val) {
+            result.push(val);
+        }
+    }
+
+    result
 }
 
 /// Create the .claude/settings.local.json in the worktree with hooks
-/// that write agent status to the foundry status file.
-pub fn setup_agent_hooks(worktree_path: &Path, project: &str, name: &str) -> Result<()> {
+/// for agent status tracking and worktree-scoped permissions. If the source
+/// repo has an existing settings.local.json, it is used as the base and
+/// foundry settings are merged on top.
+pub fn setup_agent_hooks(
+    worktree_path: &Path,
+    source_path: &Path,
+    project: &str,
+    name: &str,
+) -> Result<()> {
     let status_path = status_file_path(project, name)?;
     let status_path_str = status_path.to_string_lossy();
 
@@ -188,53 +476,56 @@ pub fn setup_agent_hooks(worktree_path: &Path, project: &str, name: &str) -> Res
         )
     })?;
 
+    // Load existing settings.local.json from source repo as base
+    let source_settings_path = source_path.join(".claude").join("settings.local.json");
+    let mut settings: serde_json::Value = if source_settings_path.exists() {
+        let content = std::fs::read_to_string(&source_settings_path)
+            .with_context(|| format!("failed to read {}", source_settings_path.display()))?;
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    // Merge hooks
+    let foundry_hooks = build_status_hooks(&status_path_str);
+    let existing_hooks = settings
+        .get("hooks")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let merged_hooks = merge_hooks(&existing_hooks, &foundry_hooks);
+    settings["hooks"] = merged_hooks;
+
+    // Merge permissions
+    let (worktree_allow, worktree_deny) = build_worktree_permissions(worktree_path);
+
+    let existing_allow = settings
+        .get("permissions")
+        .and_then(|p| p.get("allow"))
+        .and_then(|a| a.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let existing_deny = settings
+        .get("permissions")
+        .and_then(|p| p.get("deny"))
+        .and_then(|d| d.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    // Strip git push from any copied allow rules
+    let merged_allow = merge_permissions(&existing_allow, &worktree_allow, &["git push"]);
+    let merged_deny = merge_permissions(&existing_deny, &worktree_deny, &[]);
+
+    // Ensure permissions object exists
+    if settings.get("permissions").is_none() {
+        settings["permissions"] = serde_json::json!({});
+    }
+    settings["permissions"]["allow"] = serde_json::Value::Array(merged_allow);
+    settings["permissions"]["deny"] = serde_json::Value::Array(merged_deny);
+
     let settings_path = claude_dir.join("settings.local.json");
-
-    // Build the hook script commands. Each writes a status string to the file.
-    // We use simple shell commands via the "command" hook type.
-    let settings = serde_json::json!({
-        "hooks": {
-            "UserPromptSubmit": [
-                {
-                    "matcher": "*",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": format!("echo working > '{status_path_str}'"),
-                            "timeout": 5
-                        }
-                    ]
-                }
-            ],
-            "Stop": [
-                {
-                    "matcher": "*",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": format!("echo idle > '{status_path_str}'"),
-                            "timeout": 5
-                        }
-                    ]
-                }
-            ],
-            "Notification": [
-                {
-                    "matcher": "permission_prompt",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": format!("echo waiting_permission > '{status_path_str}'"),
-                            "timeout": 5
-                        }
-                    ]
-                }
-            ]
-        }
-    });
-
     let contents =
-        serde_json::to_string_pretty(&settings).context("failed to serialize hook settings")?;
+        serde_json::to_string_pretty(&settings).context("failed to serialize settings")?;
 
     std::fs::write(&settings_path, contents)
         .with_context(|| format!("failed to write {}", settings_path.display()))?;

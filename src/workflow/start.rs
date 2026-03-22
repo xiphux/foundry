@@ -73,8 +73,9 @@ pub fn run(
     });
     state.save_to(state_path)?;
 
-    // Set up Claude Code hooks for agent status tracking
-    if let Err(e) = agent_hooks::setup_agent_hooks(&worktree_path, project_name, name) {
+    // Set up Claude Code settings: hooks for status tracking + worktree permissions
+    if let Err(e) = agent_hooks::setup_agent_hooks(&worktree_path, source_path, project_name, name)
+    {
         if verbose {
             eprintln!("Warning: failed to set up agent hooks: {e}");
         }
