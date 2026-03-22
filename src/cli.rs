@@ -24,6 +24,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Create branch, worktree, run setup, open workspace
+    #[command(visible_alias = "create")]
     Start {
         /// Name for the feature branch / worktree
         name: String,
