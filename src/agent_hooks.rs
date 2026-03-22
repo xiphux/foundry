@@ -260,7 +260,7 @@ mod tests {
         )
         .unwrap();
 
-        setup_agent_hooks(worktree.path(), source.path(), "test_copy", "ws").unwrap();
+        setup_agent_hooks(worktree.path(), source.path(), "test_copy", "ws", "claude").unwrap();
 
         let settings_path = worktree.path().join(".claude").join("settings.local.json");
         let content = std::fs::read_to_string(&settings_path).unwrap();
@@ -304,7 +304,7 @@ mod tests {
         )
         .unwrap();
 
-        setup_agent_hooks(worktree.path(), source.path(), "test_strip", "ws").unwrap();
+        setup_agent_hooks(worktree.path(), source.path(), "test_strip", "ws", "claude").unwrap();
 
         let settings_path = worktree.path().join(".claude").join("settings.local.json");
         let content = std::fs::read_to_string(&settings_path).unwrap();
@@ -319,6 +319,36 @@ mod tests {
         assert!(allow.iter().any(|v| v.as_str() == Some("Bash(pnpm *)")));
 
         let _ = remove_status("test_strip", "ws");
+    }
+
+    #[test]
+    fn setup_agent_hooks_skips_for_codex() {
+        let source = TempDir::new().unwrap();
+        let worktree = TempDir::new().unwrap();
+
+        setup_agent_hooks(worktree.path(), source.path(), "test_codex", "ws", "codex").unwrap();
+
+        // Should NOT create .claude/settings.local.json for codex
+        let settings_path = worktree.path().join(".claude").join("settings.local.json");
+        assert!(!settings_path.exists());
+    }
+
+    #[test]
+    fn setup_agent_hooks_skips_for_unknown_agent() {
+        let source = TempDir::new().unwrap();
+        let worktree = TempDir::new().unwrap();
+
+        setup_agent_hooks(
+            worktree.path(),
+            source.path(),
+            "test_other",
+            "ws",
+            "some-agent",
+        )
+        .unwrap();
+
+        let settings_path = worktree.path().join(".claude").join("settings.local.json");
+        assert!(!settings_path.exists());
     }
 }
 
@@ -445,16 +475,28 @@ fn merge_permissions(
     result
 }
 
-/// Create the .claude/settings.local.json in the worktree with hooks
-/// for agent status tracking and worktree-scoped permissions. If the source
-/// repo has an existing settings.local.json, it is used as the base and
-/// foundry settings are merged on top.
+/// Set up agent-specific workspace configuration. For Claude, creates
+/// .claude/settings.local.json with status hooks and worktree-scoped
+/// permissions. For other agents, performs any applicable setup.
+/// If the source repo has existing agent config, it is used as the base.
 pub fn setup_agent_hooks(
     worktree_path: &Path,
     source_path: &Path,
     project: &str,
     name: &str,
+    agent: &str,
 ) -> Result<()> {
+    match agent {
+        "claude" => setup_claude(worktree_path, source_path, project, name),
+        // Codex permissions are handled via CLI flags in resolve_agent_command.
+        // No config file setup needed since .codex/config.toml is tracked in git.
+        _ => Ok(()),
+    }
+}
+
+/// Claude-specific setup: create .claude/settings.local.json with status
+/// tracking hooks and worktree-scoped permissions.
+fn setup_claude(worktree_path: &Path, source_path: &Path, project: &str, name: &str) -> Result<()> {
     let status_path = status_file_path(project, name)?;
     let status_path_str = status_path.to_string_lossy();
 

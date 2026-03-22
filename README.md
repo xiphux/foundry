@@ -53,6 +53,8 @@ foundry discard
 | `foundry switch [name]` | Switch to a workspace's terminal tab |
 | `foundry restore [branch]` | Restore workspace from an archived branch |
 | `foundry status` | Show status dashboard of all workspaces |
+| `foundry diff [name]` | Show changes in a workspace vs main |
+| `foundry diff [name] --stat` | Show file change summary vs main |
 | `foundry list` | List all active workspaces across all projects |
 | `foundry projects list` | List registered projects |
 | `foundry projects add <name> <path>` | Register a project |
@@ -250,15 +252,34 @@ foundry projects add myapp /path/to/myapp
 foundry projects remove myapp
 ```
 
+## Agent Support
+
+Foundry supports multiple AI coding agents. The agent is configured via `agent` in your global or project config.
+
+| Feature | Claude | Codex | Custom |
+|---|---|---|---|
+| Prompt passthrough | Yes | Yes | No |
+| Worktree permissions | Yes (settings.local.json) | Yes (CLI flags) | N/A |
+| Status tracking | Yes (hooks) | Not yet | N/A |
+| Settings merge from source | Yes | N/A | N/A |
+
+**Claude** gets the richest integration: foundry copies your source repo's `.claude/settings.local.json` into the worktree and merges in status-tracking hooks and worktree-scoped permissions (auto-approve file operations within the worktree, deny `git push` and `checkout main`).
+
+**Codex** passes sandbox and approval settings via CLI flags (`sandbox_mode="workspace-write"`, `approval_policy.default="never"`) for autonomous operation. Status tracking is not yet available since Codex hooks support is new.
+
+**Custom** agents use whatever command you specify in `agent_command`. Foundry runs it as-is without additional configuration.
+
 ## Terminal Support
 
-Foundry currently supports **Ghostty** on macOS. The terminal is detected automatically from the `TERM_PROGRAM` environment variable.
+Foundry detects the terminal automatically from the `TERM_PROGRAM` environment variable.
 
-The Ghostty backend uses AppleScript to:
-- Open new tabs with the worktree as the working directory
-- Create split panes targeting specific parent panes
-- Run commands in specific panes
-- Close workspace tabs when finishing or discarding
+| Terminal | Platform | Mechanism |
+|---|---|---|
+| Ghostty | macOS | AppleScript |
+| iTerm2 | macOS | AppleScript |
+| WezTerm | macOS, Linux, Windows | `wezterm cli` |
+
+All backends support: opening tabs, creating split panes, running commands in panes, closing tabs, and focusing tabs.
 
 ## Shell Completions
 
