@@ -52,6 +52,7 @@ pub enum Commands {
         name: Option<String>,
     },
     /// Teardown and delete worktree without merging
+    #[command(visible_alias = "destroy")]
     Discard {
         /// Worktree name (inferred from cwd if omitted)
         name: Option<String>,
