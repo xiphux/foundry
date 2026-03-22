@@ -55,7 +55,16 @@ pub fn issue_to_worktree_name(issue: &GitHubIssue) -> String {
 }
 
 /// Build a prompt string from a GitHub issue.
-pub fn issue_to_prompt(issue: &GitHubIssue) -> String {
+/// If `custom_template` is provided, use it with {issue_number}, {title}, {body} variables.
+/// Otherwise, use the default preamble.
+pub fn issue_to_prompt(issue: &GitHubIssue, custom_template: Option<&str>) -> String {
+    if let Some(template) = custom_template {
+        return template
+            .replace("{issue_number}", &issue.number.to_string())
+            .replace("{title}", &issue.title)
+            .replace("{body}", &issue.body);
+    }
+
     let preamble = "You have been assigned the following GitHub issue to work on. \
         Please review the issue, understand what needs to be done, and implement the changes. \
         If this issue is complex or involves changes across multiple files, \
@@ -150,27 +159,45 @@ mod tests {
     }
 
     #[test]
-    fn test_issue_to_prompt_with_body() {
+    fn test_issue_to_prompt_default_with_body() {
         let issue = GitHubIssue {
             number: 42,
             title: "Fix auth timeout".into(),
             body: "The login page times out after 30s".into(),
         };
-        let prompt = issue_to_prompt(&issue);
+        let prompt = issue_to_prompt(&issue, None);
+        assert!(prompt.contains("assigned the following GitHub issue"));
         assert!(prompt.contains("GitHub Issue #42"));
         assert!(prompt.contains("Fix auth timeout"));
         assert!(prompt.contains("The login page times out"));
     }
 
     #[test]
-    fn test_issue_to_prompt_no_body() {
+    fn test_issue_to_prompt_default_no_body() {
         let issue = GitHubIssue {
             number: 42,
             title: "Fix auth timeout".into(),
             body: String::new(),
         };
-        let prompt = issue_to_prompt(&issue);
+        let prompt = issue_to_prompt(&issue, None);
         assert!(prompt.contains("assigned the following GitHub issue"));
         assert!(prompt.contains("GitHub Issue #42: Fix auth timeout"));
+    }
+
+    #[test]
+    fn test_issue_to_prompt_custom_template() {
+        let issue = GitHubIssue {
+            number: 42,
+            title: "Fix auth timeout".into(),
+            body: "Login times out".into(),
+        };
+        let prompt = issue_to_prompt(
+            &issue,
+            Some("Fix issue #{issue_number}: {title}\n\nDetails: {body}"),
+        );
+        assert_eq!(
+            prompt,
+            "Fix issue #42: Fix auth timeout\n\nDetails: Login times out"
+        );
     }
 }

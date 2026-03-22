@@ -23,6 +23,8 @@ pub struct ResolvedConfig {
     pub panes: Vec<PaneConfig>,
     pub setup_scripts: Vec<ScriptConfig>,
     pub teardown_scripts: Vec<ScriptConfig>,
+    /// Custom prompt template for GitHub issues (None = use default)
+    pub issue_prompt: Option<String>,
 }
 
 /// Build the full agent command string, optionally including a prompt.
@@ -240,6 +242,7 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
         teardown_scripts: project
             .map(|p| p.scripts.teardown.clone())
             .unwrap_or_default(),
+        issue_prompt: global.issue_prompt.clone(),
     }
 }
 

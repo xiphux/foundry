@@ -12,6 +12,9 @@ pub struct GlobalConfig {
     pub archive_prefix: String,
     pub merge_strategy: MergeStrategy,
     pub worktree_dir: String,
+    /// Custom prompt template for GitHub issues.
+    /// Supports variables: {issue_number}, {title}, {body}
+    pub issue_prompt: Option<String>,
     #[serde(default = "default_panes")]
     pub panes: Vec<PaneConfig>,
 }
@@ -48,6 +51,7 @@ impl Default for GlobalConfig {
             archive_prefix: "archive".into(),
             merge_strategy: MergeStrategy::default(),
             worktree_dir: "~/.foundry/worktrees".into(),
+            issue_prompt: None,
             panes: default_panes(),
         }
     }

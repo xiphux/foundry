@@ -39,7 +39,10 @@ fn main() -> Result<()> {
                 let issue_prompt = if prompt.is_some() || prompt_file.is_some() {
                     None
                 } else {
-                    Some(foundry::github::issue_to_prompt(&gh_issue))
+                    Some(foundry::github::issue_to_prompt(
+                        &gh_issue,
+                        resolved.issue_prompt.as_deref(),
+                    ))
                 };
                 (auto_name, issue_prompt)
             } else {
