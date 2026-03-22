@@ -93,7 +93,7 @@ Foundry uses two levels of TOML configuration:
 # "my-feature" becomes "xiphux/my-feature"
 branch_prefix = "xiphux"
 
-# AI agent: "claude" (default), "codex", or "custom"
+# AI agent: "claude" (default), "codex", "coder", or "custom"
 agent = "claude"
 
 # Custom agent command (only used when agent = "custom")
@@ -256,16 +256,18 @@ foundry projects remove myapp
 
 Foundry supports multiple AI coding agents. The agent is configured via `agent` in your global or project config.
 
-| Feature | Claude | Codex | Custom |
-|---|---|---|---|
-| Prompt passthrough | Yes | Yes | No |
-| Worktree permissions | Yes (settings.local.json) | Yes (CLI flags) | N/A |
-| Status tracking | Yes (hooks) | Not yet | N/A |
-| Settings merge from source | Yes | N/A | N/A |
+| Feature | Claude | Codex | Every Code | Custom |
+|---|---|---|---|---|
+| Prompt passthrough | Yes | Yes | Yes | No |
+| Worktree permissions | Yes (settings.local.json) | Yes (CLI flags) | Yes (CLI flags) | N/A |
+| Status tracking | Yes (hooks) | Not yet | Not yet | N/A |
+| Settings merge from source | Yes | N/A | N/A | N/A |
 
 **Claude** gets the richest integration: foundry copies your source repo's `.claude/settings.local.json` into the worktree and merges in status-tracking hooks and worktree-scoped permissions (auto-approve file operations within the worktree, deny `git push` and `checkout main`).
 
-**Codex** passes sandbox and approval settings via CLI flags (`sandbox_mode="workspace-write"`, `approval_policy.default="never"`) for autonomous operation. Status tracking is not yet available since Codex hooks support is new.
+**Codex** passes sandbox and approval settings via CLI flags (`sandbox_mode="workspace-write"`, `approval_policy="never"`) for autonomous operation.
+
+**Every Code** (`coder`) uses the `--full-auto` flag for autonomous operation (sandbox scoped to workspace, approvals only on failure).
 
 **Custom** agents use whatever command you specify in `agent_command`. Foundry runs it as-is without additional configuration.
 

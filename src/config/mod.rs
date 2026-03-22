@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     pub branch_prefix: Option<String>,
-    /// The known agent identifier ("claude", "codex", "custom")
+    /// The known agent identifier ("claude", "codex", "coder", "custom")
     pub agent: String,
     /// The base agent command (derived from agent, or custom agent_command)
     pub agent_command: String,
@@ -38,7 +38,7 @@ pub fn build_agent_command(config: &ResolvedConfig, prompt: Option<&str>) -> Str
             // Shell-escape the prompt for safe embedding in a command
             let escaped = p.replace('\'', "'\\''");
             match config.agent.as_str() {
-                "claude" | "codex" => format!("{base} '{escaped}'"),
+                "claude" | "codex" | "coder" => format!("{base} '{escaped}'"),
                 _ => base.clone(), // Custom agents: don't append prompt
             }
         }
@@ -55,6 +55,7 @@ fn resolve_agent_command(agent: &str, custom_command: Option<&str>) -> String {
         "codex" => {
             "codex -c 'sandbox_mode=\"workspace-write\"' -c 'approval_policy=\"never\"'".to_string()
         }
+        "coder" => "coder --full-auto".to_string(),
         "custom" => custom_command.unwrap_or("claude").to_string(),
         // If someone puts a command directly in agent (backwards compat),
         // use it as-is
@@ -301,6 +302,13 @@ mod tests {
         assert!(cmd.contains("sandbox_mode"));
         assert!(cmd.contains("workspace-write"));
         assert!(cmd.contains("approval_policy"));
+    }
+
+    #[test]
+    fn resolve_agent_command_coder() {
+        let cmd = resolve_agent_command("coder", None);
+        assert!(cmd.starts_with("coder "));
+        assert!(cmd.contains("--full-auto"));
     }
 
     #[test]
