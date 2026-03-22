@@ -52,9 +52,7 @@ pub fn build_agent_command(config: &ResolvedConfig, prompt: Option<&str>) -> Str
 fn resolve_agent_command(agent: &str, custom_command: Option<&str>) -> String {
     match agent {
         "claude" => "claude".to_string(),
-        "codex" => {
-            "codex -c 'sandbox_mode=\"workspace-write\"' -c 'approval_policy=\"never\"'".to_string()
-        }
+        "codex" => "codex --full-auto".to_string(),
         "coder" => "coder --full-auto".to_string(),
         "custom" => custom_command.unwrap_or("claude").to_string(),
         // If someone puts a command directly in agent (backwards compat),
@@ -299,9 +297,7 @@ mod tests {
     fn resolve_agent_command_codex() {
         let cmd = resolve_agent_command("codex", None);
         assert!(cmd.starts_with("codex "));
-        assert!(cmd.contains("sandbox_mode"));
-        assert!(cmd.contains("workspace-write"));
-        assert!(cmd.contains("approval_policy"));
+        assert!(cmd.contains("--full-auto"));
     }
 
     #[test]

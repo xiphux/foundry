@@ -265,7 +265,7 @@ Foundry supports multiple AI coding agents. The agent is configured via `agent` 
 
 **Claude** gets the richest integration: foundry copies your source repo's `.claude/settings.local.json` into the worktree and merges in status-tracking hooks and worktree-scoped permissions (auto-approve file operations within the worktree, deny `git push` and `checkout main`).
 
-**Codex** passes sandbox and approval settings via CLI flags (`sandbox_mode="workspace-write"`, `approval_policy="never"`) for autonomous operation.
+**Codex** uses the `--full-auto` flag for autonomous operation (sandbox scoped to workspace, approvals only on failure).
 
 **Every Code** (`coder`) uses the `--full-auto` flag for autonomous operation (sandbox scoped to workspace, approvals only on failure).
 
