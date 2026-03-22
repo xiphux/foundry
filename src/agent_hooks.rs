@@ -17,16 +17,7 @@ impl AgentStatus {
         match self {
             AgentStatus::Working => "working",
             AgentStatus::Idle => "idle",
-            AgentStatus::WaitingPermission => "waiting",
-            AgentStatus::Unknown => "unknown",
-        }
-    }
-
-    pub fn colored_label(self) -> &'static str {
-        match self {
-            AgentStatus::Working => "\x1b[34mworking\x1b[0m",
-            AgentStatus::Idle => "\x1b[33midle\x1b[0m",
-            AgentStatus::WaitingPermission => "\x1b[31mwaiting for permission\x1b[0m",
+            AgentStatus::WaitingPermission => "waiting for permission",
             AgentStatus::Unknown => "unknown",
         }
     }

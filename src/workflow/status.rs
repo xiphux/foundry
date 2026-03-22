@@ -16,31 +16,28 @@ pub fn run(state: &WorkspaceState) -> Result<()> {
 
     // Print header
     println!(
-        "  {:<30} {:<10} {:<14} {:<24} LAST ACTIVITY",
-        "WORKSPACE", "STATUS", "COMMITS", "AGENT"
+        "  {:<30} {:<10} {:<14} {:<26} LAST COMMIT",
+        "WORKSPACE", "GIT", "COMMITS", "AGENT"
     );
     println!("  {}", "-".repeat(90));
 
     for ws in workspaces {
         let worktree = Path::new(&ws.worktree_path);
         let source = Path::new(&ws.source_path);
+        let workspace_name = format!("{}/{}", ws.project, ws.name);
 
         // Check if worktree still exists
         if !worktree.exists() {
-            println!(
-                "  {:<30} \x1b[31m{:<10}\x1b[0m",
-                format!("{}/{}", ws.project, ws.name),
-                "✗ missing"
-            );
+            println!("  {:<30} \x1b[31m✗ missing\x1b[0m", workspace_name);
             continue;
         }
 
         // Git status
         let dirty = git::has_uncommitted_changes(worktree).unwrap_or(false);
-        let status_str = if dirty {
-            format!("\x1b[33m{:<10}\x1b[0m", "⚠ dirty")
+        let (git_label, git_color) = if dirty {
+            ("⚠ dirty", "\x1b[33m")
         } else {
-            format!("\x1b[32m{:<10}\x1b[0m", "✓ clean")
+            ("✓ clean", "\x1b[32m")
         };
 
         // Commit count vs main
@@ -63,7 +60,12 @@ pub fn run(state: &WorkspaceState) -> Result<()> {
 
         // Agent status
         let agent_status = agent_hooks::read_status(&ws.project, &ws.name);
-        let agent_str = agent_status.colored_label();
+        let (agent_label, agent_color) = match agent_status {
+            agent_hooks::AgentStatus::Working => ("working", "\x1b[34m"),
+            agent_hooks::AgentStatus::Idle => ("idle", "\x1b[33m"),
+            agent_hooks::AgentStatus::WaitingPermission => ("waiting for permission", "\x1b[31m"),
+            agent_hooks::AgentStatus::Unknown => ("unknown", ""),
+        };
 
         // Time since last commit
         let time_ago = match git::last_commit_timestamp(worktree) {
@@ -71,10 +73,11 @@ pub fn run(state: &WorkspaceState) -> Result<()> {
             _ => "-".to_string(),
         };
 
-        let workspace_name = format!("{}/{}", ws.project, ws.name);
+        // Print with manual padding to avoid ANSI codes breaking alignment.
+        // Color codes add ~9 invisible chars, so we add that to the width.
         println!(
-            "  {:<30} {} {:<14} {:<24} {}",
-            workspace_name, status_str, commit_info, agent_str, time_ago
+            "  {:<30} {}{:<19}\x1b[0m {:<14} {}{:<35}\x1b[0m {}",
+            workspace_name, git_color, git_label, commit_info, agent_color, agent_label, time_ago
         );
     }
 
