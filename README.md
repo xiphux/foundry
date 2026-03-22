@@ -93,7 +93,7 @@ Foundry uses two levels of TOML configuration:
 # "my-feature" becomes "xiphux/my-feature"
 branch_prefix = "xiphux"
 
-# AI agent: "claude" (default), "codex", "coder", or "custom"
+# AI agent: "claude" (default), "codex", "every-code", or "custom"
 agent = "claude"
 
 # Custom agent command (only used when agent = "custom")
@@ -267,7 +267,7 @@ Foundry supports multiple AI coding agents. The agent is configured via `agent` 
 
 **Codex** uses the `--full-auto` flag for autonomous operation (sandbox scoped to workspace, approvals only on failure).
 
-**Every Code** (`coder`) uses the `--full-auto` flag for autonomous operation (sandbox scoped to workspace, approvals only on failure).
+**Every Code** (`every-code`) uses the `--full-auto` flag for autonomous operation (sandbox scoped to workspace, approvals only on failure).
 
 **Custom** agents use whatever command you specify in `agent_command`. Foundry runs it as-is without additional configuration.
 

@@ -5,7 +5,7 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct GlobalConfig {
     pub branch_prefix: Option<String>,
-    /// Known agent identifier: "claude", "codex", "coder", or "custom"
+    /// Known agent identifier: "claude", "codex", "every-code", or "custom"
     pub agent: String,
     /// Custom agent command (only used when agent = "custom")
     pub agent_command: Option<String>,

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     pub branch_prefix: Option<String>,
-    /// The known agent identifier ("claude", "codex", "coder", "custom")
+    /// The known agent identifier ("claude", "codex", "every-code", "custom")
     pub agent: String,
     /// The base agent command (derived from agent, or custom agent_command)
     pub agent_command: String,
@@ -38,7 +38,7 @@ pub fn build_agent_command(config: &ResolvedConfig, prompt: Option<&str>) -> Str
             // Shell-escape the prompt for safe embedding in a command
             let escaped = p.replace('\'', "'\\''");
             match config.agent.as_str() {
-                "claude" | "codex" | "coder" => format!("{base} '{escaped}'"),
+                "claude" | "codex" | "every-code" => format!("{base} '{escaped}'"),
                 _ => base.clone(), // Custom agents: don't append prompt
             }
         }
@@ -53,7 +53,7 @@ fn resolve_agent_command(agent: &str, custom_command: Option<&str>) -> String {
     match agent {
         "claude" => "claude".to_string(),
         "codex" => "codex --full-auto".to_string(),
-        "coder" => "coder --full-auto".to_string(),
+        "every-code" => "coder --full-auto".to_string(),
         "custom" => custom_command.unwrap_or("claude").to_string(),
         // If someone puts a command directly in agent (backwards compat),
         // use it as-is
@@ -301,8 +301,8 @@ mod tests {
     }
 
     #[test]
-    fn resolve_agent_command_coder() {
-        let cmd = resolve_agent_command("coder", None);
+    fn resolve_agent_command_every_code() {
+        let cmd = resolve_agent_command("every-code", None);
         assert!(cmd.starts_with("coder "));
         assert!(cmd.contains("--full-auto"));
     }
