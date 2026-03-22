@@ -40,6 +40,7 @@ pub fn run(
             state_path,
             verbose,
             &HashSet::new(),
+            prompt,
         );
     }
 
@@ -147,6 +148,7 @@ pub fn run(
         state_path,
         verbose,
         &skip_command_panes,
+        prompt,
     )?;
 
     // Handle deferred work: setup scripts + deferred pane commands

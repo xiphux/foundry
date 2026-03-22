@@ -20,6 +20,7 @@ pub fn open_workspace(
     state_path: &Path,
     verbose: bool,
     skip_command_panes: &HashSet<String>,
+    prompt: Option<&str>,
 ) -> Result<()> {
     let backend = terminal::detect_terminal()?;
 
@@ -28,13 +29,16 @@ pub fn open_workspace(
     let source_path = workspace.map(|w| w.source_path.clone()).unwrap_or_default();
     let branch = workspace.map(|w| w.branch.clone()).unwrap_or_default();
 
+    // Build agent command with prompt if provided
+    let agent_command = config::build_agent_command(config, prompt);
+
     let template_vars = TemplateVars {
         source: source_path,
         worktree: worktree_path.to_string_lossy().into(),
         branch,
         name: name.into(),
         project: project_name.into(),
-        agent_command: config.agent_command.clone(),
+        agent_command,
     };
 
     // Build PaneSpecs from the resolved config, resolving template variables

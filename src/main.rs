@@ -81,6 +81,7 @@ fn main() -> Result<()> {
                     &state_path,
                     cli.verbose,
                     &std::collections::HashSet::new(),
+                    None, // no prompt for open
                 )?;
             } else {
                 let mut registry = Registry::load_from(&registry_path)?;

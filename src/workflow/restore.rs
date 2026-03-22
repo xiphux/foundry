@@ -118,6 +118,7 @@ pub fn run(
             state_path,
             verbose,
             &std::collections::HashSet::new(),
+            None, // no prompt for restore
         );
     }
 
@@ -204,6 +205,7 @@ pub fn run(
         state_path,
         verbose,
         &std::collections::HashSet::new(),
+        None, // no prompt for restore
     )
 }
 
