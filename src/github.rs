@@ -57,7 +57,9 @@ pub fn issue_to_worktree_name(issue: &GitHubIssue) -> String {
 /// Build a prompt string from a GitHub issue.
 pub fn issue_to_prompt(issue: &GitHubIssue) -> String {
     let preamble = "You have been assigned the following GitHub issue to work on. \
-        Please review the issue, understand what needs to be done, and implement the changes.";
+        Please review the issue, understand what needs to be done, and implement the changes. \
+        If this issue is complex or involves changes across multiple files, \
+        start by creating a plan before implementing.";
 
     if issue.body.is_empty() {
         format!(
