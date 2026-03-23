@@ -3,7 +3,7 @@ use clap_complete::Shell;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "foundry", about = "AI agent workspace manager")]
+#[command(name = "foundry", about = "AI agent workspace manager", version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
