@@ -235,7 +235,7 @@ fn main() -> Result<()> {
                 cli.verbose,
             )?;
         }
-        cli::Commands::Discard { name } => {
+        cli::Commands::Discard { name, force } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
 
             let (name, project_name, source_path) = match name {
@@ -277,6 +277,7 @@ fn main() -> Result<()> {
                 &state_path,
                 cli.verbose,
                 cli.yes,
+                force,
             )?;
         }
         cli::Commands::Restore { branch } => {

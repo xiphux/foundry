@@ -56,6 +56,10 @@ pub enum Commands {
     Discard {
         /// Worktree name (inferred from cwd if omitted)
         name: Option<String>,
+
+        /// Force discard even if the branch has unmerged commits
+        #[arg(long, short)]
+        force: bool,
     },
     /// Show changes in a workspace vs main
     Diff {

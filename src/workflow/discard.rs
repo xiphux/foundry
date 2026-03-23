@@ -19,6 +19,7 @@ pub fn run(
     state_path: &Path,
     verbose: bool,
     skip_confirm: bool,
+    force: bool,
 ) -> Result<()> {
     let worktree_path = config.worktree_dir.join(project_name).join(name);
 
@@ -35,7 +36,22 @@ pub fn run(
     let branch = workspace.branch.clone();
     let tab_id = workspace.terminal_tab_id.clone();
 
-    if git::has_uncommitted_changes(&worktree_path)? && !skip_confirm {
+    // Check for unmerged commits — require --force to discard work
+    let main_branch = git::detect_main_branch(source_path)?;
+    let has_commits = git::branch_has_commits(source_path, &branch, &main_branch).unwrap_or(false);
+    if has_commits && !force {
+        let count = git::log_commits(source_path, &main_branch, &branch)
+            .map(|log| log.lines().filter(|l| !l.is_empty()).count())
+            .unwrap_or(0);
+        let s = if count == 1 { "" } else { "s" };
+        anyhow::bail!(
+            "branch '{branch}' has {count} unmerged commit{s}. \
+             Use `foundry discard {name} --force` to discard anyway, \
+             or `foundry finish {name}` to merge first."
+        );
+    }
+
+    if git::has_uncommitted_changes(&worktree_path)? && !skip_confirm && !force {
         print!("Worktree has uncommitted changes. Discard anyway? [y/N] ");
         io::stdout().flush()?;
         let mut input = String::new();
@@ -91,8 +107,7 @@ pub fn run(
     }
     git::remove_worktree(source_path, &worktree_path, true)?;
 
-    let main_branch = git::detect_main_branch(source_path)?;
-    if git::branch_has_commits(source_path, &branch, &main_branch).unwrap_or(true) {
+    if has_commits {
         if verbose {
             eprintln!("Archiving branch '{branch}'...");
         }
