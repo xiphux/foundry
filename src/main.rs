@@ -77,11 +77,61 @@ fn main() -> Result<()> {
                 fetch,
             )?;
         }
-        cli::Commands::Open { name } => {
+        cli::Commands::Open { name, all } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
             state.prune_stale();
 
-            if let Some(name) = name {
+            if all {
+                let mut registry = Registry::load_from(&registry_path)?;
+                let (project_name, source_path) = workflow::resolve_project(
+                    cli.project.as_deref(),
+                    &mut registry,
+                    &registry_path,
+                )?;
+                let global_config = config::load_global_config()?;
+                let project_config = config::load_project_config(&source_path)?;
+                let resolved = config::merge_configs(&global_config, project_config.as_ref());
+
+                let workspaces: Vec<_> = state
+                    .find_by_project(&project_name)
+                    .iter()
+                    .map(|w| w.name.clone())
+                    .collect();
+
+                if workspaces.is_empty() {
+                    println!("No active workspaces for project '{project_name}'.");
+                } else {
+                    for (i, ws_name) in workspaces.iter().enumerate() {
+                        let worktree_path = resolved.worktree_dir.join(&project_name).join(ws_name);
+                        if !worktree_path.exists() {
+                            eprintln!("Warning: worktree '{ws_name}' no longer exists, skipping.");
+                            continue;
+                        }
+
+                        if cli.verbose {
+                            eprintln!("Opening workspace '{ws_name}'...");
+                        }
+
+                        workflow::open::open_workspace(
+                            &project_name,
+                            ws_name,
+                            &worktree_path,
+                            &resolved,
+                            &mut state,
+                            &state_path,
+                            cli.verbose,
+                            &std::collections::HashSet::new(),
+                            None,
+                        )?;
+
+                        // Brief pause between opens to let the terminal settle
+                        if i < workspaces.len() - 1 {
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                        }
+                    }
+                    eprintln!("Opened {} workspace(s).", workspaces.len());
+                }
+            } else if let Some(name) = name {
                 let mut registry = Registry::load_from(&registry_path)?;
                 let (project_name, source_path) = workflow::resolve_project(
                     cli.project.as_deref(),

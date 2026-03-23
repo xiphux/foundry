@@ -49,6 +49,10 @@ pub enum Commands {
     Open {
         /// Worktree name (lists active worktrees if omitted)
         name: Option<String>,
+
+        /// Reopen all active workspaces for the project
+        #[arg(long)]
+        all: bool,
     },
     /// Merge, teardown, delete worktree, archive branch
     Finish {
