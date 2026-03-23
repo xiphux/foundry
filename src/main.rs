@@ -19,6 +19,7 @@ fn main() -> Result<()> {
             issue,
             prompt,
             prompt_file,
+            fetch,
         } => {
             let mut registry = Registry::load_from(&registry_path)?;
             let (project_name, source_path) =
@@ -73,6 +74,7 @@ fn main() -> Result<()> {
                 &state_path,
                 cli.verbose,
                 prompt_text.as_deref(),
+                fetch,
             )?;
         }
         cli::Commands::Open { name } => {

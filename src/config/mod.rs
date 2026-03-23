@@ -21,6 +21,10 @@ pub struct ResolvedConfig {
     pub archive_prefix: String,
     pub merge_strategy: MergeStrategy,
     pub worktree_dir: PathBuf,
+    /// Whether to fetch and fast-forward main before branching
+    pub auto_fetch: bool,
+    /// Remote name to fetch from (default: "origin")
+    pub fetch_remote: String,
     pub panes: Vec<PaneConfig>,
     pub setup_scripts: Vec<ScriptConfig>,
     pub teardown_scripts: Vec<ScriptConfig>,
@@ -269,6 +273,13 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
             .and_then(|p| p.merge_strategy.clone())
             .unwrap_or_else(|| global.merge_strategy.clone()),
         worktree_dir,
+        auto_fetch: project
+            .and_then(|p| p.auto_fetch)
+            .unwrap_or(global.auto_fetch),
+        fetch_remote: project
+            .and_then(|p| p.fetch_remote.clone())
+            .or_else(|| global.fetch_remote.clone())
+            .unwrap_or_else(|| "origin".into()),
         panes,
         setup_scripts: project.map(|p| p.scripts.setup.clone()).unwrap_or_default(),
         teardown_scripts: project

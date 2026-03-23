@@ -11,6 +11,8 @@ pub struct ProjectConfig {
     pub archive_prefix: Option<String>,
     pub merge_strategy: Option<super::types::MergeStrategy>,
     pub worktree_dir: Option<String>,
+    pub auto_fetch: Option<bool>,
+    pub fetch_remote: Option<String>,
     #[serde(default)]
     pub scripts: ScriptsConfig,
     #[serde(default)]

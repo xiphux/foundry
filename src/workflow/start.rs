@@ -20,6 +20,7 @@ pub fn run(
     state_path: &Path,
     verbose: bool,
     prompt: Option<&str>,
+    fetch: bool,
 ) -> Result<()> {
     let branch = super::compute_branch_name(name, config.branch_prefix.as_deref());
     let worktree_path = config.worktree_dir.join(project_name).join(name);
@@ -42,6 +43,29 @@ pub fn run(
             &HashSet::new(),
             prompt,
         );
+    }
+
+    // Fetch and fast-forward main if requested (via --fetch flag or auto_fetch config)
+    if fetch || config.auto_fetch {
+        let remote = &config.fetch_remote;
+        let main_branch = git::detect_main_branch(source_path)?;
+
+        if verbose {
+            eprintln!("Fetching from {remote}...");
+        }
+        git::fetch(source_path, remote)
+            .with_context(|| format!("failed to fetch from remote '{remote}'"))?;
+
+        if verbose {
+            eprintln!("Fast-forwarding {main_branch} to {remote}/{main_branch}...");
+        }
+        git::ff_to_remote(source_path, remote, &main_branch).with_context(|| {
+            format!(
+                "could not fast-forward '{main_branch}' to '{remote}/{main_branch}'. \
+                 Your local {main_branch} may have diverged from the remote. \
+                 Resolve manually with `git pull` in your source repo, then retry."
+            )
+        })?;
     }
 
     if verbose {

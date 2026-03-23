@@ -40,6 +40,10 @@ pub enum Commands {
         /// File containing a prompt to pass to the AI agent
         #[arg(long, conflicts_with = "prompt")]
         prompt_file: Option<PathBuf>,
+
+        /// Fetch and fast-forward main from remote before branching
+        #[arg(long)]
+        fetch: bool,
     },
     /// Reopen workspace for an existing worktree
     Open {

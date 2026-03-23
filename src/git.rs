@@ -57,6 +57,20 @@ pub fn remove_worktree(repo_path: &Path, worktree_path: &Path, force: bool) -> R
     Ok(())
 }
 
+/// Fetch from a remote.
+pub fn fetch(repo_path: &Path, remote: &str) -> Result<()> {
+    run_git(repo_path, &["fetch", remote])?;
+    Ok(())
+}
+
+/// Fast-forward the current branch to match a remote tracking branch.
+/// Fails if the merge is not a fast-forward (e.g., local and remote have diverged).
+pub fn ff_to_remote(repo_path: &Path, remote: &str, branch: &str) -> Result<()> {
+    let remote_ref = format!("{remote}/{branch}");
+    run_git(repo_path, &["merge", "--ff-only", &remote_ref])?;
+    Ok(())
+}
+
 pub fn merge_ff_only(repo_path: &Path, branch: &str) -> Result<()> {
     run_git(repo_path, &["merge", "--ff-only", branch])?;
     Ok(())

@@ -12,6 +12,11 @@ pub struct GlobalConfig {
     pub archive_prefix: String,
     pub merge_strategy: MergeStrategy,
     pub worktree_dir: String,
+    /// Automatically fetch and fast-forward main from remote before branching
+    #[serde(default)]
+    pub auto_fetch: bool,
+    /// Remote name to fetch from (default: "origin")
+    pub fetch_remote: Option<String>,
     /// Custom prompt template for GitHub issues.
     /// Supports variables: {issue_number}, {title}, {body}
     pub issue_prompt: Option<String>,
@@ -53,6 +58,8 @@ impl Default for GlobalConfig {
             archive_prefix: "archive".into(),
             merge_strategy: MergeStrategy::default(),
             worktree_dir: "~/.foundry/worktrees".into(),
+            auto_fetch: false,
+            fetch_remote: None,
             issue_prompt: None,
             panes: default_panes(),
         }
