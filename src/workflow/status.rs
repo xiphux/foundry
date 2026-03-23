@@ -58,13 +58,38 @@ pub fn run(state: &WorkspaceState) -> Result<()> {
             "unknown".to_string()
         };
 
-        // Agent status
-        let agent_status = agent_hooks::read_status(&ws.project, &ws.name);
-        let (agent_label, agent_color) = match agent_status {
-            agent_hooks::AgentStatus::Working => ("working", "\x1b[34m"),
-            agent_hooks::AgentStatus::Idle => ("idle", "\x1b[33m"),
-            agent_hooks::AgentStatus::WaitingPermission => ("waiting for permission", "\x1b[31m"),
-            agent_hooks::AgentStatus::Unknown => ("unknown", ""),
+        // Agent status (may have multiple agents per workspace)
+        let agent_statuses = agent_hooks::read_all_statuses(&ws.project, &ws.name);
+        let (agent_label, agent_color) = if agent_statuses.is_empty() {
+            ("unknown".to_string(), "")
+        } else if agent_statuses.len() == 1 {
+            let (agent_name, status) = &agent_statuses[0];
+            let (label, color) = status_display(status);
+            (format!("{agent_name}: {label}"), color)
+        } else {
+            // Multiple agents — show each
+            let parts: Vec<String> = agent_statuses
+                .iter()
+                .map(|(agent_name, status)| {
+                    let (label, _) = status_display(status);
+                    format!("{agent_name}:{label}")
+                })
+                .collect();
+            // Use the most urgent color
+            let color = if agent_statuses
+                .iter()
+                .any(|(_, s)| matches!(s, agent_hooks::AgentStatus::WaitingPermission))
+            {
+                "\x1b[31m"
+            } else if agent_statuses
+                .iter()
+                .any(|(_, s)| matches!(s, agent_hooks::AgentStatus::Working))
+            {
+                "\x1b[34m"
+            } else {
+                "\x1b[33m"
+            };
+            (parts.join(" "), color)
         };
 
         // Time since last commit
@@ -84,6 +109,16 @@ pub fn run(state: &WorkspaceState) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Map agent status to display label and ANSI color.
+fn status_display(status: &agent_hooks::AgentStatus) -> (&'static str, &'static str) {
+    match status {
+        agent_hooks::AgentStatus::Working => ("working", "\x1b[34m"),
+        agent_hooks::AgentStatus::Idle => ("idle", "\x1b[33m"),
+        agent_hooks::AgentStatus::WaitingPermission => ("waiting", "\x1b[31m"),
+        agent_hooks::AgentStatus::Unknown => ("unknown", ""),
+    }
 }
 
 /// Get the number of commits a branch has beyond base.

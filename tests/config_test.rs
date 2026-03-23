@@ -2,14 +2,14 @@
 fn test_global_config_deserialization() {
     let toml_str = r#"
 branch_prefix = "xiphux"
-agent_command = "claude"
+agent = "claude"
 archive_prefix = "archive"
 merge_strategy = "ff-only"
 worktree_dir = "~/.foundry/worktrees"
 
 [[panes]]
 name = "agent"
-command = "{agent_command}"
+agent = "claude"
 
 [[panes]]
 name = "git"
@@ -86,7 +86,8 @@ fn test_config_merge_optional_pane_skipped() {
         panes: vec![
             foundry::config::PaneConfig {
                 name: "agent".into(),
-                command: Some("claude".into()),
+                agent: Some("claude".into()),
+                command: None,
                 split_from: None,
                 direction: None,
                 optional: false,
@@ -95,6 +96,7 @@ fn test_config_merge_optional_pane_skipped() {
             },
             foundry::config::PaneConfig {
                 name: "server".into(),
+                agent: None,
                 command: Some("npm run dev".into()),
                 split_from: Some("agent".into()),
                 direction: Some(foundry::config::SplitDirection::Right),
@@ -116,7 +118,8 @@ fn test_config_merge_optional_pane_opted_in() {
         panes: vec![
             foundry::config::PaneConfig {
                 name: "agent".into(),
-                command: Some("claude".into()),
+                agent: Some("claude".into()),
+                command: None,
                 split_from: None,
                 direction: None,
                 optional: false,
@@ -125,6 +128,7 @@ fn test_config_merge_optional_pane_opted_in() {
             },
             foundry::config::PaneConfig {
                 name: "server".into(),
+                agent: None,
                 command: Some("npm run dev".into()),
                 split_from: Some("agent".into()),
                 direction: Some(foundry::config::SplitDirection::Right),
@@ -139,6 +143,7 @@ fn test_config_merge_optional_pane_opted_in() {
         panes: std::collections::HashMap::from([(
             "server".into(),
             foundry::config::PaneOverride {
+                agent: None,
                 command: Some("npm run serve".into()),
                 env: Default::default(),
                 deferred: false,
@@ -153,21 +158,63 @@ fn test_config_merge_optional_pane_opted_in() {
 
 #[test]
 fn test_build_agent_command_claude_with_prompt() {
-    let config = foundry::config::merge_configs(&foundry::config::GlobalConfig::default(), None);
-    let cmd = foundry::config::build_agent_command(&config, Some("fix the auth bug"));
+    let cmd = foundry::config::build_agent_command("claude", None, Some("fix the auth bug"));
     assert_eq!(cmd, "claude 'fix the auth bug'");
 }
 
 #[test]
 fn test_build_agent_command_claude_without_prompt() {
-    let config = foundry::config::merge_configs(&foundry::config::GlobalConfig::default(), None);
-    let cmd = foundry::config::build_agent_command(&config, None);
+    let cmd = foundry::config::build_agent_command("claude", None, None);
     assert_eq!(cmd, "claude");
 }
 
 #[test]
 fn test_build_agent_command_prompt_with_quotes() {
-    let config = foundry::config::merge_configs(&foundry::config::GlobalConfig::default(), None);
-    let cmd = foundry::config::build_agent_command(&config, Some("fix the user's auth bug"));
+    let cmd = foundry::config::build_agent_command("claude", None, Some("fix the user's auth bug"));
     assert_eq!(cmd, "claude 'fix the user'\\''s auth bug'");
+}
+
+#[test]
+fn test_default_layout_gets_global_agent() {
+    let global = foundry::config::GlobalConfig {
+        agent: "codex".into(),
+        ..Default::default()
+    };
+    let resolved = foundry::config::merge_configs(&global, None);
+    // The default layout's first pane should get the global agent
+    assert_eq!(resolved.panes[0].agent.as_deref(), Some("codex"));
+}
+
+#[test]
+fn test_custom_panes_with_agent_override_global() {
+    let global = foundry::config::GlobalConfig {
+        agent: "claude".into(),
+        panes: vec![
+            foundry::config::PaneConfig {
+                name: "dev".into(),
+                agent: Some("codex".into()),
+                command: None,
+                split_from: None,
+                direction: None,
+                optional: false,
+                env: Default::default(),
+                deferred: false,
+            },
+            foundry::config::PaneConfig {
+                name: "shell".into(),
+                agent: None,
+                command: None,
+                split_from: Some("dev".into()),
+                direction: Some(foundry::config::SplitDirection::Right),
+                optional: false,
+                env: Default::default(),
+                deferred: false,
+            },
+        ],
+        ..Default::default()
+    };
+    let resolved = foundry::config::merge_configs(&global, None);
+    // Pane has explicit agent, global agent should NOT be applied to any pane
+    assert_eq!(resolved.panes[0].agent.as_deref(), Some("codex"));
+    assert_eq!(resolved.panes[1].agent, None);
 }

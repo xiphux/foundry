@@ -29,24 +29,37 @@ pub fn open_workspace(
     let source_path = workspace.map(|w| w.source_path.clone()).unwrap_or_default();
     let branch = workspace.map(|w| w.branch.clone()).unwrap_or_default();
 
-    // Build agent command with prompt if provided
-    let agent_command = config::build_agent_command(config, prompt);
-
     let template_vars = TemplateVars {
         source: source_path,
         worktree: worktree_path.to_string_lossy().into(),
         branch,
         name: name.into(),
         project: project_name.into(),
-        agent_command,
     };
 
-    // Build PaneSpecs from the resolved config, resolving template variables
+    // Build PaneSpecs from the resolved config, resolving template variables.
+    // Only the first agent pane receives the prompt — multiple agents acting on
+    // the same prompt simultaneously would interfere with each other.
     let mut pane_specs = Vec::new();
+    let mut prompt_assigned = false;
     for pane in &config.panes {
         let resolved_command = if skip_command_panes.contains(&pane.name) {
             // Command will be sent separately (e.g., after deferred setup scripts)
             None
+        } else if let Some(ref agent) = pane.agent {
+            // Pane has an agent — auto-generate the command.
+            // Only the first agent pane gets the prompt.
+            let pane_prompt = if !prompt_assigned {
+                prompt_assigned = true;
+                prompt
+            } else {
+                None
+            };
+            Some(config::build_agent_command(
+                agent,
+                config.custom_agent_command.as_deref(),
+                pane_prompt,
+            ))
         } else if let Some(ref cmd) = pane.command {
             let resolved = config::resolve_template(cmd, &template_vars)?;
             if resolved.is_empty() {

@@ -6,7 +6,6 @@ fn test_resolve_template_variables() {
         branch: "xiphux/feat".into(),
         name: "feat".into(),
         project: "myapp".into(),
-        agent_command: "claude".into(),
     };
     let result =
         foundry::config::resolve_template("cp {source}/.env {worktree}/.env", &vars).unwrap();
@@ -24,7 +23,6 @@ fn test_resolve_unknown_variable_errors() {
         branch: "".into(),
         name: "".into(),
         project: "".into(),
-        agent_command: "".into(),
     };
     let result = foundry::config::resolve_template("echo {unknown}", &vars);
     assert!(result.is_err());
@@ -38,7 +36,6 @@ fn test_resolve_no_variables() {
         branch: "".into(),
         name: "".into(),
         project: "".into(),
-        agent_command: "".into(),
     };
     let result = foundry::config::resolve_template("echo hello", &vars).unwrap();
     assert_eq!(result, "echo hello");

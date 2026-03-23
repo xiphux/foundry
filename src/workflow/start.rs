@@ -73,21 +73,33 @@ pub fn run(
     });
     state.save_to(state_path)?;
 
-    // Set up agent-specific workspace configuration (hooks, permissions, etc.)
-    if let Err(e) = agent_hooks::setup_agent_hooks(
-        &worktree_path,
-        source_path,
-        project_name,
-        name,
-        &config.agent,
-    ) {
-        if verbose {
-            eprintln!("Warning: failed to set up agent hooks: {e}");
+    // Validate that no agent type appears in more than one pane
+    let mut seen_agents = std::collections::HashMap::new();
+    for pane in &config.panes {
+        if let Some(ref agent) = pane.agent {
+            if let Some(existing_pane) = seen_agents.get(agent) {
+                anyhow::bail!(
+                    "agent '{agent}' is configured in both pane '{existing_pane}' and pane '{}'. \
+                     Each agent type can only appear in one pane per workspace.",
+                    pane.name
+                );
+            }
+            seen_agents.insert(agent.clone(), pane.name.clone());
         }
     }
 
-    // Build the agent command with prompt (if provided)
-    let agent_command = config::build_agent_command(config, prompt);
+    // Set up agent-specific workspace configuration for each unique agent in the panes
+    let agents: Vec<String> = seen_agents.into_keys().collect();
+
+    for agent in &agents {
+        if let Err(e) =
+            agent_hooks::setup_agent_hooks(&worktree_path, source_path, project_name, name, agent)
+        {
+            if verbose {
+                eprintln!("Warning: failed to set up agent hooks for {agent}: {e}");
+            }
+        }
+    }
 
     let template_vars = TemplateVars {
         source: source_path.to_string_lossy().into(),
@@ -95,7 +107,6 @@ pub fn run(
         branch: branch.clone(),
         name: name.into(),
         project: project_name.into(),
-        agent_command,
     };
 
     // Split scripts into immediate (blocking) and deferred (run in terminal pane)
@@ -136,11 +147,12 @@ pub fn run(
         }
     }
 
-    // Collect names of deferred panes — their commands will be sent separately
+    // Collect names of deferred panes — their commands will be sent separately.
+    // Only command-based panes can be deferred, not agent panes.
     let skip_command_panes: HashSet<String> = config
         .panes
         .iter()
-        .filter(|p| p.deferred)
+        .filter(|p| p.deferred && p.agent.is_none())
         .map(|p| p.name.clone())
         .collect();
 
@@ -188,7 +200,8 @@ pub fn run(
 
         if let Some((pane_index, pane)) = deferred_pane {
             // Chain: deferred setup scripts && deferred pane command
-            // All run in the deferred pane (e.g., the server pane)
+            // All run in the deferred pane (e.g., the server pane).
+            // Agent panes cannot be deferred — only explicit commands support deferral.
             let mut chain = deferred_setup_commands;
             if let Some(ref cmd) = pane.command {
                 let resolved = config::resolve_template(cmd, &template_vars)?;
@@ -206,7 +219,7 @@ pub fn run(
             let shell_pane_index = config
                 .panes
                 .iter()
-                .position(|p| p.command.is_none())
+                .position(|p| p.command.is_none() && p.agent.is_none())
                 .unwrap_or(0);
 
             let chained = deferred_setup_commands.join(" && ");

@@ -93,11 +93,9 @@ Foundry uses two levels of TOML configuration:
 # "my-feature" becomes "xiphux/my-feature"
 branch_prefix = "xiphux"
 
-# AI agent: "claude" (default), "codex", "every-code", or "custom"
+# Default AI agent: "claude" (default), "codex", "every-code", or "custom"
+# Used for the default pane layout when no panes have explicit agent fields
 agent = "claude"
-
-# Custom agent command (only used when agent = "custom")
-# agent_command = "my-custom-agent --some-flag"
 
 # Prefix for archived branches (default: "archive")
 archive_prefix = "archive"
@@ -130,7 +128,7 @@ You can define your own layout in the global config. The first pane becomes the 
 
 [[panes]]
 name = "agent"
-command = "{agent_command}"
+agent = "claude"
 # Per-pane environment variables (optional)
 [panes.env]
 SOME_VAR = "value"
@@ -154,6 +152,27 @@ direction = "right"
 optional = true
 ```
 
+#### Multi-Agent Layout
+
+You can run multiple different agents in a single workspace by setting `agent` on different panes. Each agent type can only appear once per workspace.
+
+```toml
+[[panes]]
+name = "developer"
+agent = "claude"
+
+[[panes]]
+name = "reviewer"
+agent = "codex"
+split_from = "developer"
+direction = "right"
+
+[[panes]]
+name = "shell"
+split_from = "developer"
+direction = "down"
+```
+
 This produces the following layout (with `server` pane only if the project opts in):
 
 ```
@@ -170,13 +189,16 @@ This produces the following layout (with `server` pane only if the project opts 
 | Field | Required | Description |
 |---|---|---|
 | `name` | Yes | Unique name for this pane |
-| `command` | No | Command to run (empty = shell prompt) |
+| `agent` | No | Agent to run in this pane (auto-generates command with permissions and prompt passthrough) |
+| `command` | No | Command to run (empty = shell prompt, ignored if `agent` is set) |
 | `split_from` | No* | Name of the pane to split from |
 | `direction` | No* | Split direction: `"right"` or `"down"` |
 | `optional` | No | If `true`, only included when the project opts in (default: `false`) |
 | `[panes.env]` | No | Environment variables to set for this pane |
 
 \* Required for all panes except the first (which becomes the tab).
+
+**Important:** Always use `agent` instead of `command` for AI coding agents. Using `agent = "claude"` ensures foundry sets up permissions, status tracking, and prompt passthrough. If you use `command = "claude"` directly, foundry will warn you to switch to the `agent` field.
 
 ### Project Config
 
@@ -208,8 +230,8 @@ command = "npm run dev"
 Project config can also override global scalar values:
 
 ```toml
-# Override the agent command for this project
-agent_command = "codex"
+# Override the default agent for this project
+agent = "codex"
 
 # Override the merge strategy for this project
 merge_strategy = "merge"
@@ -232,7 +254,6 @@ The following variables can be used in `command` and `working_dir` fields in scr
 | `{branch}` | Full branch name (with prefix if configured) |
 | `{name}` | Short name (without prefix) |
 | `{project}` | Project name |
-| `{agent_command}` | The configured agent command |
 
 ### Config Merging Rules
 

@@ -23,18 +23,18 @@ impl AgentStatus {
     }
 }
 
-/// Get the path to the status file for a workspace.
-pub fn status_file_path(project: &str, name: &str) -> Result<PathBuf> {
+/// Get the path to the status file for a specific agent in a workspace.
+pub fn status_file_path(project: &str, name: &str, agent: &str) -> Result<PathBuf> {
     let foundry_dir = config::foundry_dir()?;
     Ok(foundry_dir
         .join("status")
         .join(project)
-        .join(format!("{name}.status")))
+        .join(format!("{name}-{agent}.status")))
 }
 
 /// Read the current agent status from the status file.
-pub fn read_status(project: &str, name: &str) -> AgentStatus {
-    let path = match status_file_path(project, name) {
+pub fn read_status(project: &str, name: &str, agent: &str) -> AgentStatus {
+    let path = match status_file_path(project, name, agent) {
         Ok(p) => p,
         Err(_) => return AgentStatus::Unknown,
     };
@@ -50,10 +50,54 @@ pub fn read_status(project: &str, name: &str) -> AgentStatus {
     }
 }
 
-/// Remove the status file for a workspace (cleanup on finish/discard).
+/// Read statuses for all agents in a workspace. Returns a list of (agent_name, status) pairs.
+pub fn read_all_statuses(project: &str, name: &str) -> Vec<(String, AgentStatus)> {
+    let foundry_dir = match config::foundry_dir() {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+
+    let status_dir = foundry_dir.join("status").join(project);
+    let prefix = format!("{name}-");
+    let suffix = ".status";
+
+    let entries = match std::fs::read_dir(&status_dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut statuses = Vec::new();
+    for entry in entries.flatten() {
+        let filename = entry.file_name().to_string_lossy().to_string();
+        if filename.starts_with(&prefix) && filename.ends_with(suffix) {
+            let agent = &filename[prefix.len()..filename.len() - suffix.len()];
+            if !agent.is_empty() {
+                let status = read_status(project, name, agent);
+                statuses.push((agent.to_string(), status));
+            }
+        }
+    }
+    statuses.sort_by(|a, b| a.0.cmp(&b.0));
+    statuses
+}
+
+/// Remove all status files for a workspace (cleanup on finish/discard).
 pub fn remove_status(project: &str, name: &str) {
-    if let Ok(path) = status_file_path(project, name) {
-        let _ = std::fs::remove_file(&path);
+    let foundry_dir = match config::foundry_dir() {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+
+    let status_dir = foundry_dir.join("status").join(project);
+    let prefix = format!("{name}-");
+
+    if let Ok(entries) = std::fs::read_dir(&status_dir) {
+        for entry in entries.flatten() {
+            let filename = entry.file_name().to_string_lossy().to_string();
+            if filename.starts_with(&prefix) && filename.ends_with(".status") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
     }
 }
 
@@ -75,49 +119,48 @@ mod tests {
 
     #[test]
     fn status_file_path_construction() {
-        let path = status_file_path("myproject", "my-workspace").unwrap();
-        assert!(path.ends_with("status/myproject/my-workspace.status"));
+        let path = status_file_path("myproject", "my-workspace", "claude").unwrap();
+        assert!(path.ends_with("status/myproject/my-workspace-claude.status"));
         assert!(path.to_string_lossy().contains(".foundry"));
     }
 
     #[test]
     fn read_status_working() {
-        let dir = TempDir::new().unwrap();
-        let status_dir = dir.path().join("status").join("proj");
-        std::fs::create_dir_all(&status_dir).unwrap();
-        std::fs::write(status_dir.join("ws.status"), "working").unwrap();
-
-        // read_status uses the real foundry_dir, so we test via a file directly
-        // Instead, test round-trip through the real path
-        let path = status_file_path("testproj_read", "testws").unwrap();
+        let path = status_file_path("testproj_read2", "testws", "claude").unwrap();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(&path, "working").unwrap();
-        assert_eq!(read_status("testproj_read", "testws"), AgentStatus::Working);
+        assert_eq!(
+            read_status("testproj_read2", "testws", "claude"),
+            AgentStatus::Working
+        );
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn read_status_idle() {
-        let path = status_file_path("testproj_idle", "testws").unwrap();
+        let path = status_file_path("testproj_idle2", "testws", "claude").unwrap();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(&path, "idle").unwrap();
-        assert_eq!(read_status("testproj_idle", "testws"), AgentStatus::Idle);
+        assert_eq!(
+            read_status("testproj_idle2", "testws", "claude"),
+            AgentStatus::Idle
+        );
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn read_status_waiting_permission() {
-        let path = status_file_path("testproj_wait", "testws").unwrap();
+        let path = status_file_path("testproj_wait2", "testws", "claude").unwrap();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(&path, "waiting_permission").unwrap();
         assert_eq!(
-            read_status("testproj_wait", "testws"),
+            read_status("testproj_wait2", "testws", "claude"),
             AgentStatus::WaitingPermission
         );
         let _ = std::fs::remove_file(&path);
@@ -126,20 +169,20 @@ mod tests {
     #[test]
     fn read_status_missing_file() {
         assert_eq!(
-            read_status("nonexistent_proj_xyz", "nonexistent_ws"),
+            read_status("nonexistent_proj_xyz2", "nonexistent_ws", "claude"),
             AgentStatus::Unknown
         );
     }
 
     #[test]
     fn read_status_invalid_content() {
-        let path = status_file_path("testproj_invalid", "testws").unwrap();
+        let path = status_file_path("testproj_invalid2", "testws", "claude").unwrap();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(&path, "bogus_value").unwrap();
         assert_eq!(
-            read_status("testproj_invalid", "testws"),
+            read_status("testproj_invalid2", "testws", "claude"),
             AgentStatus::Unknown
         );
         let _ = std::fs::remove_file(&path);
@@ -147,20 +190,20 @@ mod tests {
 
     #[test]
     fn remove_status_existing_file() {
-        let path = status_file_path("testproj_rm", "testws").unwrap();
+        let path = status_file_path("testproj_rm2", "testws", "claude").unwrap();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(&path, "idle").unwrap();
         assert!(path.exists());
-        remove_status("testproj_rm", "testws");
+        remove_status("testproj_rm2", "testws");
         assert!(!path.exists());
     }
 
     #[test]
     fn remove_status_nonexistent_file() {
         // Should not panic
-        remove_status("nonexistent_proj_rm_xyz", "nonexistent_ws");
+        remove_status("nonexistent_proj_rm_xyz2", "nonexistent_ws");
     }
 
     #[test]
@@ -497,7 +540,7 @@ pub fn setup_agent_hooks(
 /// Claude-specific setup: create .claude/settings.local.json with status
 /// tracking hooks and worktree-scoped permissions.
 fn setup_claude(worktree_path: &Path, source_path: &Path, project: &str, name: &str) -> Result<()> {
-    let status_path = status_file_path(project, name)?;
+    let status_path = status_file_path(project, name, "claude")?;
     let status_path_str = status_path.to_string_lossy();
 
     // Ensure the status directory exists

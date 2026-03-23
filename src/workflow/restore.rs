@@ -157,7 +157,6 @@ pub fn run(
         branch: branch.into(),
         name: name.clone(),
         project: project_name.into(),
-        agent_command: config.agent_command.clone(),
     };
 
     for script in &config.setup_scripts {

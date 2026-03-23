@@ -19,6 +19,10 @@ pub enum SplitDirection {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PaneConfig {
     pub name: String,
+    /// Agent to run in this pane (e.g., "claude", "codex", "every-code").
+    /// If set, the command is auto-generated from the agent identifier.
+    /// Mutually exclusive with `command`.
+    pub agent: Option<String>,
     pub command: Option<String>,
     pub split_from: Option<String>,
     pub direction: Option<SplitDirection>,
@@ -54,6 +58,7 @@ pub struct ScriptsConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PaneOverride {
+    pub agent: Option<String>,
     pub command: Option<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,

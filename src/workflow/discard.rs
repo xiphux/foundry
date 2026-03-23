@@ -55,7 +55,6 @@ pub fn run(
         branch: branch.clone(),
         name: name.into(),
         project: project_name.into(),
-        agent_command: config.agent_command.clone(),
     };
 
     for script in &config.teardown_scripts {

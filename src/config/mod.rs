@@ -13,10 +13,11 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     pub branch_prefix: Option<String>,
-    /// The known agent identifier ("claude", "codex", "every-code", "custom")
+    /// The default agent identifier ("claude", "codex", "every-code", "custom").
+    /// Used for the default pane layout when no panes have explicit agent fields.
     pub agent: String,
-    /// The base agent command (derived from agent, or custom agent_command)
-    pub agent_command: String,
+    /// Custom agent command (only used when agent = "custom")
+    pub custom_agent_command: Option<String>,
     pub archive_prefix: String,
     pub merge_strategy: MergeStrategy,
     pub worktree_dir: PathBuf,
@@ -27,36 +28,61 @@ pub struct ResolvedConfig {
     pub issue_prompt: Option<String>,
 }
 
-/// Build the full agent command string, optionally including a prompt.
-/// For known agents (claude, codex), the prompt is passed as a positional argument.
-/// For custom agents, the prompt is not appended (the user's custom command is used as-is).
-pub fn build_agent_command(config: &ResolvedConfig, prompt: Option<&str>) -> String {
-    let base = &config.agent_command;
+/// Build the full agent command string for a given agent identifier,
+/// optionally including a prompt. For known agents (claude, codex, every-code),
+/// the prompt is passed as a positional argument.
+pub fn build_agent_command(
+    agent: &str,
+    custom_command: Option<&str>,
+    prompt: Option<&str>,
+) -> String {
+    let base = resolve_agent_command(agent, custom_command);
 
     match prompt {
         Some(p) if !p.is_empty() => {
-            // Shell-escape the prompt for safe embedding in a command
             let escaped = p.replace('\'', "'\\''");
-            match config.agent.as_str() {
+            match agent {
                 "claude" | "codex" | "every-code" => format!("{base} '{escaped}'"),
-                _ => base.clone(), // Custom agents: don't append prompt
+                _ => base,
             }
         }
-        _ => base.clone(),
+        _ => base,
+    }
+}
+
+/// Known agent executable names. Used to warn when users put agent commands
+/// in the `command` field instead of using the `agent` field.
+const KNOWN_AGENT_EXECUTABLES: &[&str] = &["claude", "codex", "coder"];
+
+/// Check if a pane command looks like it's invoking a known agent, and warn
+/// that the `agent` field should be used instead.
+pub fn warn_agent_in_command(panes: &[PaneConfig]) {
+    for pane in panes {
+        if pane.agent.is_some() {
+            continue;
+        }
+        if let Some(ref cmd) = pane.command {
+            let first_word = cmd.split_whitespace().next().unwrap_or("");
+            if KNOWN_AGENT_EXECUTABLES.contains(&first_word) {
+                eprintln!(
+                    "Warning: pane '{}' uses command '{cmd}' which looks like a known agent. \
+                     Use `agent = \"{first_word}\"` instead of `command` so foundry can set up \
+                     permissions, status tracking, and prompt passthrough.",
+                    pane.name
+                );
+            }
+        }
     }
 }
 
 /// Resolve the base agent command from the agent identifier.
-/// For codex, includes CLI flags for autonomous operation in worktrees
-/// (sandbox scoped to workspace, no approval prompts).
-fn resolve_agent_command(agent: &str, custom_command: Option<&str>) -> String {
+/// For codex/every-code, includes CLI flags for autonomous operation in worktrees.
+pub fn resolve_agent_command(agent: &str, custom_command: Option<&str>) -> String {
     match agent {
         "claude" => "claude".to_string(),
         "codex" => "codex --full-auto".to_string(),
         "every-code" => "coder --full-auto".to_string(),
         "custom" => custom_command.unwrap_or("claude").to_string(),
-        // If someone puts a command directly in agent (backwards compat),
-        // use it as-is
         other => other.to_string(),
     }
 }
@@ -69,18 +95,10 @@ pub struct TemplateVars {
     pub branch: String,
     pub name: String,
     pub project: String,
-    pub agent_command: String,
 }
 
 /// The set of known template variable names.
-const KNOWN_VARS: &[&str] = &[
-    "source",
-    "worktree",
-    "branch",
-    "name",
-    "project",
-    "agent_command",
-];
+const KNOWN_VARS: &[&str] = &["source", "worktree", "branch", "name", "project"];
 
 /// Validate that a template string only uses known variable names.
 /// Called at config parse time. Does NOT resolve values.
@@ -111,7 +129,6 @@ pub fn resolve_template(template: &str, vars: &TemplateVars) -> Result<String> {
                 "branch" => &vars.branch,
                 "name" => &vars.name,
                 "project" => &vars.project,
-                "agent_command" => &vars.agent_command,
                 _ => anyhow::bail!("unknown template variable: {{{var_name}}}"),
             };
             result.push_str(value);
@@ -191,7 +208,15 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
 
     let worktree_dir = expand_tilde(worktree_dir_str);
 
-    let panes = global
+    let agent = project
+        .and_then(|p| p.agent.clone())
+        .unwrap_or_else(|| global.agent.clone());
+
+    let custom_agent_command = project
+        .and_then(|p| p.agent_command.clone())
+        .or_else(|| global.agent_command.clone());
+
+    let mut panes: Vec<PaneConfig> = global
         .panes
         .iter()
         .filter_map(|pane| {
@@ -203,6 +228,9 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
 
             let mut merged = pane.clone();
             if let Some(ov) = project_override {
+                if let Some(ref a) = ov.agent {
+                    merged.agent = Some(a.clone());
+                }
                 if let Some(ref cmd) = ov.command {
                     merged.command = Some(cmd.clone());
                 }
@@ -217,22 +245,23 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
         })
         .collect();
 
-    let agent = project
-        .and_then(|p| p.agent.clone())
-        .unwrap_or_else(|| global.agent.clone());
+    // If no pane has an explicit agent, apply the global agent to the first pane
+    // that has no command (the default "agent" pane in the default layout).
+    let has_any_agent_pane = panes.iter().any(|p| p.agent.is_some());
+    if !has_any_agent_pane {
+        if let Some(first) = panes.first_mut() {
+            if first.command.is_none() {
+                first.agent = Some(agent.clone());
+            }
+        }
+    }
 
-    let custom_command = project
-        .and_then(|p| p.agent_command.clone())
-        .or_else(|| global.agent_command.clone());
-
-    let agent_command = resolve_agent_command(&agent, custom_command.as_deref());
-
-    ResolvedConfig {
+    let resolved = ResolvedConfig {
         branch_prefix: project
             .and_then(|p| p.branch_prefix.clone())
             .or_else(|| global.branch_prefix.clone()),
         agent,
-        agent_command,
+        custom_agent_command,
         archive_prefix: project
             .and_then(|p| p.archive_prefix.clone())
             .unwrap_or_else(|| global.archive_prefix.clone()),
@@ -246,7 +275,11 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
             .map(|p| p.scripts.teardown.clone())
             .unwrap_or_default(),
         issue_prompt: global.issue_prompt.clone(),
-    }
+    };
+
+    warn_agent_in_command(&resolved.panes);
+
+    resolved
 }
 
 /// Expand ~ to home directory.
@@ -367,5 +400,49 @@ mod tests {
         // An unclosed brace around a known variable name still succeeds
         // because the parser treats the remaining text as the var name.
         assert!(validate_template("cd {worktree").is_ok());
+    }
+
+    #[test]
+    fn known_agent_executables_detected() {
+        // Should match: first word is a known agent executable
+        assert!(KNOWN_AGENT_EXECUTABLES.contains(&"claude"));
+        assert!(KNOWN_AGENT_EXECUTABLES.contains(&"codex"));
+        assert!(KNOWN_AGENT_EXECUTABLES.contains(&"coder"));
+        // Should not match
+        assert!(!KNOWN_AGENT_EXECUTABLES.contains(&"npm"));
+        assert!(!KNOWN_AGENT_EXECUTABLES.contains(&"claude-helper"));
+    }
+
+    #[test]
+    fn warn_agent_in_command_detects_agent_commands() {
+        // This test verifies the detection logic (warning goes to stderr,
+        // which we can't easily capture, but we verify the function doesn't panic)
+        let panes = vec![PaneConfig {
+            name: "test".into(),
+            agent: None,
+            command: Some("claude --dangerously-skip-permissions".into()),
+            split_from: None,
+            direction: None,
+            optional: false,
+            env: Default::default(),
+            deferred: false,
+        }];
+        warn_agent_in_command(&panes); // should warn but not panic
+    }
+
+    #[test]
+    fn warn_agent_in_command_skips_agent_panes() {
+        // Panes with agent set should not trigger warnings even if command is also set
+        let panes = vec![PaneConfig {
+            name: "test".into(),
+            agent: Some("claude".into()),
+            command: Some("claude".into()),
+            split_from: None,
+            direction: None,
+            optional: false,
+            env: Default::default(),
+            deferred: false,
+        }];
+        warn_agent_in_command(&panes); // should not warn
     }
 }
