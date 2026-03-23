@@ -5,6 +5,7 @@ use std::process::Command;
 
 use crate::config::{self, ResolvedConfig, TemplateVars};
 use crate::git;
+use crate::history;
 use crate::state::{Workspace, WorkspaceState};
 
 /// Derive a short worktree name from an archived branch name.
@@ -137,6 +138,14 @@ pub fn run(
     }
     git::create_worktree(source_path, &worktree_path, branch)
         .with_context(|| "failed to create worktree")?;
+
+    // Record history event
+    let _ = history::record(&history::HistoryEvent::restored(
+        project_name,
+        &name,
+        branch,
+        branch, // from_branch is the archived branch name
+    ));
 
     // Record state before setup scripts
     state.add(Workspace {

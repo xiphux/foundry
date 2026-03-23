@@ -7,6 +7,7 @@ use std::process::Command;
 use crate::agent_hooks;
 use crate::config::{self, ResolvedConfig, TemplateVars};
 use crate::git;
+use crate::history;
 use crate::state::{Workspace, WorkspaceState};
 use crate::terminal;
 
@@ -21,6 +22,7 @@ pub fn run(
     verbose: bool,
     prompt: Option<&str>,
     fetch: bool,
+    issue_ref: Option<&str>,
 ) -> Result<()> {
     let branch = super::compute_branch_name(name, config.branch_prefix.as_deref());
     let worktree_path = config.worktree_dir.join(project_name).join(name);
@@ -78,6 +80,14 @@ pub fn run(
     }
     git::create_branch(source_path, &branch)
         .with_context(|| format!("failed to create branch '{branch}'"))?;
+
+    // Record history event
+    let _ = history::record(&history::HistoryEvent::started(
+        project_name,
+        name,
+        &branch,
+        issue_ref,
+    ));
 
     if let Some(parent) = worktree_path.parent() {
         std::fs::create_dir_all(parent)

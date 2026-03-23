@@ -45,16 +45,20 @@ foundry discard
 | Command | Description |
 |---|---|
 | `foundry start <name>` | Create branch, worktree, run setup, open workspace |
+| `foundry start --issue <number>` | Start from a GitHub issue (auto-generates name and prompt) |
 | `foundry start <name> --prompt "..."` | Start with a prompt passed to the AI agent |
-| `foundry start <name> --prompt-file <path>` | Start with a prompt loaded from a file |
-| `foundry open [name]` | Reopen workspace (lists active worktrees if no name) |
+| `foundry start <name> --fetch` | Fetch and fast-forward main before branching |
+| `foundry open [name]` | Reopen workspace (resumes agent conversation if available) |
+| `foundry open --all` | Reopen all active workspaces for the project |
 | `foundry finish [name]` | Merge to main/master, teardown, clean up |
 | `foundry discard [name]` | Teardown and clean up without merging |
+| `foundry discard [name] --force` | Discard even if the branch has unmerged commits |
 | `foundry switch [name]` | Switch to a workspace's terminal tab |
 | `foundry restore [branch]` | Restore workspace from an archived branch |
 | `foundry status` | Show status dashboard of all workspaces |
 | `foundry diff [name]` | Show changes in a workspace vs main |
 | `foundry diff [name] --stat` | Show file change summary vs main |
+| `foundry history` | Show workspace activity history |
 | `foundry list` | List all active workspaces across all projects |
 | `foundry projects list` | List registered projects |
 | `foundry projects add <name> <path>` | Register a project |
@@ -68,6 +72,7 @@ foundry discard
 | `--project <name>` | Specify project explicitly (otherwise inferred from cwd) |
 | `--verbose` | Show detailed output for each step |
 | `--yes` | Skip confirmation prompts |
+| `--version` | Show version |
 
 ### Command Details
 
@@ -76,6 +81,12 @@ foundry discard
 **`foundry finish [name]`** and **`foundry discard [name]`** can infer the workspace name from your current directory if you're inside a worktree. When finishing, the merge uses the configured strategy (fast-forward only by default). Branches with commits are archived (e.g., `archive/my-feature-20260321`); branches with no commits are simply deleted.
 
 **`foundry restore [branch]`** accepts a full branch name (`archive/my-feature-20260321`) or just the branch name without the archive prefix. Run with no arguments to see available archived branches.
+
+**`foundry open`** resumes the agent's previous conversation (e.g., `claude --continue`) when reopening a workspace that has conversation history. If a new `--prompt` is provided, it starts a fresh conversation instead. `--all` reopens all active workspaces for the project, skipping any that are already open.
+
+**`foundry discard`** requires `--force` (or `-f`) if the branch has unmerged commits, similar to `git branch -D`. Workspaces with no commits can be discarded freely.
+
+**`foundry history`** shows recent workspace lifecycle events (started, finished, discarded, restored) with timestamps and metadata. Use `--limit` to control how many events are shown (default: 20).
 
 ## Configuration
 
@@ -96,6 +107,12 @@ branch_prefix = "xiphux"
 # Default AI agent: "claude" (default), "codex", "every-code", or "custom"
 # Used for the default pane layout when no panes have explicit agent fields
 agent = "claude"
+
+# Automatically fetch and fast-forward main before branching (default: false)
+# auto_fetch = true
+
+# Remote to fetch from (default: "origin")
+# fetch_remote = "upstream"
 
 # Prefix for archived branches (default: "archive")
 archive_prefix = "archive"

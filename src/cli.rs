@@ -91,6 +91,12 @@ pub enum Commands {
     /// Manage project registry
     #[command(subcommand)]
     Projects(ProjectsCommands),
+    /// Show workspace activity history
+    History {
+        /// Number of recent events to show (default: 20)
+        #[arg(long, default_value = "20")]
+        limit: usize,
+    },
     /// List all active workspaces across all projects
     List,
     /// Show status dashboard of all active workspaces

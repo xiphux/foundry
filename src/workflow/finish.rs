@@ -5,6 +5,7 @@ use std::process::Command;
 use crate::agent_hooks;
 use crate::config::{self, MergeStrategy, ResolvedConfig, TemplateVars};
 use crate::git;
+use crate::history;
 use crate::state::WorkspaceState;
 use crate::terminal;
 
@@ -94,6 +95,13 @@ pub fn run(
 
     // Check for commits BEFORE merging (after merge, branch matches main)
     let has_commits = git::branch_has_commits(source_path, &branch, &main_branch).unwrap_or(true);
+    let commit_count = if has_commits {
+        git::log_commits(source_path, &main_branch, &branch)
+            .map(|log| log.lines().filter(|l| !l.is_empty()).count() as u64)
+            .unwrap_or(0)
+    } else {
+        0
+    };
 
     if verbose {
         eprintln!("Merging '{branch}' into '{main_branch}'...");
@@ -136,6 +144,18 @@ pub fn run(
         git::delete_branch(source_path, &branch)?;
         eprintln!("Finished workspace '{name}'. Branch '{branch}' deleted (no commits).");
     }
+
+    let strategy_str = match config.merge_strategy {
+        MergeStrategy::FfOnly => "ff-only",
+        MergeStrategy::Merge => "merge",
+    };
+    let _ = history::record(&history::HistoryEvent::finished(
+        project_name,
+        name,
+        &branch,
+        commit_count,
+        strategy_str,
+    ));
 
     state.remove(project_name, name);
     state.save_to(state_path)?;

@@ -75,6 +75,7 @@ fn main() -> Result<()> {
                 cli.verbose,
                 prompt_text.as_deref(),
                 fetch,
+                issue.as_deref(),
             )?;
         }
         cli::Commands::Open { name, all } => {
@@ -391,6 +392,9 @@ fn main() -> Result<()> {
                 println!("Project '{name}' removed.");
             }
         },
+        cli::Commands::History { limit } => {
+            foundry::history::display(limit)?;
+        }
         cli::Commands::List => {
             let mut state = WorkspaceState::load_from(&state_path)?;
             state.prune_stale();
