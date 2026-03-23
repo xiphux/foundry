@@ -101,6 +101,51 @@ pub fn remove_status(project: &str, name: &str) {
     }
 }
 
+/// Compute the Claude project directory path for a worktree.
+/// Claude stores conversations at ~/.claude/projects/<mangled-path>/
+/// where the path has slashes replaced with dashes.
+pub fn claude_project_dir(worktree_path: &Path) -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let abs_path = if worktree_path.is_absolute() {
+        worktree_path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(worktree_path)
+    };
+    let mangled = abs_path.to_string_lossy().replace(['/', '.'], "-");
+    Some(home.join(".claude").join("projects").join(mangled))
+}
+
+/// Check if a Claude conversation exists for a worktree (has .jsonl files).
+pub fn has_claude_conversation(worktree_path: &Path) -> bool {
+    let dir = match claude_project_dir(worktree_path) {
+        Some(d) => d,
+        None => return false,
+    };
+
+    if !dir.exists() {
+        return false;
+    }
+
+    std::fs::read_dir(&dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.path().extension().is_some_and(|ext| ext == "jsonl"))
+        })
+        .unwrap_or(false)
+}
+
+/// Clear the Claude conversation directory for a worktree.
+/// Used when starting a new workspace to prevent resuming stale conversations
+/// from a previous workspace with the same name.
+pub fn clear_claude_conversations(worktree_path: &Path) {
+    if let Some(dir) = claude_project_dir(worktree_path) {
+        if dir.exists() {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,6 +437,50 @@ mod tests {
 
         let settings_path = worktree.path().join(".claude").join("settings.local.json");
         assert!(!settings_path.exists());
+    }
+
+    #[test]
+    fn claude_project_dir_mangles_path() {
+        let path = std::path::PathBuf::from("/Users/test/.foundry/worktrees/myapp/feature");
+        let dir = claude_project_dir(&path).unwrap();
+        let dir_name = dir.file_name().unwrap().to_string_lossy();
+        assert_eq!(dir_name, "-Users-test--foundry-worktrees-myapp-feature");
+    }
+
+    #[test]
+    fn has_claude_conversation_false_when_no_dir() {
+        let dir = TempDir::new().unwrap();
+        assert!(!has_claude_conversation(dir.path()));
+    }
+
+    #[test]
+    fn has_claude_conversation_true_when_jsonl_exists() {
+        let dir = TempDir::new().unwrap();
+        if let Some(project_dir) = claude_project_dir(dir.path()) {
+            std::fs::create_dir_all(&project_dir).unwrap();
+            std::fs::write(project_dir.join("abc123.jsonl"), "test conversation").unwrap();
+            assert!(has_claude_conversation(dir.path()));
+            let _ = std::fs::remove_dir_all(&project_dir);
+        }
+    }
+
+    #[test]
+    fn clear_claude_conversations_removes_dir() {
+        let dir = TempDir::new().unwrap();
+        if let Some(project_dir) = claude_project_dir(dir.path()) {
+            std::fs::create_dir_all(&project_dir).unwrap();
+            std::fs::write(project_dir.join("abc123.jsonl"), "test conversation").unwrap();
+            assert!(project_dir.exists());
+            clear_claude_conversations(dir.path());
+            assert!(!project_dir.exists());
+        }
+    }
+
+    #[test]
+    fn clear_claude_conversations_noop_when_no_dir() {
+        let dir = TempDir::new().unwrap();
+        // Should not panic
+        clear_claude_conversations(dir.path());
     }
 }
 

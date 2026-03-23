@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::agent_hooks;
 use crate::config::{self, ResolvedConfig, TemplateVars};
 use crate::state::WorkspaceState;
 use crate::terminal::{self, PaneSpec};
@@ -37,6 +38,9 @@ pub fn open_workspace(
         project: project_name.into(),
     };
 
+    // Check if there's an existing Claude conversation to resume
+    let can_continue = agent_hooks::has_claude_conversation(worktree_path);
+
     // Build PaneSpecs from the resolved config, resolving template variables.
     // Only the first agent pane receives the prompt — multiple agents acting on
     // the same prompt simultaneously would interfere with each other.
@@ -55,10 +59,13 @@ pub fn open_workspace(
             } else {
                 None
             };
+            // Resume previous conversation if one exists and no new prompt is given
+            let continue_session = can_continue && agent == "claude" && pane_prompt.is_none();
             Some(config::build_agent_command(
                 agent,
                 config.custom_agent_command.as_deref(),
                 pane_prompt,
+                continue_session,
             ))
         } else if let Some(ref cmd) = pane.command {
             let resolved = config::resolve_template(cmd, &template_vars)?;

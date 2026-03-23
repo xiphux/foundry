@@ -45,6 +45,11 @@ pub fn run(
         );
     }
 
+    // Clear stale conversation history if this worktree name was used before.
+    // This prevents --continue from resuming a conversation from a previous
+    // workspace that happened to have the same name.
+    agent_hooks::clear_claude_conversations(&worktree_path);
+
     // Fetch and fast-forward main if requested (via --fetch flag or auto_fetch config)
     if fetch || config.auto_fetch {
         let remote = &config.fetch_remote;

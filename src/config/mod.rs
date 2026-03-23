@@ -33,24 +33,37 @@ pub struct ResolvedConfig {
 }
 
 /// Build the full agent command string for a given agent identifier,
-/// optionally including a prompt. For known agents (claude, codex, every-code),
-/// the prompt is passed as a positional argument.
+/// optionally including a prompt and/or session resume flag.
+/// For known agents (claude, codex, every-code), the prompt is passed as
+/// a positional argument. If `continue_session` is true, adds the
+/// appropriate flag to resume the previous conversation.
 pub fn build_agent_command(
     agent: &str,
     custom_command: Option<&str>,
     prompt: Option<&str>,
+    continue_session: bool,
 ) -> String {
     let base = resolve_agent_command(agent, custom_command);
+
+    let with_continue = if continue_session {
+        match agent {
+            "claude" => format!("{base} --continue"),
+            "codex" | "every-code" => format!("{base} --resume"),
+            _ => base,
+        }
+    } else {
+        base
+    };
 
     match prompt {
         Some(p) if !p.is_empty() => {
             let escaped = p.replace('\'', "'\\''");
             match agent {
-                "claude" | "codex" | "every-code" => format!("{base} '{escaped}'"),
-                _ => base,
+                "claude" | "codex" | "every-code" => format!("{with_continue} '{escaped}'"),
+                _ => with_continue,
             }
         }
-        _ => base,
+        _ => with_continue,
     }
 }
 
