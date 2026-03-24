@@ -22,6 +22,10 @@ pub struct GlobalConfig {
     /// Custom prompt template for GitHub issues.
     /// Supports variables: {issue_number}, {title}, {body}
     pub issue_prompt: Option<String>,
+    /// Shell executable to use in terminal panes (e.g., "bash", "powershell").
+    /// On Windows Terminal, defaults to "powershell" if unset.
+    /// Other terminal backends use their default shell and ignore this setting.
+    pub shell: Option<String>,
     #[serde(default = "default_panes")]
     pub panes: Vec<PaneConfig>,
 }
@@ -64,6 +68,7 @@ impl Default for GlobalConfig {
             auto_fetch: false,
             fetch_remote: None,
             issue_prompt: None,
+            shell: None,
             panes: default_panes(),
         }
     }

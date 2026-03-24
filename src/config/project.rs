@@ -13,6 +13,8 @@ pub struct ProjectConfig {
     pub worktree_dir: Option<String>,
     pub auto_fetch: Option<bool>,
     pub fetch_remote: Option<String>,
+    /// Override the global shell setting for this project.
+    pub shell: Option<String>,
     #[serde(default)]
     pub scripts: ScriptsConfig,
     #[serde(default)]
