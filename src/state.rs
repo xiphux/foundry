@@ -56,6 +56,10 @@ impl WorkspaceState {
     }
 
     pub fn add(&mut self, workspace: Workspace) {
+        // Remove any existing entry with the same project+name to prevent duplicates
+        self.inner
+            .workspaces
+            .retain(|w| !(w.project == workspace.project && w.name == workspace.name));
         self.inner.workspaces.push(workspace);
     }
 
@@ -102,6 +106,18 @@ impl WorkspaceState {
         self.inner
             .workspaces
             .retain(|w| Path::new(&w.worktree_path).exists());
+
+        // Deduplicate by project+name, keeping the last entry (most recent)
+        let mut seen = std::collections::HashSet::new();
+        let mut deduped = Vec::new();
+        for ws in self.inner.workspaces.iter().rev() {
+            let key = format!("{}:{}", ws.project, ws.name);
+            if seen.insert(key) {
+                deduped.push(ws.clone());
+            }
+        }
+        deduped.reverse();
+        self.inner.workspaces = deduped;
     }
 
     /// Get all ports currently allocated across all active workspaces.
