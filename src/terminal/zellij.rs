@@ -69,17 +69,23 @@ impl ZellijBackend {
     }
 
     /// Generate a session name from project/workspace info.
+    /// Zellij has a ~25 character limit on session names, so we use a
+    /// short hash to keep names unique within the limit.
     fn session_name(path: &Path) -> String {
-        let name = path
-            .file_name()
-            .and_then(|f| f.to_str())
-            .unwrap_or("workspace");
-        let parent = path
-            .parent()
-            .and_then(|p| p.file_name())
-            .and_then(|f| f.to_str())
-            .unwrap_or("foundry");
-        format!("foundry-{parent}-{name}")
+        use std::hash::{Hash, Hasher};
+        let name = path.file_name().and_then(|f| f.to_str()).unwrap_or("ws");
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        path.hash(&mut hasher);
+        let hash = format!("{:x}", hasher.finish());
+        let hash_short = &hash[..6];
+        // Truncate workspace name to fit: "f-" (2) + name + "-" (1) + hash (6) <= 25
+        let max_name_len = 16;
+        let truncated = if name.len() > max_name_len {
+            &name[..max_name_len]
+        } else {
+            name
+        };
+        format!("f-{truncated}-{hash_short}")
     }
 }
 
