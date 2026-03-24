@@ -206,9 +206,12 @@ impl TerminalBackend for TmuxBackend {
             return Ok(());
         }
 
-        // kill-session may fail if the server already shut down (no sessions left).
-        // That's fine — the session is already gone.
-        let _ = Self::run_tmux(&["kill-session", "-t", tab_id]);
+        // Use spawn instead of output — when killing our own session from
+        // inside it, the process may be terminated before output() returns.
+        // Spawning fire-and-forget avoids hanging.
+        let _ = Command::new("tmux")
+            .args(["kill-session", "-t", tab_id])
+            .spawn();
         Ok(())
     }
 
