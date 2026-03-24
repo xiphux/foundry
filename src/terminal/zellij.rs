@@ -125,7 +125,7 @@ impl TerminalBackend for ZellijBackend {
             .args([
                 "--session",
                 &session,
-                "--layout",
+                "--new-session-with-layout",
                 layout_path.to_str().context("invalid layout path")?,
             ])
             .current_dir(path)
