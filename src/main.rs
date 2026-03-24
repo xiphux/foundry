@@ -123,6 +123,7 @@ fn main() -> Result<()> {
                             cli.verbose,
                             &std::collections::HashSet::new(),
                             None,
+                            &std::collections::HashMap::new(),
                         )?;
 
                         // Brief pause between opens to let the terminal settle
@@ -158,6 +159,7 @@ fn main() -> Result<()> {
                     cli.verbose,
                     &std::collections::HashSet::new(),
                     None, // no prompt for open
+                    &std::collections::HashMap::new(),
                 )?;
             } else {
                 let mut registry = Registry::load_from(&registry_path)?;

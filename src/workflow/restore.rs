@@ -120,6 +120,7 @@ pub fn run(
             verbose,
             &std::collections::HashSet::new(),
             None, // no prompt for restore
+            &std::collections::HashMap::new(),
         );
     }
 
@@ -231,6 +232,7 @@ pub fn run(
         verbose,
         &std::collections::HashSet::new(),
         None, // no prompt for restore
+        &std::collections::HashMap::new(),
     )
 }
 

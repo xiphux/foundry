@@ -69,6 +69,13 @@ pub fn detect_terminal() -> Result<Box<dyn TerminalBackend>> {
 /// need all pane references within a single script execution — object handles
 /// cannot be passed between separate script invocations.
 pub trait TerminalBackend {
+    /// Whether this backend supports sending commands to existing panes after
+    /// the workspace is opened. Multiplexer backends (tmux, zellij) block
+    /// during open_workspace, so run_in_pane is not available.
+    fn supports_run_in_pane(&self) -> bool {
+        true
+    }
+
     /// Open a complete workspace layout with multiple panes.
     /// Returns an identifier for the tab that can be used with `close_tab`.
     fn open_workspace(&self, path: &Path, panes: &[PaneSpec], verbose: bool) -> Result<String>;

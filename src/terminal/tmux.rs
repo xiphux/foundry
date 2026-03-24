@@ -59,6 +59,10 @@ impl TmuxBackend {
 }
 
 impl TerminalBackend for TmuxBackend {
+    fn supports_run_in_pane(&self) -> bool {
+        false
+    }
+
     fn open_workspace(&self, path: &Path, panes: &[PaneSpec], verbose: bool) -> Result<String> {
         if Self::inside_tmux() {
             anyhow::bail!(

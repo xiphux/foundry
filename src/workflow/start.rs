@@ -44,6 +44,7 @@ pub fn run(
             verbose,
             &HashSet::new(),
             prompt,
+            &std::collections::HashMap::new(),
         );
     }
 
@@ -212,33 +213,6 @@ pub fn run(
         }
     }
 
-    // Collect names of deferred panes — their commands will be sent separately.
-    // Only command-based panes can be deferred, not agent panes.
-    let skip_command_panes: HashSet<String> = config
-        .panes
-        .iter()
-        .filter(|p| p.deferred && p.agent.is_none())
-        .map(|p| p.name.clone())
-        .collect();
-
-    // Open the workspace (deferred pane commands are suppressed)
-    super::open::open_workspace(
-        project_name,
-        name,
-        &worktree_path,
-        config,
-        state,
-        state_path,
-        verbose,
-        &skip_command_panes,
-        prompt,
-    )?;
-
-    // Handle deferred work: setup scripts + deferred pane commands
-    if deferred_scripts.is_empty() && skip_command_panes.is_empty() {
-        return Ok(());
-    }
-
     // Resolve deferred setup script commands
     let mut deferred_setup_commands = Vec::new();
     for script in &deferred_scripts {
@@ -252,24 +226,37 @@ pub fn run(
         deferred_setup_commands.push(resolved_command);
     }
 
-    // Read the tab ID that open_workspace stored in state.
-    // For multiplexer backends (tmux, zellij), the session has already exited
-    // by this point, so deferred scripts are not applicable.
-    let tab_id = state
-        .find_by_worktree_path(&worktree_path.to_string_lossy())
-        .map(|w| w.terminal_tab_id.clone())
-        .unwrap_or_default();
-    let backend = terminal::detect_terminal();
+    // Check if the backend supports run_in_pane (sending commands to existing panes).
+    // Multiplexer backends (tmux, zellij) block during open_workspace, so deferred
+    // scripts must be baked into pane commands upfront rather than sent after.
+    let backend = terminal::detect_terminal()?;
+    let can_defer = backend.supports_run_in_pane();
 
-    if let Ok(backend) = backend {
-        // Find deferred pane (if any) — its command runs after deferred setup scripts
-        let deferred_pane = config.panes.iter().enumerate().find(|(_, p)| p.deferred);
+    // Collect names of deferred panes — their commands will be sent separately
+    // (only if the backend supports it). Otherwise, deferred commands are
+    // pre-chained into the pane command via open_workspace's deferred_commands map.
+    let skip_command_panes: HashSet<String> = if can_defer {
+        config
+            .panes
+            .iter()
+            .filter(|p| p.deferred && p.agent.is_none())
+            .map(|p| p.name.clone())
+            .collect()
+    } else {
+        HashSet::new()
+    };
 
-        if let Some((pane_index, pane)) = deferred_pane {
-            // Chain: deferred setup scripts && deferred pane command
-            // All run in the deferred pane (e.g., the server pane).
-            // Agent panes cannot be deferred — only explicit commands support deferral.
-            let mut chain = deferred_setup_commands;
+    // For backends that don't support run_in_pane, build a map of pane name →
+    // pre-chained deferred commands to pass to open_workspace.
+    let deferred_commands: std::collections::HashMap<String, String> = if !can_defer
+        && (!deferred_scripts.is_empty() || config.panes.iter().any(|p| p.deferred))
+    {
+        let deferred_pane = config
+            .panes
+            .iter()
+            .find(|p| p.deferred && p.agent.is_none());
+        if let Some(pane) = deferred_pane {
+            let mut chain = deferred_setup_commands.clone();
             if let Some(ref cmd) = pane.command {
                 let resolved = config::resolve_template(cmd, &template_vars)?;
                 if !resolved.is_empty() {
@@ -277,12 +264,82 @@ pub fn run(
                 }
             }
             if !chain.is_empty() {
+                let mut map = std::collections::HashMap::new();
+                map.insert(pane.name.clone(), chain.join(" && "));
+                map
+            } else {
+                std::collections::HashMap::new()
+            }
+        } else if !deferred_setup_commands.is_empty() {
+            // No deferred pane — run in the shell pane
+            let shell_pane = config
+                .panes
+                .iter()
+                .find(|p| p.command.is_none() && p.agent.is_none());
+            if let Some(pane) = shell_pane {
+                let mut map = std::collections::HashMap::new();
+                map.insert(pane.name.clone(), deferred_setup_commands.join(" && "));
+                map
+            } else {
+                std::collections::HashMap::new()
+            }
+        } else {
+            std::collections::HashMap::new()
+        }
+    } else {
+        std::collections::HashMap::new()
+    };
+
+    // Open the workspace (deferred pane commands are suppressed if backend supports run_in_pane)
+    super::open::open_workspace(
+        project_name,
+        name,
+        &worktree_path,
+        config,
+        state,
+        state_path,
+        verbose,
+        &skip_command_panes,
+        prompt,
+        &deferred_commands,
+    )?;
+
+    // For backends that support run_in_pane, send deferred scripts now
+    if can_defer && (!deferred_setup_commands.is_empty() || !skip_command_panes.is_empty()) {
+        let tab_id = state
+            .find_by_worktree_path(&worktree_path.to_string_lossy())
+            .map(|w| w.terminal_tab_id.clone())
+            .unwrap_or_default();
+
+        let deferred_pane = config.panes.iter().enumerate().find(|(_, p)| p.deferred);
+
+        if let Some((pane_index, pane)) = deferred_pane {
+            let mut chain = deferred_setup_commands;
+            let is_first_agent = config
+                .panes
+                .iter()
+                .find(|p| p.agent.is_some())
+                .map(|p| p.name == pane.name)
+                .unwrap_or(false);
+            let _deferred_prompt = if is_first_agent { prompt } else { None };
+            let pane_cmd = if let Some(ref cmd) = pane.command {
+                let resolved = config::resolve_template(cmd, &template_vars)?;
+                if resolved.is_empty() {
+                    None
+                } else {
+                    Some(resolved)
+                }
+            } else {
+                None
+            };
+            if let Some(cmd) = pane_cmd {
+                chain.push(cmd);
+            }
+            if !chain.is_empty() {
                 let chained = chain.join(" && ");
                 backend.run_in_pane(&tab_id, pane_index, &chained)?;
             }
         } else if !deferred_setup_commands.is_empty() {
-            // No deferred pane — run setup scripts in the shell pane
-            // (first pane with no command)
             let shell_pane_index = config
                 .panes
                 .iter()

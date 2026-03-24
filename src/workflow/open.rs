@@ -22,6 +22,7 @@ pub fn open_workspace(
     verbose: bool,
     skip_command_panes: &HashSet<String>,
     prompt: Option<&str>,
+    deferred_commands: &std::collections::HashMap<String, String>,
 ) -> Result<()> {
     let backend = terminal::detect_terminal()?;
 
@@ -60,7 +61,10 @@ pub fn open_workspace(
     let mut pane_specs = Vec::new();
     let mut prompt_assigned = false;
     for pane in &config.panes {
-        let resolved_command = if skip_command_panes.contains(&pane.name) {
+        let resolved_command = if let Some(deferred_cmd) = deferred_commands.get(&pane.name) {
+            // Pre-chained deferred command (for backends that don't support run_in_pane)
+            Some(deferred_cmd.clone())
+        } else if skip_command_panes.contains(&pane.name) {
             // Command will be sent separately (e.g., after deferred setup scripts)
             None
         } else if let Some(ref agent) = pane.agent {

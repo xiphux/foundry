@@ -72,15 +72,15 @@ impl ZellijBackend {
 
         for child in &children {
             let dir_str = match child.direction {
-                Some(SplitDirection::Right) => "vertical",
-                Some(SplitDirection::Down) => "horizontal",
-                None => "vertical",
+                Some(SplitDirection::Right) => "Vertical",
+                Some(SplitDirection::Down) => "Horizontal",
+                None => "Vertical",
             };
 
             let child_lines = Self::render_pane(child, all_panes, indent + 4);
 
             let mut wrapped = Vec::new();
-            wrapped.push(format!("{pad}pane direction=\"{dir_str}\" {{"));
+            wrapped.push(format!("{pad}pane split_direction=\"{dir_str}\" {{"));
             wrapped.extend(current);
             wrapped.extend(child_lines);
             wrapped.push(format!("{pad}}}"));
@@ -135,6 +135,10 @@ impl ZellijBackend {
 }
 
 impl TerminalBackend for ZellijBackend {
+    fn supports_run_in_pane(&self) -> bool {
+        false
+    }
+
     fn open_workspace(&self, path: &Path, panes: &[PaneSpec], verbose: bool) -> Result<String> {
         if Self::inside_zellij() {
             anyhow::bail!(
@@ -157,11 +161,21 @@ impl TerminalBackend for ZellijBackend {
         std::fs::write(&layout_path, &layout)?;
 
         if verbose {
+            eprintln!("Layout file: {}", layout_path.display());
+            eprintln!("{layout}");
+        }
+
+        if verbose {
             eprintln!(
                 "Setting up workspace layout with {} pane(s)...",
                 panes.len()
             );
         }
+
+        // Clean up any dead session with the same name from a previous run
+        let _ = Command::new("zellij")
+            .args(["delete-session", &session])
+            .output();
 
         let mut child = Command::new("zellij")
             .args([
@@ -176,8 +190,10 @@ impl TerminalBackend for ZellijBackend {
 
         let _ = child.wait();
 
-        // Clean up layout file
-        let _ = std::fs::remove_file(&layout_path);
+        // Clean up layout file (keep if verbose for debugging)
+        if !verbose {
+            let _ = std::fs::remove_file(&layout_path);
+        }
 
         Ok(session)
     }
@@ -187,11 +203,16 @@ impl TerminalBackend for ZellijBackend {
             return Ok(());
         }
 
-        // Use spawn — when killing our own session from inside it,
-        // output() can hang because the process gets terminated.
-        let _ = Command::new("zellij")
-            .args(["kill-session", tab_id])
-            .spawn();
+        if Self::inside_zellij() {
+            // Inside the session — close the current tab. If it's the only
+            // tab, this exits the session.
+            let _ = Command::new("zellij").args(["action", "close-tab"]).spawn();
+        } else {
+            // Outside the session — kill it by name
+            let _ = Command::new("zellij")
+                .args(["kill-session", tab_id])
+                .spawn();
+        }
 
         Ok(())
     }
