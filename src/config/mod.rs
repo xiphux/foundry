@@ -30,6 +30,10 @@ pub struct ResolvedConfig {
     pub teardown_scripts: Vec<ScriptConfig>,
     /// Custom prompt template for GitHub issues (None = use default)
     pub issue_prompt: Option<String>,
+    /// Starting port for dynamic port allocation (default: 10000)
+    pub port_range_start: u16,
+    /// Named port slots to allocate per workspace (env var names)
+    pub ports: Vec<String>,
 }
 
 /// Build the full agent command string for a given agent identifier,
@@ -299,6 +303,8 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
             .map(|p| p.scripts.teardown.clone())
             .unwrap_or_default(),
         issue_prompt: global.issue_prompt.clone(),
+        port_range_start: global.port_range_start.unwrap_or(10000),
+        ports: project.map(|p| p.ports.clone()).unwrap_or_default(),
     };
 
     warn_agent_in_command(&resolved.panes);

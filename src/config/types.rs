@@ -66,3 +66,6 @@ pub struct PaneOverride {
     #[serde(default)]
     pub deferred: bool,
 }
+
+/// A named port slot that foundry allocates per workspace.
+pub type PortConfig = String;

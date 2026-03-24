@@ -147,6 +147,22 @@ pub fn run(
         branch, // from_branch is the archived branch name
     ));
 
+    // Allocate ports for restored workspace
+    let allocated_ports = if config.ports.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        let reserved = state.all_allocated_ports();
+        let ports = super::allocate_ports(&config.ports, &reserved, config.port_range_start);
+        if verbose {
+            let mut sorted: Vec<_> = ports.iter().collect();
+            sorted.sort_by_key(|(_, v)| *v);
+            for (name, port) in &sorted {
+                eprintln!("Allocated port: {name}={port}");
+            }
+        }
+        ports
+    };
+
     // Record state before setup scripts
     state.add(Workspace {
         project: project_name.into(),
@@ -156,6 +172,7 @@ pub fn run(
         source_path: source_path.to_string_lossy().into(),
         created_at: Utc::now(),
         terminal_tab_id: String::new(),
+        allocated_ports,
     });
     state.save_to(state_path)?;
 

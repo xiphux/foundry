@@ -91,12 +91,20 @@ pub fn open_workspace(
             None
         };
 
+        // Merge allocated port env vars into this pane's env
+        let mut env = pane.env.clone();
+        if let Some(ws) = state.find_by_worktree_path(&worktree_path.to_string_lossy()) {
+            for (port_name, port_value) in &ws.allocated_ports {
+                env.insert(port_name.clone(), port_value.to_string());
+            }
+        }
+
         pane_specs.push(PaneSpec {
             name: pane.name.clone(),
             split_from: pane.split_from.clone(),
             direction: pane.direction.clone(),
             command: resolved_command,
-            env: pane.env.clone(),
+            env,
         });
     }
 

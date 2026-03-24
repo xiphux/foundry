@@ -17,4 +17,7 @@ pub struct ProjectConfig {
     pub scripts: ScriptsConfig,
     #[serde(default)]
     pub panes: HashMap<String, PaneOverride>,
+    #[serde(default)]
+    /// Named port slots to allocate per workspace (e.g., ["VITE_PORT", "API_PORT"])
+    pub ports: Vec<String>,
 }

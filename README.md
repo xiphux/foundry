@@ -108,6 +108,9 @@ branch_prefix = "xiphux"
 # Used for the default pane layout when no panes have explicit agent fields
 agent = "claude"
 
+# Starting port for dynamic port allocation (default: 10000)
+# port_range_start = 20000
+
 # Automatically fetch and fast-forward main before branching (default: false)
 # auto_fetch = true
 
@@ -239,6 +242,9 @@ name = "Stop containers"
 command = "docker compose down"
 working_dir = "{worktree}"
 
+# Allocate unique ports per workspace (available as env vars in all panes)
+ports = ["VITE_PORT", "API_PORT"]
+
 # Opt in to optional panes and/or override pane commands
 [panes.server]
 command = "npm run dev"
@@ -259,6 +265,28 @@ merge_strategy = "merge"
 Setup scripts marked with `deferred = true` run in the shell pane **after** the workspace opens, rather than blocking before it opens. This lets you start working while slower scripts (like `npm install`) run in the background.
 
 Deferred scripts are chained together with `&&` and sent to the first pane that has no command configured (typically the "shell" pane). Non-deferred scripts run in order before the workspace opens, as usual.
+
+### Dynamic Port Allocation
+
+When running multiple workspaces in parallel, dev servers compete for the same ports. Foundry can allocate unique ports per workspace and expose them as environment variables.
+
+Add a `ports` array to your project config listing the environment variable names:
+
+```toml
+# .foundry.toml
+ports = ["VITE_PORT", "API_PORT", "DYNAMODB_PORT"]
+```
+
+Each workspace gets a contiguous block of ports (starting from 10000 by default). The variables `$VITE_PORT`, `$API_PORT`, `$DYNAMODB_PORT` are available in all panes and setup scripts. Ports are assigned once at `foundry start` and remain stable for the life of the workspace.
+
+Configure your dev servers to use these variables instead of hardcoded ports (e.g., `vite --port $VITE_PORT`).
+
+To customize the starting port, set `port_range_start` in your global config:
+
+```toml
+# ~/.foundry/config.toml
+port_range_start = 20000
+```
 
 ### Template Variables
 

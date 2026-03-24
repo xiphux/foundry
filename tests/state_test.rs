@@ -13,6 +13,7 @@ fn test_state_add_and_list() {
         source_path: "/code/myapp".into(),
         created_at: chrono::Utc::now(),
         terminal_tab_id: String::new(),
+        allocated_ports: Default::default(),
     });
     state.save_to(&state_path).unwrap();
     let reloaded = foundry::state::WorkspaceState::load_from(&state_path).unwrap();
@@ -33,6 +34,7 @@ fn test_state_remove() {
         source_path: "/code/myapp".into(),
         created_at: chrono::Utc::now(),
         terminal_tab_id: String::new(),
+        allocated_ports: Default::default(),
     });
     state.remove("myapp", "feat-a");
     state.save_to(&state_path).unwrap();
@@ -53,6 +55,7 @@ fn test_state_find_by_project() {
         source_path: "/code/myapp".into(),
         created_at: chrono::Utc::now(),
         terminal_tab_id: String::new(),
+        allocated_ports: Default::default(),
     });
     state.add(foundry::state::Workspace {
         project: "other".into(),
@@ -62,6 +65,7 @@ fn test_state_find_by_project() {
         source_path: "/code/other".into(),
         created_at: chrono::Utc::now(),
         terminal_tab_id: String::new(),
+        allocated_ports: Default::default(),
     });
     let myapp_workspaces = state.find_by_project("myapp");
     assert_eq!(myapp_workspaces.len(), 1);
@@ -81,6 +85,7 @@ fn test_state_find_by_worktree_path() {
         source_path: "/code/myapp".into(),
         created_at: chrono::Utc::now(),
         terminal_tab_id: String::new(),
+        allocated_ports: Default::default(),
     });
     let found = state.find_by_worktree_path("/tmp/worktrees/myapp/feat-a");
     assert!(found.is_some());
@@ -102,6 +107,7 @@ fn test_set_terminal_tab_id() {
         source_path: "/code/myapp".into(),
         created_at: chrono::Utc::now(),
         terminal_tab_id: String::new(),
+        allocated_ports: Default::default(),
     });
     state.set_terminal_tab_id("myapp", "feat-a", "tab-123".to_string());
     state.save_to(&state_path).unwrap();
@@ -128,6 +134,7 @@ fn test_prune_stale() {
         source_path: "/code/myapp".into(),
         created_at: chrono::Utc::now(),
         terminal_tab_id: String::new(),
+        allocated_ports: Default::default(),
     });
     state.add(foundry::state::Workspace {
         project: "myapp".into(),
@@ -137,6 +144,7 @@ fn test_prune_stale() {
         source_path: "/code/myapp".into(),
         created_at: chrono::Utc::now(),
         terminal_tab_id: String::new(),
+        allocated_ports: Default::default(),
     });
 
     assert_eq!(state.list().len(), 2);

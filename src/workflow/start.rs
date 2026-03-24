@@ -100,6 +100,22 @@ pub fn run(
     git::create_worktree(source_path, &worktree_path, &branch)
         .with_context(|| "failed to create worktree")?;
 
+    // Allocate ports for this workspace
+    let allocated_ports = if config.ports.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        let reserved = state.all_allocated_ports();
+        let ports = super::allocate_ports(&config.ports, &reserved, config.port_range_start);
+        if verbose {
+            let mut sorted: Vec<_> = ports.iter().collect();
+            sorted.sort_by_key(|(_, v)| *v);
+            for (name, port) in &sorted {
+                eprintln!("Allocated port: {name}={port}");
+            }
+        }
+        ports
+    };
+
     // Record state BEFORE setup scripts so discard can clean up on failure
     state.add(Workspace {
         project: project_name.into(),
@@ -109,6 +125,7 @@ pub fn run(
         source_path: source_path.to_string_lossy().into(),
         created_at: Utc::now(),
         terminal_tab_id: String::new(),
+        allocated_ports,
     });
     state.save_to(state_path)?;
 
@@ -167,10 +184,19 @@ pub fn run(
             eprintln!("Running setup script: {}...", script.name);
         }
 
-        let status = Command::new("sh")
-            .arg("-c")
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
             .arg(&resolved_command)
-            .current_dir(&working_dir)
+            .current_dir(&working_dir);
+
+        // Inject allocated ports as environment variables for setup scripts
+        if let Some(ws) = state.find_by_worktree_path(&worktree_path.to_string_lossy()) {
+            for (port_name, port_value) in &ws.allocated_ports {
+                cmd.env(port_name, port_value.to_string());
+            }
+        }
+
+        let status = cmd
             .status()
             .with_context(|| format!("failed to run setup script '{}'", script.name))?;
 

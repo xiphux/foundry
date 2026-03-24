@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +14,9 @@ pub struct Workspace {
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub terminal_tab_id: String,
+    /// Allocated ports for this workspace (env var name -> port number)
+    #[serde(default)]
+    pub allocated_ports: HashMap<String, u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -95,5 +99,14 @@ impl WorkspaceState {
         self.inner
             .workspaces
             .retain(|w| Path::new(&w.worktree_path).exists());
+    }
+
+    /// Get all ports currently allocated across all active workspaces.
+    pub fn all_allocated_ports(&self) -> Vec<u16> {
+        self.inner
+            .workspaces
+            .iter()
+            .flat_map(|w| w.allocated_ports.values().copied())
+            .collect()
     }
 }

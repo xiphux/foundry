@@ -12,6 +12,8 @@ pub struct GlobalConfig {
     pub archive_prefix: String,
     pub merge_strategy: MergeStrategy,
     pub worktree_dir: String,
+    /// Starting port for dynamic port allocation (default: 10000)
+    pub port_range_start: Option<u16>,
     /// Automatically fetch and fast-forward main from remote before branching
     #[serde(default)]
     pub auto_fetch: bool,
@@ -58,6 +60,7 @@ impl Default for GlobalConfig {
             archive_prefix: "archive".into(),
             merge_strategy: MergeStrategy::default(),
             worktree_dir: "~/.foundry/worktrees".into(),
+            port_range_start: None,
             auto_fetch: false,
             fetch_remote: None,
             issue_prompt: None,

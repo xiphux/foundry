@@ -64,6 +64,47 @@ pub fn compute_branch_name(name: &str, prefix: Option<&str>) -> String {
     }
 }
 
+/// Ending port for dynamic allocation range (exclusive).
+const PORT_RANGE_END: u16 = 60000;
+
+/// Allocate a contiguous block of ports for a new workspace.
+/// Scans from `range_start` to find a contiguous block of `port_names.len()`
+/// ports that don't overlap with any already-reserved ports.
+pub fn allocate_ports(
+    port_names: &[String],
+    reserved: &[u16],
+    range_start: u16,
+) -> std::collections::HashMap<String, u16> {
+    let count = port_names.len();
+    if count == 0 {
+        return std::collections::HashMap::new();
+    }
+
+    let mut sorted_reserved: Vec<u16> = reserved.to_vec();
+    sorted_reserved.sort();
+
+    // Find the first contiguous block of `count` ports in the range
+    let mut start = range_start;
+    'outer: while start + count as u16 <= PORT_RANGE_END {
+        for offset in 0..count as u16 {
+            let port = start + offset;
+            if sorted_reserved.binary_search(&port).is_ok() {
+                // This port is taken — skip past it
+                start = port + 1;
+                continue 'outer;
+            }
+        }
+        // Found a contiguous block
+        break;
+    }
+
+    port_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| (name.clone(), start + i as u16))
+        .collect()
+}
+
 pub fn foundry_paths() -> Result<(PathBuf, PathBuf)> {
     let foundry_dir = config::foundry_dir()?;
     Ok((
@@ -92,5 +133,53 @@ mod tests {
     #[test]
     fn compute_branch_name_with_empty_prefix() {
         assert_eq!(compute_branch_name("my-feature", Some("")), "my-feature");
+    }
+
+    #[test]
+    fn allocate_ports_contiguous_block() {
+        let names = vec!["VITE_PORT".into(), "API_PORT".into(), "DB_PORT".into()];
+        let ports = allocate_ports(&names, &[], 10000);
+        assert_eq!(ports["VITE_PORT"], 10000);
+        assert_eq!(ports["API_PORT"], 10001);
+        assert_eq!(ports["DB_PORT"], 10002);
+    }
+
+    #[test]
+    fn allocate_ports_skips_reserved() {
+        let names = vec!["PORT_A".into()];
+        let ports = allocate_ports(&names, &[10000], 10000);
+        assert_eq!(ports["PORT_A"], 10001);
+    }
+
+    #[test]
+    fn allocate_ports_finds_gap_after_reserved_block() {
+        let names = vec!["PORT_A".into(), "PORT_B".into()];
+        let ports = allocate_ports(&names, &[10000], 10000);
+        assert_eq!(ports["PORT_A"], 10001);
+        assert_eq!(ports["PORT_B"], 10002);
+    }
+
+    #[test]
+    fn allocate_ports_skips_fragmented_reserved() {
+        let names = vec!["PORT_A".into(), "PORT_B".into(), "PORT_C".into()];
+        let reserved = vec![10000, 10002];
+        let ports = allocate_ports(&names, &reserved, 10000);
+        // Can't fit 3 contiguous starting at 10000 (taken), or 10001 (10002 taken)
+        assert_eq!(ports["PORT_A"], 10003);
+        assert_eq!(ports["PORT_B"], 10004);
+        assert_eq!(ports["PORT_C"], 10005);
+    }
+
+    #[test]
+    fn allocate_ports_empty_names() {
+        let ports = allocate_ports(&[], &[], 10000);
+        assert!(ports.is_empty());
+    }
+
+    #[test]
+    fn allocate_ports_custom_range_start() {
+        let names = vec!["PORT_A".into()];
+        let ports = allocate_ports(&names, &[], 20000);
+        assert_eq!(ports["PORT_A"], 20000);
     }
 }
