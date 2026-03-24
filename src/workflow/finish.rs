@@ -125,10 +125,53 @@ pub fn run(
         }
     }
 
+    // On Windows, directories can't be deleted while any process has them as
+    // its cwd. If we're running from inside the worktree, bail immediately.
+    if cfg!(windows) {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        if cwd.starts_with(&worktree_path) {
+            anyhow::bail!(
+                "on Windows, you cannot finish a workspace from inside its worktree \
+                 (the directory is locked by your shell). Close this tab first, then run:\n  \
+                 foundry finish {name}"
+            );
+        }
+    }
+
+    // Remove worktree — on Windows this may fail if the workspace's terminal
+    // panes still hold the directory open. In that case, close the panes and
+    // retry before giving up.
     if verbose {
         eprintln!("Removing worktree...");
     }
-    git::remove_worktree(source_path, &worktree_path, false)?;
+    if let Err(first_err) = git::remove_worktree(source_path, &worktree_path, false) {
+        if cfg!(windows) && !tab_id.is_empty() {
+            // git worktree remove partially succeeded: it unregistered the
+            // worktree from git metadata but failed to delete the directory
+            // (locked by pane processes). Close the panes, then delete the
+            // leftover directory directly.
+            if verbose {
+                eprintln!("Worktree directory is locked, closing terminal panes and retrying...");
+            }
+            if let Ok(backend) = terminal::detect_terminal() {
+                let _ = backend.close_tab(&tab_id);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+
+            if worktree_path.exists() {
+                std::fs::remove_dir_all(&worktree_path).with_context(|| {
+                    format!(
+                        "could not remove worktree directory after closing panes. \
+                         If another process still holds it open, close it and run:\n  \
+                         rm -rf '{}'\n  foundry finish {name}",
+                        worktree_path.display()
+                    )
+                })?;
+            }
+        } else {
+            return Err(first_err);
+        }
+    }
 
     // Archive if the branch had commits, otherwise just delete it
     if has_commits {

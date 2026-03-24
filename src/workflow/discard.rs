@@ -107,11 +107,54 @@ pub fn run(
         }
     }
 
-    // Remove worktree and clean up branch
+    // On Windows, directories can't be deleted while any process has them as
+    // its cwd. If we're running from inside the worktree, bail immediately.
+    if cfg!(windows) {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        if cwd.starts_with(&worktree_path) {
+            anyhow::bail!(
+                "on Windows, you cannot discard a workspace from inside its worktree \
+                 (the directory is locked by your shell). Close this tab first, then run:\n  \
+                 foundry discard {name}"
+            );
+        }
+    }
+
+    // Remove worktree — on Windows this may fail if the workspace's terminal
+    // panes still hold the directory open. In that case, close the panes and
+    // retry before giving up.
     if verbose {
         eprintln!("Removing worktree...");
     }
-    git::remove_worktree(source_path, &worktree_path, true)?;
+    if let Err(first_err) = git::remove_worktree(source_path, &worktree_path, true) {
+        if cfg!(windows) && !tab_id.is_empty() {
+            // git worktree remove partially succeeded: it unregistered the
+            // worktree from git metadata but failed to delete the directory
+            // (locked by pane processes). Close the panes, then delete the
+            // leftover directory directly.
+            if verbose {
+                eprintln!("Worktree directory is locked, closing terminal panes and retrying...");
+            }
+            if let Ok(backend) = terminal::detect_terminal() {
+                let _ = backend.close_tab(&tab_id);
+            }
+            // Give processes time to exit and release handles.
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+
+            if worktree_path.exists() {
+                std::fs::remove_dir_all(&worktree_path).with_context(|| {
+                    format!(
+                        "could not remove worktree directory after closing panes. \
+                         If another process still holds it open, close it and run:\n  \
+                         rm -rf '{}'\n  foundry discard {name}",
+                        worktree_path.display()
+                    )
+                })?;
+            }
+        } else {
+            return Err(first_err);
+        }
+    }
 
     let archived_as = if has_commits {
         if verbose {
@@ -119,7 +162,6 @@ pub fn run(
         }
         git::archive_branch(source_path, &branch, &config.archive_prefix)?;
         eprintln!("Discarded workspace '{name}'. Branch '{branch}' archived.");
-        // Derive the archive branch name (same logic as archive_branch)
         let date = chrono::Utc::now().format("%Y%m%d").to_string();
         Some(format!("{}/{branch}-{date}", config.archive_prefix))
     } else {
@@ -145,6 +187,8 @@ pub fn run(
 
     // Close the terminal tab LAST — if we're running from inside the worktree's
     // tab, this will kill our own process. All cleanup must be done before this.
+    // On Windows, if we already closed the panes above (retry path), close_tab
+    // will be a no-op because the processes are already dead.
     if !tab_id.is_empty() {
         if verbose {
             eprintln!("Closing terminal tab...");
