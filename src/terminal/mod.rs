@@ -1,10 +1,13 @@
 mod applescript;
+pub mod bare;
 pub mod ghostty;
 pub mod iterm2;
+pub mod tmux;
 pub mod wezterm;
 pub mod windows_terminal;
+pub mod zellij;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -46,8 +49,17 @@ pub fn detect_terminal() -> Result<Box<dyn TerminalBackend>> {
         return Ok(Box::new(term));
     }
 
-    let term_program = std::env::var("TERM_PROGRAM").unwrap_or_else(|_| "unknown".into());
-    bail!("unsupported terminal: '{term_program}'. Supported terminals: Ghostty, iTerm2, WezTerm, Windows Terminal")
+    // Fallback to terminal multiplexers (Zellij, then tmux)
+    if let Some(term) = zellij::ZellijBackend::detect() {
+        return Ok(Box::new(term));
+    }
+
+    if let Some(term) = tmux::TmuxBackend::detect() {
+        return Ok(Box::new(term));
+    }
+
+    // Bare fallback — no splits, just run the agent command
+    Ok(Box::new(bare::BareBackend::new()))
 }
 
 /// Object-safe trait for terminal automation backends.

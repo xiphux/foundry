@@ -347,8 +347,13 @@ Foundry detects the terminal automatically from the `TERM_PROGRAM` environment v
 | iTerm2 | macOS | AppleScript |
 | WezTerm | macOS, Linux, Windows | `wezterm cli` |
 | Windows Terminal | Windows | `wt.exe` |
+| Zellij (fallback) | macOS, Linux | `zellij` CLI |
+| tmux (fallback) | macOS, Linux | `tmux` CLI |
+| Bare (fallback) | any | single pane, no splits |
 
-All backends support: opening tabs, creating split panes, running commands in panes, and closing tabs. Windows Terminal does not support `run_in_pane` (deferred pane commands) or `focus_tab` due to `wt.exe` limitations.
+Native terminal backends open a new tab with splits. If no native backend is detected, foundry falls back to **Zellij** or **tmux** (whichever is available), which take over the current terminal with a multiplexer session. If neither is available, **bare mode** runs the first agent command in the current terminal with no splits.
+
+Windows Terminal does not support `run_in_pane` (deferred pane commands) or `focus_tab` due to `wt.exe` limitations.
 
 ### Shell Configuration
 
