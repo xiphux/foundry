@@ -105,6 +105,7 @@ pub fn open_workspace(
             direction: pane.direction.clone(),
             command: resolved_command,
             env,
+            shell: config.shell.clone(),
         });
     }
 

@@ -2,6 +2,7 @@ mod applescript;
 pub mod ghostty;
 pub mod iterm2;
 pub mod wezterm;
+pub mod windows_terminal;
 
 use anyhow::{bail, Result};
 use std::collections::HashMap;
@@ -22,6 +23,9 @@ pub struct PaneSpec {
     pub command: Option<String>,
     /// Environment variables to set for this pane.
     pub env: HashMap<String, String>,
+    /// Shell executable to use (e.g., "bash", "powershell").
+    /// Only used by backends that need explicit shell selection (Windows Terminal).
+    pub shell: Option<String>,
 }
 
 /// Detect the current terminal and return a boxed automation backend.
@@ -38,8 +42,12 @@ pub fn detect_terminal() -> Result<Box<dyn TerminalBackend>> {
         return Ok(Box::new(term));
     }
 
+    if let Some(term) = windows_terminal::WindowsTerminalBackend::detect() {
+        return Ok(Box::new(term));
+    }
+
     let term_program = std::env::var("TERM_PROGRAM").unwrap_or_else(|_| "unknown".into());
-    bail!("unsupported terminal: '{term_program}'. Supported terminals: Ghostty, iTerm2, WezTerm")
+    bail!("unsupported terminal: '{term_program}'. Supported terminals: Ghostty, iTerm2, WezTerm, Windows Terminal")
 }
 
 /// Object-safe trait for terminal automation backends.
