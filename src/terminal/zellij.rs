@@ -10,16 +10,17 @@ impl ZellijBackend {
     /// Detect if Zellij is available on the system.
     /// Only used as a fallback when no native terminal backend is detected.
     pub fn detect() -> Option<Self> {
-        // Don't detect if we're already inside a Zellij session (avoid nesting)
-        if std::env::var("ZELLIJ").is_ok() {
-            return None;
-        }
         Command::new("zellij")
             .arg("--version")
             .output()
             .ok()
             .filter(|o| o.status.success())
             .map(|_| Self)
+    }
+
+    /// Check if we're currently inside a Zellij session.
+    pub fn inside_zellij() -> bool {
+        std::env::var("ZELLIJ").is_ok()
     }
 
     /// Build a Zellij KDL layout string from pane specs.
@@ -84,6 +85,13 @@ impl ZellijBackend {
 
 impl TerminalBackend for ZellijBackend {
     fn open_workspace(&self, path: &Path, panes: &[PaneSpec], verbose: bool) -> Result<String> {
+        if Self::inside_zellij() {
+            anyhow::bail!(
+                "already inside a Zellij session. Cannot open a nested workspace. \
+                 Detach first (Ctrl+O, D) and run foundry from outside Zellij."
+            );
+        }
+
         let session = Self::session_name(path);
 
         if verbose {

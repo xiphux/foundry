@@ -252,7 +252,9 @@ pub fn run(
         deferred_setup_commands.push(resolved_command);
     }
 
-    // Read the tab ID that open_workspace stored in state
+    // Read the tab ID that open_workspace stored in state.
+    // For multiplexer backends (tmux, zellij), the session has already exited
+    // by this point, so deferred scripts are not applicable.
     let tab_id = state
         .find_by_worktree_path(&worktree_path.to_string_lossy())
         .map(|w| w.terminal_tab_id.clone())

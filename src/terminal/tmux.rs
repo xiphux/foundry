@@ -9,18 +9,20 @@ pub struct TmuxBackend;
 
 impl TmuxBackend {
     /// Detect if tmux is available on the system.
-    /// Only used as a fallback when no native terminal or Zellij is detected.
+    /// Only used as a fallback when no native terminal backend is detected.
     pub fn detect() -> Option<Self> {
-        // Don't detect if we're already inside a tmux session (avoid nesting)
-        if std::env::var("TMUX").is_ok() {
-            return None;
-        }
         Command::new("tmux")
             .arg("-V")
             .output()
             .ok()
             .filter(|o| o.status.success())
             .map(|_| Self)
+    }
+
+    /// Check if we're currently inside a tmux session.
+    /// Used to prevent nesting (opening a new session inside an existing one).
+    pub fn inside_tmux() -> bool {
+        std::env::var("TMUX").is_ok()
     }
 
     /// Generate a session name from the worktree path.
@@ -49,6 +51,11 @@ impl TmuxBackend {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            // "no server running" means the tmux server shut down (all sessions
+            // ended). This is expected after a workspace session exits.
+            if stderr.contains("no server running") {
+                return Ok(String::new());
+            }
             anyhow::bail!("tmux error: {}", stderr.trim());
         }
 
@@ -58,8 +65,16 @@ impl TmuxBackend {
 
 impl TerminalBackend for TmuxBackend {
     fn open_workspace(&self, path: &Path, panes: &[PaneSpec], verbose: bool) -> Result<String> {
+        if Self::inside_tmux() {
+            anyhow::bail!(
+                "already inside a tmux session. Cannot open a nested workspace. \
+                 Detach first (Ctrl+B, D) and run foundry from outside tmux."
+            );
+        }
+
         let session = Self::session_name(path);
         let path_str = path.to_str().context("invalid worktree path")?;
+        let user_shell = std::env::var("SHELL").unwrap_or_else(|_| "bash".into());
 
         if verbose {
             eprintln!("Starting tmux session '{session}'...");
@@ -69,7 +84,7 @@ impl TerminalBackend for TmuxBackend {
         let first_cmd = panes
             .first()
             .and_then(|p| p.command.as_deref())
-            .unwrap_or("bash");
+            .unwrap_or(&user_shell);
 
         // Build env exports for the first pane
         let first_env = panes
@@ -96,7 +111,7 @@ impl TerminalBackend for TmuxBackend {
             &session,
             "-c",
             path_str,
-            "bash",
+            &user_shell,
             "-c",
             &first_full_cmd,
         ])?;
@@ -144,7 +159,7 @@ impl TerminalBackend for TmuxBackend {
             };
 
             // Build command with env vars
-            let pane_cmd = pane.command.as_deref().unwrap_or("bash");
+            let pane_cmd = pane.command.as_deref().unwrap_or(&user_shell);
             let env_exports: String = pane
                 .env
                 .iter()
@@ -168,7 +183,7 @@ impl TerminalBackend for TmuxBackend {
                 "-P",
                 "-F",
                 "#{pane_id}",
-                "bash",
+                &user_shell,
                 "-c",
                 &full_cmd,
             ])?;
