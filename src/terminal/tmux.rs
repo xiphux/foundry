@@ -108,11 +108,10 @@ impl TerminalBackend for TmuxBackend {
             );
         }
 
-        // Create splits for remaining panes
-        // Track pane indices: tmux uses %N format for pane IDs
+        // Create splits for remaining panes.
+        // tmux pane IDs (%N) are globally unique — use them directly as targets.
         let mut pane_ids: Vec<String> = Vec::new();
 
-        // First pane is %0 in the new session
         let first_pane_id = Self::run_tmux(&["list-panes", "-t", &session, "-F", "#{pane_id}"])?;
         pane_ids.push(first_pane_id.lines().next().unwrap_or("%0").to_string());
 
@@ -163,7 +162,7 @@ impl TerminalBackend for TmuxBackend {
                 "split-window",
                 split_flag,
                 "-t",
-                &format!("{session}:{}", parent_pane_id),
+                parent_pane_id,
                 "-c",
                 path_str,
                 "-P",
@@ -179,7 +178,7 @@ impl TerminalBackend for TmuxBackend {
 
         // Select the first pane
         if let Some(first) = pane_ids.first() {
-            let _ = Self::run_tmux(&["select-pane", "-t", &format!("{session}:{first}")]);
+            let _ = Self::run_tmux(&["select-pane", "-t", first]);
         }
 
         // Attach to the session (takes over the current terminal)
@@ -239,13 +238,7 @@ impl TerminalBackend for TmuxBackend {
         })?;
 
         // Send keys to the target pane
-        Self::run_tmux(&[
-            "send-keys",
-            "-t",
-            &format!("{tab_id}:{pane_id}"),
-            command,
-            "Enter",
-        ])?;
+        Self::run_tmux(&["send-keys", "-t", pane_id, command, "Enter"])?;
 
         Ok(())
     }
