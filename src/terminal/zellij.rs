@@ -31,21 +31,11 @@ impl ZellijBackend {
             return Ok(format!("layout {{\n    cwd \"{path_str}\"\n    pane\n}}\n"));
         }
 
-        // Zellij layouts use a tree structure of panes with horizontal/vertical splits.
-        // For simplicity, we build a flat layout: all panes in a single horizontal
-        // container, splitting vertically (side-by-side) or nested.
-        //
-        // Since foundry's split model is tree-based (split_from + direction), and Zellij's
-        // layout model is nested containers, we simplify: generate panes in order with
-        // their commands. Complex split topologies may not match exactly.
         let mut lines = Vec::new();
         lines.push("layout {".into());
         lines.push(format!("    cwd \"{}\"", path_str.replace('"', "\\\"")));
 
-        // Build a simple layout: first pane, then splits
-        // We use a flat pane list — Zellij will arrange them in its default layout
         for pane in panes {
-            let mut pane_line = String::from("    pane");
             if let Some(ref cmd) = pane.command {
                 if !cmd.is_empty() {
                     // Build command with env vars prepended
@@ -54,14 +44,17 @@ impl ZellijBackend {
                         full_cmd.push_str(&format!("export {k}='{}'; ", v.replace('\'', "'\\''")));
                     }
                     full_cmd.push_str(cmd);
-                    pane_line.push_str(&format!(
-                        " command=\"bash\" {{ args \"-c\" \"{}\" }}",
-                        full_cmd.replace('"', "\\\"")
+                    let escaped = full_cmd.replace('"', "\\\"");
+                    lines.push(format!(
+                        "    pane command=\"bash\" name=\"{}\" {{",
+                        pane.name
                     ));
+                    lines.push(format!("        args \"-c\" \"{escaped}\""));
+                    lines.push("    }".into());
+                    continue;
                 }
             }
-            pane_line.push_str(&format!(" {{ name \"{}\" }}", pane.name));
-            lines.push(pane_line);
+            lines.push(format!("    pane name=\"{}\"", pane.name));
         }
 
         lines.push("}".into());
