@@ -78,10 +78,13 @@ impl WorkspaceState {
     }
 
     pub fn find_by_worktree_path(&self, path: &str) -> Option<&Workspace> {
-        self.inner
-            .workspaces
-            .iter()
-            .find(|w| path == w.worktree_path || path.starts_with(&format!("{}/", w.worktree_path)))
+        let cwd = Path::new(path);
+        self.inner.workspaces.iter().find(|w| {
+            // Use Path::starts_with which compares by path components.
+            // This handles mixed separators on Windows (e.g., stored path
+            // has forward slashes from config while cwd uses backslashes).
+            cwd.starts_with(Path::new(&w.worktree_path))
+        })
     }
 
     pub fn set_terminal_tab_id(&mut self, project: &str, name: &str, tab_id: String) {
