@@ -51,11 +51,6 @@ impl TmuxBackend {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            // "no server running" means the tmux server shut down (all sessions
-            // ended). This is expected after a workspace session exits.
-            if stderr.contains("no server running") {
-                return Ok(String::new());
-            }
             anyhow::bail!("tmux error: {}", stderr.trim());
         }
 
@@ -211,6 +206,8 @@ impl TerminalBackend for TmuxBackend {
             return Ok(());
         }
 
+        // kill-session may fail if the server already shut down (no sessions left).
+        // That's fine — the session is already gone.
         let _ = Self::run_tmux(&["kill-session", "-t", tab_id]);
         Ok(())
     }
@@ -241,8 +238,13 @@ impl TerminalBackend for TmuxBackend {
             return Ok(());
         }
 
-        // Get pane IDs for this session
-        let output = Self::run_tmux(&["list-panes", "-t", tab_id, "-F", "#{pane_id}"])?;
+        // Get pane IDs for this session. If the server is no longer running
+        // (session already exited), silently skip.
+        let output = match Self::run_tmux(&["list-panes", "-t", tab_id, "-F", "#{pane_id}"]) {
+            Ok(o) => o,
+            Err(e) if e.to_string().contains("no server running") => return Ok(()),
+            Err(e) => return Err(e),
+        };
         let pane_ids: Vec<&str> = output.lines().collect();
 
         let pane_id = pane_ids.get(pane_index).ok_or_else(|| {
