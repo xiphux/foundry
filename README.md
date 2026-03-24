@@ -346,8 +346,20 @@ Foundry detects the terminal automatically from the `TERM_PROGRAM` environment v
 | Ghostty | macOS | AppleScript |
 | iTerm2 | macOS | AppleScript |
 | WezTerm | macOS, Linux, Windows | `wezterm cli` |
+| Windows Terminal | Windows | `wt.exe` |
 
-All backends support: opening tabs, creating split panes, running commands in panes, closing tabs, and focusing tabs.
+All backends support: opening tabs, creating split panes, running commands in panes, and closing tabs. Windows Terminal does not support `run_in_pane` (deferred pane commands) or `focus_tab` due to `wt.exe` limitations.
+
+### Shell Configuration
+
+On Windows Terminal, you can specify which shell to use in panes:
+
+```toml
+# ~/.foundry/config.toml
+shell = "C:/Program Files/Git/bin/bash.exe"
+```
+
+Supported values: `"powershell"`, `"pwsh"`, or a path to `bash.exe`. If you specify `git-bash.exe`, foundry automatically resolves it to the embeddable `bin/bash.exe` in the same Git installation. Other terminal backends use their default shell and ignore this setting.
 
 ## Shell Completions
 
