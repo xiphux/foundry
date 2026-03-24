@@ -3,12 +3,12 @@ use std::path::Path;
 use std::process::Command;
 
 use super::{PaneSpec, TerminalBackend};
+use crate::config::types::SplitDirection;
 
 pub struct ZellijBackend;
 
 impl ZellijBackend {
     /// Detect if Zellij is available on the system.
-    /// Only used as a fallback when no native terminal backend is detected.
     pub fn detect() -> Option<Self> {
         Command::new("zellij")
             .arg("--version")
@@ -24,6 +24,11 @@ impl ZellijBackend {
     }
 
     /// Build a Zellij KDL layout string from pane specs.
+    ///
+    /// Converts foundry's `split_from` + `direction` tree into Zellij's nested
+    /// container model. Each split creates a directional container:
+    /// - `SplitDirection::Right` → `direction="vertical"` (side-by-side)
+    /// - `SplitDirection::Down` → `direction="horizontal"` (stacked)
     fn build_layout(path: &Path, panes: &[PaneSpec]) -> Result<String> {
         let path_str = path.to_str().context("invalid worktree path")?;
 
@@ -31,34 +36,81 @@ impl ZellijBackend {
             return Ok(format!("layout {{\n    cwd \"{path_str}\"\n    pane\n}}\n"));
         }
 
+        let escaped_cwd = path_str.replace('"', "\\\"");
+
         let mut lines = Vec::new();
         lines.push("layout {".into());
-        lines.push(format!("    cwd \"{}\"", path_str.replace('"', "\\\"")));
+        lines.push(format!("    cwd \"{escaped_cwd}\""));
 
-        for pane in panes {
-            if let Some(ref cmd) = pane.command {
-                if !cmd.is_empty() {
-                    // Build command with env vars prepended
-                    let mut full_cmd = String::new();
-                    for (k, v) in &pane.env {
-                        full_cmd.push_str(&format!("export {k}='{}'; ", v.replace('\'', "'\\''")));
-                    }
-                    full_cmd.push_str(cmd);
-                    let escaped = full_cmd.replace('"', "\\\"");
-                    lines.push(format!(
-                        "    pane command=\"bash\" name=\"{}\" {{",
-                        pane.name
-                    ));
-                    lines.push(format!("        args \"-c\" \"{escaped}\""));
-                    lines.push("    }".into());
-                    continue;
-                }
-            }
-            lines.push(format!("    pane name=\"{}\"", pane.name));
+        // Start from the first pane (root of the split tree)
+        if let Some(root) = panes.first() {
+            let pane_lines = Self::render_pane(root, panes, 4);
+            lines.extend(pane_lines);
         }
 
         lines.push("}".into());
         Ok(lines.join("\n"))
+    }
+
+    /// Recursively render a pane and its children (panes that split from it).
+    fn render_pane(pane: &PaneSpec, all_panes: &[PaneSpec], indent: usize) -> Vec<String> {
+        // Find children that split from this pane
+        let children: Vec<&PaneSpec> = all_panes
+            .iter()
+            .filter(|p| p.split_from.as_deref() == Some(&pane.name))
+            .collect();
+
+        if children.is_empty() {
+            // Leaf pane — no children split from it
+            return Self::render_pane_node(pane, indent);
+        }
+
+        // This pane has children. For each child, wrap the current pane and
+        // the child in a container with the child's split direction.
+        let pad = " ".repeat(indent);
+        let mut current = Self::render_pane_node(pane, indent + 4);
+
+        for child in &children {
+            let dir_str = match child.direction {
+                Some(SplitDirection::Right) => "vertical",
+                Some(SplitDirection::Down) => "horizontal",
+                None => "vertical",
+            };
+
+            let child_lines = Self::render_pane(child, all_panes, indent + 4);
+
+            let mut wrapped = Vec::new();
+            wrapped.push(format!("{pad}pane direction=\"{dir_str}\" {{"));
+            wrapped.extend(current);
+            wrapped.extend(child_lines);
+            wrapped.push(format!("{pad}}}"));
+            current = wrapped;
+        }
+
+        current
+    }
+
+    /// Render a single pane node (leaf, no container wrapping).
+    fn render_pane_node(pane: &PaneSpec, indent: usize) -> Vec<String> {
+        let pad = " ".repeat(indent);
+
+        if let Some(ref cmd) = pane.command {
+            if !cmd.is_empty() {
+                let mut full_cmd = String::new();
+                for (k, v) in &pane.env {
+                    full_cmd.push_str(&format!("export {k}='{}'; ", v.replace('\'', "'\\''")));
+                }
+                full_cmd.push_str(cmd);
+                let escaped = full_cmd.replace('"', "\\\"");
+                return vec![
+                    format!("{pad}pane command=\"bash\" name=\"{}\" {{", pane.name),
+                    format!("{pad}    args \"-c\" \"{escaped}\""),
+                    format!("{pad}}}"),
+                ];
+            }
+        }
+
+        vec![format!("{pad}pane name=\"{}\"", pane.name)]
     }
 
     /// Generate a session name from project/workspace info.
@@ -111,9 +163,6 @@ impl TerminalBackend for ZellijBackend {
             );
         }
 
-        // Start Zellij in the background — it takes over a new process
-        // We use `spawn` rather than `exec` so foundry can continue to
-        // record state after the session starts.
         let mut child = Command::new("zellij")
             .args([
                 "--session",
@@ -125,10 +174,6 @@ impl TerminalBackend for ZellijBackend {
             .spawn()
             .context("failed to start zellij")?;
 
-        // Detach immediately so foundry can continue.
-        // Zellij runs in the foreground of its own terminal — we don't wait.
-        // However, if we're in a pipe/non-interactive context, we should wait.
-        // For now, just let it run.
         let _ = child.wait();
 
         // Clean up layout file
@@ -142,9 +187,11 @@ impl TerminalBackend for ZellijBackend {
             return Ok(());
         }
 
+        // Use spawn — when killing our own session from inside it,
+        // output() can hang because the process gets terminated.
         let _ = Command::new("zellij")
             .args(["kill-session", tab_id])
-            .output();
+            .spawn();
 
         Ok(())
     }
@@ -180,9 +227,6 @@ impl TerminalBackend for ZellijBackend {
             return Ok(());
         }
 
-        // Zellij's CLI can write to panes, but targeting by index requires
-        // the session to be running and us to be attached. For now, use
-        // zellij action write-chars which sends to the focused pane.
         let cmd_with_enter = format!("{command}\n");
         let _ = Command::new("zellij")
             .args([
