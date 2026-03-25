@@ -2,6 +2,10 @@
 name = "foundry"
 version = "0.1.0"
 edition = "2021"
+description = "CLI for managing AI agent workspaces using git worktrees and terminal automation"
+repository = "https://github.com/xiphux/foundry"
+homepage = "https://github.com/xiphux/foundry"
+license = "GPL-3.0-only"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -16,3 +20,8 @@ serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
