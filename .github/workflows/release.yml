@@ -45,8 +45,40 @@ on:
       - '**[0-9]+.[0-9]+.[0-9]+*'
 
 jobs:
+  # Run CI checks (fmt, clippy, test) before building release artifacts.
+  # Prevents releasing code that hasn't passed checks, especially when
+  # a tag and commit are pushed simultaneously.
+  ci:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Configure git
+        run: |
+          git config --global user.email "ci@foundry.dev"
+          git config --global user.name "CI"
+      - name: Check formatting
+        run: cargo fmt -- --check
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+      - name: Run tests
+        run: cargo test
+
   # Run 'dist plan' (or host) to determine what tasks we need to do
   plan:
+    needs:
+      - ci
     runs-on: "ubuntu-22.04"
     outputs:
       val: ${{ steps.plan.outputs.manifest }}
