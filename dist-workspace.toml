@@ -8,14 +8,18 @@ cargo-dist-version = "0.31.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
-installers = ["shell", "homebrew"]
+installers = ["shell", "powershell", "homebrew"]
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
+# Run CI checks before plan to gate releases
+plan-jobs = ["./ci-gate"]
+# Allow manual edits to release.yml (Scoop publish job)
+allow-dirty = ["ci"]
 # Publish jobs to run after building
 publish-jobs = ["homebrew"]
 # Homebrew tap repository for publishing formulas
-tap = "xiphux/homebrew-foundry"
+tap = "xiphux/homebrew-tap"

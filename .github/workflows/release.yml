@@ -45,40 +45,8 @@ on:
       - '**[0-9]+.[0-9]+.[0-9]+*'
 
 jobs:
-  # Run CI checks (fmt, clippy, test) before building release artifacts.
-  # Prevents releasing code that hasn't passed checks, especially when
-  # a tag and commit are pushed simultaneously.
-  ci:
-    runs-on: "ubuntu-latest"
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Configure git
-        run: |
-          git config --global user.email "ci@foundry.dev"
-          git config --global user.name "CI"
-      - name: Check formatting
-        run: cargo fmt -- --check
-      - name: Clippy
-        run: cargo clippy -- -D warnings
-      - name: Run tests
-        run: cargo test
-
   # Run 'dist plan' (or host) to determine what tasks we need to do
   plan:
-    needs:
-      - ci
     runs-on: "ubuntu-22.04"
     outputs:
       val: ${{ steps.plan.outputs.manifest }}
@@ -119,12 +87,17 @@ jobs:
           name: artifacts-plan-dist-manifest
           path: plan-dist-manifest.json
 
+  custom-ci-gate:
+    uses: ./.github/workflows/ci-gate.yml
+    secrets: inherit
+
   # Build and packages all the platform-specific things
   build-local-artifacts:
     name: build-local-artifacts (${{ join(matrix.targets, ', ') }})
     # Let the initial task tell us to not run (currently very blunt)
     needs:
       - plan
+      - custom-ci-gate
     if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
     strategy:
       fail-fast: false
@@ -325,7 +298,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: true
-          repository: "xiphux/homebrew-foundry"
+          repository: "xiphux/homebrew-tap"
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
       # So we have access to the formula
       - name: Fetch homebrew formulae
@@ -356,15 +329,71 @@ jobs:
           done
           git push
 
+  # Publish the Scoop manifest to the bucket repository
+  publish-scoop-manifest:
+    needs:
+      - plan
+      - host
+    runs-on: "ubuntu-22.04"
+    if: ${{ !fromJson(needs.plan.outputs.val).announcement_is_prerelease || fromJson(needs.plan.outputs.val).publish_prereleases }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: "Download release artifacts"
+        uses: actions/download-artifact@v7
+        with:
+          pattern: artifacts-*
+          path: artifacts
+          merge-multiple: true
+      - name: "Build and publish Scoop manifest"
+        env:
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          PLAN: ${{ needs.plan.outputs.val }}
+        run: |
+          if [ -z "$SCOOP_BUCKET_TOKEN" ]; then
+            echo "SCOOP_BUCKET_TOKEN secret not set, skipping Scoop publish"
+            exit 0
+          fi
+
+          VERSION=$(echo "$PLAN" | jq -r '.releases[0].app_version')
+
+          # Get the SHA256 hash from the checksum file
+          HASH_FILE="artifacts/foundry-x86_64-pc-windows-msvc.zip.sha256"
+          if [ ! -f "$HASH_FILE" ]; then
+            echo "No Windows checksum file found, skipping Scoop publish"
+            exit 0
+          fi
+          HASH=$(awk '{print $1}' "$HASH_FILE")
+
+          # Generate manifest from template
+          sed -e "s/VERSION/${VERSION}/g" -e "s/HASH/${HASH}/g" \
+            .github/scoop/foundry.json.tmpl > foundry.json
+
+          # Clone bucket repo, update manifest, push
+          git clone "https://x-access-token:${SCOOP_BUCKET_TOKEN}@github.com/xiphux/scoop-bucket.git" bucket
+          mkdir -p bucket/bucket
+          cp foundry.json bucket/bucket/foundry.json
+          cd bucket
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bucket/foundry.json
+          if git diff --cached --quiet; then
+            echo "Manifest unchanged, nothing to commit"
+          else
+            git commit -m "foundry ${VERSION}"
+            git push
+            echo "Scoop manifest published successfully"
+          fi
+
   announce:
     needs:
       - plan
       - host
       - publish-homebrew-formula
+      - publish-scoop-manifest
     # use "always() && ..." to allow us to wait for all publish jobs while
     # still allowing individual publish jobs to skip themselves (for prereleases).
     # "host" however must run to completion, no skipping allowed!
-    if: ${{ always() && needs.host.result == 'success' && (needs.publish-homebrew-formula.result == 'skipped' || needs.publish-homebrew-formula.result == 'success') }}
+    if: ${{ always() && needs.host.result == 'success' && (needs.publish-homebrew-formula.result == 'skipped' || needs.publish-homebrew-formula.result == 'success') && (needs.publish-scoop-manifest.result == 'skipped' || needs.publish-scoop-manifest.result == 'success') }}
     runs-on: "ubuntu-22.04"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
