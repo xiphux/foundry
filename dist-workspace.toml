@@ -15,3 +15,7 @@ targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-da
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
+# Publish jobs to run after building
+publish-jobs = ["homebrew"]
+# Homebrew tap repository for publishing formulas
+tap = "xiphux/homebrew-foundry"
