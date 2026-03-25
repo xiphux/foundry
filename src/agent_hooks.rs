@@ -115,8 +115,26 @@ pub fn claude_project_dir(worktree_path: &Path) -> Option<PathBuf> {
     Some(home.join(".claude").join("projects").join(mangled))
 }
 
+/// Check if an agent has an existing conversation for a worktree.
+/// Currently only Claude stores file-based conversations; other agents
+/// always return false.
+pub fn has_agent_conversation(agent: &str, worktree_path: &Path) -> bool {
+    match agent {
+        "claude" => has_claude_conversation(worktree_path),
+        _ => false,
+    }
+}
+
+/// Clear agent conversation state for a worktree.
+/// Used when starting a new workspace to prevent resuming stale conversations
+/// from a previous workspace with the same name.
+pub fn clear_agent_conversations(worktree_path: &Path) {
+    // Currently only Claude stores file-based conversation state
+    clear_claude_conversations(worktree_path);
+}
+
 /// Check if a Claude conversation exists for a worktree (has .jsonl files).
-pub fn has_claude_conversation(worktree_path: &Path) -> bool {
+fn has_claude_conversation(worktree_path: &Path) -> bool {
     let dir = match claude_project_dir(worktree_path) {
         Some(d) => d,
         None => return false,
@@ -136,9 +154,7 @@ pub fn has_claude_conversation(worktree_path: &Path) -> bool {
 }
 
 /// Clear the Claude conversation directory for a worktree.
-/// Used when starting a new workspace to prevent resuming stale conversations
-/// from a previous workspace with the same name.
-pub fn clear_claude_conversations(worktree_path: &Path) {
+fn clear_claude_conversations(worktree_path: &Path) {
     if let Some(dir) = claude_project_dir(worktree_path) {
         if dir.exists() {
             let _ = std::fs::remove_dir_all(&dir);
@@ -448,39 +464,46 @@ mod tests {
     }
 
     #[test]
-    fn has_claude_conversation_false_when_no_dir() {
+    fn has_agent_conversation_false_when_no_dir() {
         let dir = TempDir::new().unwrap();
-        assert!(!has_claude_conversation(dir.path()));
+        assert!(!has_agent_conversation("claude", dir.path()));
     }
 
     #[test]
-    fn has_claude_conversation_true_when_jsonl_exists() {
+    fn has_agent_conversation_true_when_jsonl_exists() {
         let dir = TempDir::new().unwrap();
         if let Some(project_dir) = claude_project_dir(dir.path()) {
             std::fs::create_dir_all(&project_dir).unwrap();
             std::fs::write(project_dir.join("abc123.jsonl"), "test conversation").unwrap();
-            assert!(has_claude_conversation(dir.path()));
+            assert!(has_agent_conversation("claude", dir.path()));
             let _ = std::fs::remove_dir_all(&project_dir);
         }
     }
 
     #[test]
-    fn clear_claude_conversations_removes_dir() {
+    fn has_agent_conversation_false_for_unknown_agent() {
+        let dir = TempDir::new().unwrap();
+        assert!(!has_agent_conversation("codex", dir.path()));
+        assert!(!has_agent_conversation("unknown-agent", dir.path()));
+    }
+
+    #[test]
+    fn clear_agent_conversations_removes_dir() {
         let dir = TempDir::new().unwrap();
         if let Some(project_dir) = claude_project_dir(dir.path()) {
             std::fs::create_dir_all(&project_dir).unwrap();
             std::fs::write(project_dir.join("abc123.jsonl"), "test conversation").unwrap();
             assert!(project_dir.exists());
-            clear_claude_conversations(dir.path());
+            clear_agent_conversations(dir.path());
             assert!(!project_dir.exists());
         }
     }
 
     #[test]
-    fn clear_claude_conversations_noop_when_no_dir() {
+    fn clear_agent_conversations_noop_when_no_dir() {
         let dir = TempDir::new().unwrap();
         // Should not panic
-        clear_claude_conversations(dir.path());
+        clear_agent_conversations(dir.path());
     }
 }
 

@@ -38,11 +38,65 @@ pub struct ResolvedConfig {
     pub ports: Vec<String>,
 }
 
+/// Per-agent capabilities. Groups all agent-specific knowledge in one place
+/// so adding a new agent is a single registry entry rather than touching
+/// multiple match arms across the codebase.
+pub struct AgentCapabilities {
+    /// The CLI executable (and any default flags) for this agent.
+    pub executable: &'static str,
+    /// Flag to resume a previous conversation (e.g., "--continue", "--resume").
+    pub resume_flag: Option<&'static str>,
+    /// Whether the agent accepts the prompt as a trailing positional argument.
+    pub prompt_is_positional: bool,
+    /// Alternative executable names that should trigger the "use agent field" warning
+    /// (e.g., "coder" for every-code). The agent identifier itself is always included.
+    pub executable_aliases: &'static [&'static str],
+}
+
+/// Registry of known agents and their capabilities.
+const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
+    (
+        "claude",
+        AgentCapabilities {
+            executable: "claude",
+            resume_flag: Some("--continue"),
+            prompt_is_positional: true,
+            executable_aliases: &[],
+        },
+    ),
+    (
+        "codex",
+        AgentCapabilities {
+            executable: "codex --full-auto",
+            resume_flag: Some("--resume"),
+            prompt_is_positional: true,
+            executable_aliases: &[],
+        },
+    ),
+    (
+        "every-code",
+        AgentCapabilities {
+            executable: "coder --full-auto",
+            resume_flag: Some("--resume"),
+            prompt_is_positional: true,
+            executable_aliases: &["coder"],
+        },
+    ),
+];
+
+/// Look up capabilities for a known agent. Returns None for unknown/custom agents.
+pub fn agent_capabilities(agent: &str) -> Option<&'static AgentCapabilities> {
+    AGENT_REGISTRY
+        .iter()
+        .find(|(id, _)| *id == agent)
+        .map(|(_, caps)| caps)
+}
+
 /// Build the full agent command string for a given agent identifier,
 /// optionally including a prompt and/or session resume flag.
-/// For known agents (claude, codex, every-code), the prompt is passed as
-/// a positional argument. If `continue_session` is true, adds the
-/// appropriate flag to resume the previous conversation.
+/// For known agents, the prompt is passed as a positional argument.
+/// If `continue_session` is true, adds the appropriate flag to resume
+/// the previous conversation.
 pub fn build_agent_command(
     agent: &str,
     custom_command: Option<&str>,
@@ -50,12 +104,13 @@ pub fn build_agent_command(
     continue_session: bool,
 ) -> String {
     let base = resolve_agent_command(agent, custom_command);
+    let caps = agent_capabilities(agent);
 
     let with_continue = if continue_session {
-        match agent {
-            "claude" => format!("{base} --continue"),
-            "codex" | "every-code" => format!("{base} --resume"),
-            _ => base,
+        if let Some(flag) = caps.and_then(|c| c.resume_flag) {
+            format!("{base} {flag}")
+        } else {
+            base
         }
     } else {
         base
@@ -63,19 +118,16 @@ pub fn build_agent_command(
 
     match prompt {
         Some(p) if !p.is_empty() => {
-            let escaped = p.replace('\'', "'\\''");
-            match agent {
-                "claude" | "codex" | "every-code" => format!("{with_continue} '{escaped}'"),
-                _ => with_continue,
+            if caps.is_some_and(|c| c.prompt_is_positional) {
+                let escaped = p.replace('\'', "'\\''");
+                format!("{with_continue} '{escaped}'")
+            } else {
+                with_continue
             }
         }
         _ => with_continue,
     }
 }
-
-/// Known agent executable names. Used to warn when users put agent commands
-/// in the `command` field instead of using the `agent` field.
-const KNOWN_AGENT_EXECUTABLES: &[&str] = &["claude", "codex", "coder"];
 
 /// Check if a pane command looks like it's invoking a known agent, and warn
 /// that the `agent` field should be used instead.
@@ -86,27 +138,34 @@ pub fn warn_agent_in_command(panes: &[PaneConfig]) {
         }
         if let Some(ref cmd) = pane.command {
             let first_word = cmd.split_whitespace().next().unwrap_or("");
-            if KNOWN_AGENT_EXECUTABLES.contains(&first_word) {
-                eprintln!(
-                    "Warning: pane '{}' uses command '{cmd}' which looks like a known agent. \
-                     Use `agent = \"{first_word}\"` instead of `command` so foundry can set up \
-                     permissions, status tracking, and prompt passthrough.",
-                    pane.name
-                );
+            // Check against all agent identifiers and their executable aliases
+            for (agent_id, caps) in AGENT_REGISTRY {
+                if first_word == *agent_id
+                    || caps.executable.split_whitespace().next() == Some(first_word)
+                    || caps.executable_aliases.contains(&first_word)
+                {
+                    eprintln!(
+                        "Warning: pane '{}' uses command '{cmd}' which looks like a known agent. \
+                         Use `agent = \"{agent_id}\"` instead of `command` so foundry can set up \
+                         permissions, status tracking, and prompt passthrough.",
+                        pane.name
+                    );
+                    break;
+                }
             }
         }
     }
 }
 
 /// Resolve the base agent command from the agent identifier.
-/// For codex/every-code, includes CLI flags for autonomous operation in worktrees.
+/// For known agents, returns the executable with any default flags.
 pub fn resolve_agent_command(agent: &str, custom_command: Option<&str>) -> String {
-    match agent {
-        "claude" => "claude".to_string(),
-        "codex" => "codex --full-auto".to_string(),
-        "every-code" => "coder --full-auto".to_string(),
-        "custom" => custom_command.unwrap_or("claude").to_string(),
-        other => other.to_string(),
+    if agent == "custom" {
+        return custom_command.unwrap_or("claude").to_string();
+    }
+    match agent_capabilities(agent) {
+        Some(caps) => caps.executable.to_string(),
+        None => agent.to_string(),
     }
 }
 
@@ -438,14 +497,26 @@ mod tests {
     }
 
     #[test]
-    fn known_agent_executables_detected() {
-        // Should match: first word is a known agent executable
-        assert!(KNOWN_AGENT_EXECUTABLES.contains(&"claude"));
-        assert!(KNOWN_AGENT_EXECUTABLES.contains(&"codex"));
-        assert!(KNOWN_AGENT_EXECUTABLES.contains(&"coder"));
-        // Should not match
-        assert!(!KNOWN_AGENT_EXECUTABLES.contains(&"npm"));
-        assert!(!KNOWN_AGENT_EXECUTABLES.contains(&"claude-helper"));
+    fn agent_registry_has_known_agents() {
+        assert!(agent_capabilities("claude").is_some());
+        assert!(agent_capabilities("codex").is_some());
+        assert!(agent_capabilities("every-code").is_some());
+        assert!(agent_capabilities("unknown").is_none());
+    }
+
+    #[test]
+    fn agent_capabilities_claude() {
+        let caps = agent_capabilities("claude").unwrap();
+        assert_eq!(caps.executable, "claude");
+        assert_eq!(caps.resume_flag, Some("--continue"));
+        assert!(caps.prompt_is_positional);
+    }
+
+    #[test]
+    fn agent_capabilities_codex() {
+        let caps = agent_capabilities("codex").unwrap();
+        assert!(caps.executable.contains("--full-auto"));
+        assert_eq!(caps.resume_flag, Some("--resume"));
     }
 
     #[test]

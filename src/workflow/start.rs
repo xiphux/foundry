@@ -51,7 +51,7 @@ pub fn run(
     // Clear stale conversation history if this worktree name was used before.
     // This prevents --continue from resuming a conversation from a previous
     // workspace that happened to have the same name.
-    agent_hooks::clear_claude_conversations(&worktree_path);
+    agent_hooks::clear_agent_conversations(&worktree_path);
 
     // Fetch and fast-forward main if requested (via --fetch flag or auto_fetch config)
     if fetch || config.auto_fetch {
@@ -315,13 +315,6 @@ pub fn run(
 
         if let Some((pane_index, pane)) = deferred_pane {
             let mut chain = deferred_setup_commands;
-            let is_first_agent = config
-                .panes
-                .iter()
-                .find(|p| p.agent.is_some())
-                .map(|p| p.name == pane.name)
-                .unwrap_or(false);
-            let _deferred_prompt = if is_first_agent { prompt } else { None };
             let pane_cmd = if let Some(ref cmd) = pane.command {
                 let resolved = config::resolve_template(cmd, &template_vars)?;
                 if resolved.is_empty() {

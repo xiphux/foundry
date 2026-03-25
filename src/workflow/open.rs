@@ -52,9 +52,6 @@ pub fn open_workspace(
         project: project_name.into(),
     };
 
-    // Check if there's an existing Claude conversation to resume
-    let can_continue = agent_hooks::has_claude_conversation(worktree_path);
-
     // Build PaneSpecs from the resolved config, resolving template variables.
     // Only the first agent pane receives the prompt — multiple agents acting on
     // the same prompt simultaneously would interfere with each other.
@@ -76,8 +73,13 @@ pub fn open_workspace(
             } else {
                 None
             };
-            // Resume previous conversation if one exists and no new prompt is given
-            let continue_session = can_continue && agent == "claude" && pane_prompt.is_none();
+            // Resume previous conversation if the agent supports it,
+            // a conversation exists, and no new prompt is given.
+            let continue_session = pane_prompt.is_none()
+                && config::agent_capabilities(agent)
+                    .and_then(|c| c.resume_flag)
+                    .is_some()
+                && agent_hooks::has_agent_conversation(agent, worktree_path);
             Some(config::build_agent_command(
                 agent,
                 config.custom_agent_command.as_deref(),

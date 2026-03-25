@@ -260,6 +260,10 @@ impl WindowsTerminalBackend {
 }
 
 impl TerminalBackend for WindowsTerminalBackend {
+    fn supports_run_in_pane(&self) -> bool {
+        false
+    }
+
     fn open_workspace(&self, path: &Path, panes: &[PaneSpec], verbose: bool) -> Result<String> {
         if panes.is_empty() {
             bail!("no panes specified");
