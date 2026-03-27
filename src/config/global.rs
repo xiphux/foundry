@@ -19,6 +19,9 @@ pub struct GlobalConfig {
     pub auto_fetch: bool,
     /// Remote name to fetch from (default: "origin")
     pub fetch_remote: Option<String>,
+    /// Remote name for PR operations. If unset, uses the sole remote if there's
+    /// exactly one, otherwise defaults to "origin".
+    pub pr_remote: Option<String>,
     /// Custom prompt template for GitHub issues.
     /// Supports variables: {issue_number}, {title}, {body}
     pub issue_prompt: Option<String>,
@@ -67,6 +70,7 @@ impl Default for GlobalConfig {
             port_range_start: None,
             auto_fetch: false,
             fetch_remote: None,
+            pr_remote: None,
             issue_prompt: None,
             shell: None,
             panes: default_panes(),

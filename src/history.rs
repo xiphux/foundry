@@ -71,6 +71,29 @@ mod tests {
         assert_eq!(parsed.project, "myapp");
         assert_eq!(parsed.name, "feat");
     }
+
+    #[test]
+    fn history_event_pr_created_serializes() {
+        let event = HistoryEvent::pr_created(
+            "myapp",
+            "fix-auth",
+            "fix-auth",
+            42,
+            "https://github.com/user/repo/pull/42",
+        );
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"event\":\"pr_created\""));
+        assert!(json.contains("\"pr_number\":42"));
+        assert!(json.contains("\"pr_url\":\"https://github.com/user/repo/pull/42\""));
+    }
+
+    #[test]
+    fn history_event_pr_merged_serializes() {
+        let event = HistoryEvent::pr_merged("myapp", "fix-auth", "fix-auth", 42);
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"event\":\"pr_merged\""));
+        assert!(json.contains("\"pr_number\":42"));
+    }
 }
 
 /// A workspace lifecycle event recorded in the history log.
@@ -93,6 +116,10 @@ pub struct HistoryEvent {
     pub archived_as: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_number: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_url: Option<String>,
 }
 
 impl HistoryEvent {
@@ -108,6 +135,8 @@ impl HistoryEvent {
             merge_strategy: None,
             archived_as: None,
             from_branch: None,
+            pr_number: None,
+            pr_url: None,
         }
     }
 
@@ -129,6 +158,8 @@ impl HistoryEvent {
             merge_strategy: Some(merge_strategy.into()),
             archived_as: None,
             from_branch: None,
+            pr_number: None,
+            pr_url: None,
         }
     }
 
@@ -150,6 +181,8 @@ impl HistoryEvent {
             merge_strategy: None,
             archived_as: archived_as.map(|s| s.into()),
             from_branch: None,
+            pr_number: None,
+            pr_url: None,
         }
     }
 
@@ -165,6 +198,48 @@ impl HistoryEvent {
             merge_strategy: None,
             archived_as: None,
             from_branch: Some(from_branch.into()),
+            pr_number: None,
+            pr_url: None,
+        }
+    }
+
+    pub fn pr_created(
+        project: &str,
+        name: &str,
+        branch: &str,
+        pr_number: u64,
+        pr_url: &str,
+    ) -> Self {
+        Self {
+            event: "pr_created".into(),
+            project: project.into(),
+            name: name.into(),
+            branch: branch.into(),
+            timestamp: Utc::now(),
+            from_issue: None,
+            commits: None,
+            merge_strategy: None,
+            archived_as: None,
+            from_branch: None,
+            pr_number: Some(pr_number),
+            pr_url: Some(pr_url.into()),
+        }
+    }
+
+    pub fn pr_merged(project: &str, name: &str, branch: &str, pr_number: u64) -> Self {
+        Self {
+            event: "pr_merged".into(),
+            project: project.into(),
+            name: name.into(),
+            branch: branch.into(),
+            timestamp: Utc::now(),
+            from_issue: None,
+            commits: None,
+            merge_strategy: None,
+            archived_as: None,
+            from_branch: None,
+            pr_number: Some(pr_number),
+            pr_url: None,
         }
     }
 }
@@ -267,6 +342,20 @@ pub fn display(limit: usize) -> Result<()> {
                     String::new()
                 }
             }
+            "pr_created" => {
+                if let Some(ref url) = event.pr_url {
+                    format!(" (PR {url})")
+                } else {
+                    String::new()
+                }
+            }
+            "pr_merged" => {
+                if let Some(pr) = event.pr_number {
+                    format!(" (PR #{pr})")
+                } else {
+                    String::new()
+                }
+            }
             _ => String::new(),
         };
 
@@ -275,6 +364,8 @@ pub fn display(limit: usize) -> Result<()> {
             "finished" => ("\x1b[34m", "finished  "),
             "discarded" => ("\x1b[33m", "discarded "),
             "restored" => ("\x1b[36m", "restored  "),
+            "pr_created" => ("\x1b[35m", "pr        "),
+            "pr_merged" => ("\x1b[34m", "merged    "),
             _ => ("", &*format!("{:<10}", event.event)),
         };
 

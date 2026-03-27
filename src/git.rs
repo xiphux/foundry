@@ -199,6 +199,27 @@ pub fn diff_committed(repo_path: &Path, base: &str, branch: &str, stat: bool) ->
     }
 }
 
+/// List all configured remote names.
+pub fn list_remotes(repo_path: &Path) -> Result<Vec<String>> {
+    let output = run_git(repo_path, &["remote"])?;
+    Ok(output
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.to_string())
+        .collect())
+}
+
+/// Get the URL of a remote.
+pub fn remote_url(repo_path: &Path, remote: &str) -> Result<String> {
+    run_git(repo_path, &["remote", "get-url", remote])
+}
+
+/// Push a branch to a remote. Uses --set-upstream on first push.
+pub fn push_branch(repo_path: &Path, remote: &str, branch: &str) -> Result<()> {
+    run_git(repo_path, &["push", "-u", remote, branch])?;
+    Ok(())
+}
+
 /// Get the uncommitted changes (both staged and unstaged) in a worktree.
 /// If `stat` is true, returns `--stat` summary instead of full patch.
 pub fn diff_uncommitted(worktree_path: &Path, stat: bool) -> Result<String> {

@@ -1,13 +1,10 @@
 use anyhow::{Context, Result};
 use std::path::Path;
-use std::process::Command;
 
-use crate::agent_hooks;
-use crate::config::{self, MergeStrategy, ResolvedConfig, TemplateVars};
+use crate::config::{MergeStrategy, ResolvedConfig};
 use crate::git;
 use crate::history;
 use crate::state::WorkspaceState;
-use crate::terminal;
 
 pub fn run(
     name: &str,
@@ -46,42 +43,6 @@ pub fn run(
              Commit or stash them before finishing.",
             source_path.display()
         );
-    }
-
-    let template_vars = TemplateVars {
-        source: source_path.to_string_lossy().into(),
-        worktree: worktree_path.to_string_lossy().into(),
-        branch: branch.clone(),
-        name: name.into(),
-        project: project_name.into(),
-    };
-
-    for script in &config.teardown_scripts {
-        let resolved_command = config::resolve_template(&script.command, &template_vars)?;
-        let working_dir = if let Some(ref wd) = script.working_dir {
-            config::resolve_template(wd, &template_vars)?
-        } else {
-            worktree_path.to_string_lossy().into()
-        };
-
-        if verbose {
-            eprintln!("Running teardown script: {}...", script.name);
-        }
-
-        let status = Command::new("sh")
-            .arg("-c")
-            .arg(&resolved_command)
-            .current_dir(&working_dir)
-            .status()
-            .with_context(|| format!("failed to run teardown script '{}'", script.name))?;
-
-        if !status.success() {
-            eprintln!(
-                "Warning: teardown script '{}' failed (exit code {}), continuing...",
-                script.name,
-                status.code().unwrap_or(-1)
-            );
-        }
     }
 
     let main_branch = git::detect_main_branch(source_path)?;
@@ -126,95 +87,36 @@ pub fn run(
         }
     }
 
-    // On Windows, directories can't be deleted while any process has them as
-    // its cwd. If we're running from inside the worktree, bail immediately.
-    if cfg!(windows) {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        if cwd.starts_with(&worktree_path) {
-            anyhow::bail!(
-                "on Windows, you cannot finish a workspace from inside its worktree \
-                 (the directory is locked by your shell). Close this tab first, then run:\n  \
-                 foundry finish {name}"
-            );
-        }
-    }
-
-    // Remove worktree — on Windows this may fail if the workspace's terminal
-    // panes still hold the directory open. In that case, close the panes and
-    // retry before giving up.
-    if verbose {
-        eprintln!("Removing worktree...");
-    }
-    if let Err(first_err) = git::remove_worktree(source_path, &worktree_path, false) {
-        if cfg!(windows) && !tab_id.is_empty() {
-            // git worktree remove partially succeeded: it unregistered the
-            // worktree from git metadata but failed to delete the directory
-            // (locked by pane processes). Close the panes, then delete the
-            // leftover directory directly.
-            if verbose {
-                eprintln!("Worktree directory is locked, closing terminal panes and retrying...");
-            }
-            if let Ok(backend) = terminal::detect_terminal() {
-                let _ = backend.close_tab(&tab_id);
-            }
-            std::thread::sleep(std::time::Duration::from_millis(1500));
-
-            if worktree_path.exists() {
-                std::fs::remove_dir_all(&worktree_path).with_context(|| {
-                    format!(
-                        "could not remove worktree directory after closing panes. \
-                         If another process still holds it open, close it and run:\n  \
-                         rm -rf '{}'\n  foundry finish {name}",
-                        worktree_path.display()
-                    )
-                })?;
-            }
-        } else {
-            return Err(first_err);
-        }
-    }
-
-    // Archive if the branch had commits, otherwise just delete it
-    if has_commits {
-        if verbose {
-            eprintln!("Archiving branch '{branch}'...");
-        }
-        git::archive_branch(source_path, &branch, &config.archive_prefix)?;
-        eprintln!("Finished workspace '{name}'. Branch '{branch}' archived.");
-    } else {
-        if verbose {
-            eprintln!("Deleting branch '{branch}' (no commits)...");
-        }
-        git::delete_branch(source_path, &branch)?;
-        eprintln!("Finished workspace '{name}'. Branch '{branch}' deleted (no commits).");
-    }
-
     let strategy_str = match config.merge_strategy {
         MergeStrategy::FfOnly => "ff-only",
         MergeStrategy::Merge => "merge",
     };
-    let _ = history::record(&history::HistoryEvent::finished(
-        project_name,
-        name,
-        &branch,
-        commit_count,
-        strategy_str,
-    ));
 
-    state.remove(project_name, name);
-    state.save_to(state_path)?;
-    agent_hooks::remove_status(project_name, name);
+    let history_event =
+        history::HistoryEvent::finished(project_name, name, &branch, commit_count, strategy_str);
 
-    // Close the terminal tab LAST — if we're running from inside the worktree's
-    // tab, this will kill our own process. All cleanup must be done before this.
-    if !tab_id.is_empty() {
-        if verbose {
-            eprintln!("Closing terminal tab...");
-        }
-        if let Ok(backend) = terminal::detect_terminal() {
-            let _ = backend.close_tab(&tab_id);
-        }
+    // Print success message BEFORE cleanup — cleanup closes the terminal tab
+    // as its last step, which kills the process if running from inside the tab.
+    if has_commits {
+        eprintln!("Finished workspace '{name}'. Branch '{branch}' archived.");
+    } else {
+        eprintln!("Finished workspace '{name}'. Branch '{branch}' deleted (no commits).");
     }
+
+    super::cleanup_workspace(
+        name,
+        project_name,
+        source_path,
+        &worktree_path,
+        &branch,
+        &tab_id,
+        config,
+        state,
+        state_path,
+        verbose,
+        super::BranchCleanup::Archive,
+        &history_event,
+    )?;
 
     Ok(())
 }

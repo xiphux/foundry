@@ -59,6 +59,24 @@ pub enum Commands {
         /// Worktree name (inferred from cwd if omitted)
         name: Option<String>,
     },
+    /// Push branch and create a pull request
+    Pr {
+        /// Worktree name (inferred from cwd if omitted)
+        name: Option<String>,
+
+        /// PR title (auto-generated from branch name if omitted)
+        #[arg(long)]
+        title: Option<String>,
+
+        /// PR body/description
+        #[arg(long)]
+        body: Option<String>,
+    },
+    /// Merge pull request and clean up workspace
+    Merge {
+        /// Worktree name (inferred from cwd if omitted)
+        name: Option<String>,
+    },
     /// Teardown and delete worktree without merging
     #[command(visible_alias = "destroy")]
     Discard {

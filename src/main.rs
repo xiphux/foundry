@@ -421,6 +421,12 @@ fn main() -> Result<()> {
             state.save_to(&state_path)?;
             workflow::status::run(&state)?;
         }
+        cli::Commands::Pr { .. } => {
+            todo!("pr command not yet implemented")
+        }
+        cli::Commands::Merge { .. } => {
+            todo!("merge command not yet implemented")
+        }
         cli::Commands::Completions { shell } => {
             clap_complete::generate(
                 shell,

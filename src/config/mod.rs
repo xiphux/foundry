@@ -25,6 +25,8 @@ pub struct ResolvedConfig {
     pub auto_fetch: bool,
     /// Remote name to fetch from (default: "origin")
     pub fetch_remote: String,
+    /// Remote name for PR operations (None = auto-detect)
+    pub pr_remote: Option<String>,
     pub panes: Vec<PaneConfig>,
     pub setup_scripts: Vec<ScriptConfig>,
     pub teardown_scripts: Vec<ScriptConfig>,
@@ -357,6 +359,9 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
             .and_then(|p| p.fetch_remote.clone())
             .or_else(|| global.fetch_remote.clone())
             .unwrap_or_else(|| "origin".into()),
+        pr_remote: project
+            .and_then(|p| p.pr_remote.clone())
+            .or_else(|| global.pr_remote.clone()),
         panes,
         setup_scripts: project.map(|p| p.scripts.setup.clone()).unwrap_or_default(),
         teardown_scripts: project
