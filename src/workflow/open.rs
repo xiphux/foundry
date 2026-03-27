@@ -28,15 +28,14 @@ pub fn open_workspace(
 
     // If the workspace already has an open tab, just focus it instead of opening a duplicate
     let workspace = state.find_by_worktree_path(&worktree_path.to_string_lossy());
-    if let Some(ws) = workspace {
-        if !ws.terminal_tab_id.is_empty() {
-            if let Ok(true) = backend.focus_tab(&ws.terminal_tab_id) {
-                if verbose {
-                    eprintln!("Workspace '{name}' is already open, switching to it.");
-                }
-                return Ok(());
-            }
+    if let Some(ws) = workspace
+        && !ws.terminal_tab_id.is_empty()
+        && let Ok(true) = backend.focus_tab(&ws.terminal_tab_id)
+    {
+        if verbose {
+            eprintln!("Workspace '{name}' is already open, switching to it.");
         }
+        return Ok(());
     }
 
     // Build template vars for pane commands from workspace state

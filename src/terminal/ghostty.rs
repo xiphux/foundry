@@ -104,25 +104,25 @@ impl GhosttyBackend {
 
         // Send commands to each pane
         for pane in panes {
-            if let Some(ref cmd) = pane.command {
-                if !cmd.is_empty() {
-                    let cur_var = pane_var(&pane.name);
-                    // If pane has env vars and it's the first pane (which didn't get
-                    // a surface configuration), export them manually
-                    if pane.split_from.is_none() && !pane.env.is_empty() {
-                        for (k, v) in &pane.env {
-                            let escaped_k = escape_applescript(k);
-                            let escaped_v = escape_applescript(v);
-                            lines.push(format!(
-                                "    input text \"export {escaped_k}='{escaped_v}'\" to {cur_var}"
-                            ));
-                            lines.push(format!("    send key \"enter\" to {cur_var}"));
-                        }
+            if let Some(ref cmd) = pane.command
+                && !cmd.is_empty()
+            {
+                let cur_var = pane_var(&pane.name);
+                // If pane has env vars and it's the first pane (which didn't get
+                // a surface configuration), export them manually
+                if pane.split_from.is_none() && !pane.env.is_empty() {
+                    for (k, v) in &pane.env {
+                        let escaped_k = escape_applescript(k);
+                        let escaped_v = escape_applescript(v);
+                        lines.push(format!(
+                            "    input text \"export {escaped_k}='{escaped_v}'\" to {cur_var}"
+                        ));
+                        lines.push(format!("    send key \"enter\" to {cur_var}"));
                     }
-                    let escaped_cmd = escape_applescript(cmd);
-                    lines.push(format!("    input text \"{escaped_cmd}\" to {cur_var}"));
-                    lines.push(format!("    send key \"enter\" to {cur_var}"));
                 }
+                let escaped_cmd = escape_applescript(cmd);
+                lines.push(format!("    input text \"{escaped_cmd}\" to {cur_var}"));
+                lines.push(format!("    send key \"enter\" to {cur_var}"));
             }
         }
 

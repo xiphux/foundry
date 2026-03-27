@@ -151,10 +151,9 @@ pub fn run(
     for agent in &agents {
         if let Err(e) =
             agent_hooks::setup_agent_hooks(&worktree_path, source_path, project_name, name, agent)
+            && verbose
         {
-            if verbose {
-                eprintln!("Warning: failed to set up agent hooks for {agent}: {e}");
-            }
+            eprintln!("Warning: failed to set up agent hooks for {agent}: {e}");
         }
     }
 

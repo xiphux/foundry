@@ -91,7 +91,9 @@ pub fn run(
                 verbose,
             );
         }
-        anyhow::bail!("branch '{branch}' not found. Run `foundry restore` with no arguments to see archived branches.");
+        anyhow::bail!(
+            "branch '{branch}' not found. Run `foundry restore` with no arguments to see archived branches."
+        );
     }
 
     // Derive a worktree name from the branch

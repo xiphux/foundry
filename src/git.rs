@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
 
@@ -19,10 +19,10 @@ fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {
 }
 
 pub fn detect_main_branch(repo_path: &Path) -> Result<String> {
-    if let Ok(output) = run_git(repo_path, &["symbolic-ref", "refs/remotes/origin/HEAD"]) {
-        if let Some(branch) = output.strip_prefix("refs/remotes/origin/") {
-            return Ok(branch.to_string());
-        }
+    if let Ok(output) = run_git(repo_path, &["symbolic-ref", "refs/remotes/origin/HEAD"])
+        && let Some(branch) = output.strip_prefix("refs/remotes/origin/")
+    {
+        return Ok(branch.to_string());
     }
     let branches = run_git(
         repo_path,

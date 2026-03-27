@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::path::Path;
 use std::process::Command;
 
@@ -33,20 +33,20 @@ impl TerminalBackend for BareBackend {
         let pane = panes.iter().find(|p| p.command.is_some()).or(panes.first());
 
         if let Some(pane) = pane {
-            if let Some(ref cmd) = pane.command {
-                if !cmd.is_empty() {
-                    if verbose {
-                        eprintln!("Running: {cmd}");
-                    }
-
-                    let mut child = Command::new("sh")
-                        .arg("-c")
-                        .arg(cmd)
-                        .current_dir(path)
-                        .envs(&pane.env)
-                        .spawn()?;
-                    let _ = child.wait();
+            if let Some(ref cmd) = pane.command
+                && !cmd.is_empty()
+            {
+                if verbose {
+                    eprintln!("Running: {cmd}");
                 }
+
+                let mut child = Command::new("sh")
+                    .arg("-c")
+                    .arg(cmd)
+                    .current_dir(path)
+                    .envs(&pane.env)
+                    .spawn()?;
+                let _ = child.wait();
             }
         } else {
             eprintln!("Workspace opened at {}", path.display());

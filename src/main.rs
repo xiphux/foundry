@@ -146,7 +146,9 @@ fn main() -> Result<()> {
 
                 let worktree_path = resolved.worktree_dir.join(&project_name).join(&name);
                 if !worktree_path.exists() {
-                    anyhow::bail!("worktree '{name}' does not exist. Use `foundry start {name}` to create it.");
+                    anyhow::bail!(
+                        "worktree '{name}' does not exist. Use `foundry start {name}` to create it."
+                    );
                 }
 
                 workflow::open::open_workspace(

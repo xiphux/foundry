@@ -94,20 +94,20 @@ impl ZellijBackend {
     fn render_pane_node(pane: &PaneSpec, indent: usize) -> Vec<String> {
         let pad = " ".repeat(indent);
 
-        if let Some(ref cmd) = pane.command {
-            if !cmd.is_empty() {
-                let mut full_cmd = String::new();
-                for (k, v) in &pane.env {
-                    full_cmd.push_str(&format!("export {k}='{}'; ", v.replace('\'', "'\\''")));
-                }
-                full_cmd.push_str(cmd);
-                let escaped = full_cmd.replace('"', "\\\"");
-                return vec![
-                    format!("{pad}pane command=\"bash\" name=\"{}\" {{", pane.name),
-                    format!("{pad}    args \"-c\" \"{escaped}\""),
-                    format!("{pad}}}"),
-                ];
+        if let Some(ref cmd) = pane.command
+            && !cmd.is_empty()
+        {
+            let mut full_cmd = String::new();
+            for (k, v) in &pane.env {
+                full_cmd.push_str(&format!("export {k}='{}'; ", v.replace('\'', "'\\''")));
             }
+            full_cmd.push_str(cmd);
+            let escaped = full_cmd.replace('"', "\\\"");
+            return vec![
+                format!("{pad}pane command=\"bash\" name=\"{}\" {{", pane.name),
+                format!("{pad}    args \"-c\" \"{escaped}\""),
+                format!("{pad}}}"),
+            ];
         }
 
         vec![format!("{pad}pane name=\"{}\"", pane.name)]

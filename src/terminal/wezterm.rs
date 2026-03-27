@@ -162,10 +162,10 @@ impl TerminalBackend for WeztermBackend {
                 }
 
                 // Run the pane command
-                if let Some(ref cmd) = pane.command {
-                    if !cmd.is_empty() {
-                        Self::send_text(pane_id, cmd)?;
-                    }
+                if let Some(ref cmd) = pane.command
+                    && !cmd.is_empty()
+                {
+                    Self::send_text(pane_id, cmd)?;
                 }
             }
         }

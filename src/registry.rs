@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -47,7 +47,9 @@ impl Registry {
 
     pub fn add(&mut self, name: &str, path: PathBuf) -> Result<()> {
         if self.inner.projects.contains_key(name) {
-            bail!("project '{name}' already exists. Use `foundry projects remove` first, or choose a different name.");
+            bail!(
+                "project '{name}' already exists. Use `foundry projects remove` first, or choose a different name."
+            );
         }
         self.inner
             .projects

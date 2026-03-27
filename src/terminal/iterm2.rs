@@ -103,13 +103,13 @@ impl Iterm2Backend {
             }
 
             // Run the pane command
-            if let Some(ref cmd) = pane.command {
-                if !cmd.is_empty() {
-                    let escaped_cmd = escape_applescript(cmd);
-                    lines.push(format!("    tell {var}"));
-                    lines.push(format!("        write text \"{escaped_cmd}\""));
-                    lines.push("    end tell".to_string());
-                }
+            if let Some(ref cmd) = pane.command
+                && !cmd.is_empty()
+            {
+                let escaped_cmd = escape_applescript(cmd);
+                lines.push(format!("    tell {var}"));
+                lines.push(format!("        write text \"{escaped_cmd}\""));
+                lines.push("    end tell".to_string());
             }
         }
 

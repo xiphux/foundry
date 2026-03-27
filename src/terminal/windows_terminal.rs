@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
@@ -131,10 +131,10 @@ impl WindowsTerminalBackend {
         }
 
         // Run the pane command if one was specified.
-        if let Some(ref cmd) = pane.command {
-            if !cmd.is_empty() {
-                ps_parts.push(cmd.clone());
-            }
+        if let Some(ref cmd) = pane.command
+            && !cmd.is_empty()
+        {
+            ps_parts.push(cmd.clone());
         }
 
         let ps_command = Self::escape_wt(&ps_parts.join("; "));
@@ -397,14 +397,11 @@ impl TerminalBackend for WindowsTerminalBackend {
                 if let Some(idx_str) = name_str
                     .strip_prefix("pane_")
                     .and_then(|s| s.strip_suffix(".pid"))
+                    && let Ok(idx) = idx_str.parse::<usize>()
+                    && let Ok(content) = std::fs::read_to_string(entry.path())
+                    && let Ok(pid) = content.trim().parse::<u32>()
                 {
-                    if let Ok(idx) = idx_str.parse::<usize>() {
-                        if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                            if let Ok(pid) = content.trim().parse::<u32>() {
-                                pids.push((idx, pid));
-                            }
-                        }
-                    }
+                    pids.push((idx, pid));
                 }
             }
         }

@@ -155,10 +155,10 @@ fn has_claude_conversation(worktree_path: &Path) -> bool {
 
 /// Clear the Claude conversation directory for a worktree.
 fn clear_claude_conversations(worktree_path: &Path) {
-    if let Some(dir) = claude_project_dir(worktree_path) {
-        if dir.exists() {
-            let _ = std::fs::remove_dir_all(&dir);
-        }
+    if let Some(dir) = claude_project_dir(worktree_path)
+        && dir.exists()
+    {
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
@@ -335,9 +335,11 @@ mod tests {
     fn build_worktree_permissions_scoped_to_path() {
         let path = std::path::PathBuf::from("/tmp/worktrees/myproject/feature");
         let (allow, deny) = build_worktree_permissions(&path);
-        assert!(allow
-            .iter()
-            .any(|a| a.contains("/tmp/worktrees/myproject/feature/**")));
+        assert!(
+            allow
+                .iter()
+                .any(|a| a.contains("/tmp/worktrees/myproject/feature/**"))
+        );
         assert!(allow.iter().any(|a| a.starts_with("Read(")));
         assert!(allow.iter().any(|a| a.starts_with("Edit(")));
         assert!(allow.iter().any(|a| a.starts_with("Write(")));
@@ -416,9 +418,11 @@ mod tests {
 
         let allow = settings["permissions"]["allow"].as_array().unwrap();
         // git push should be stripped
-        assert!(!allow
-            .iter()
-            .any(|v| v.as_str().map(|s| s.contains("git push")).unwrap_or(false)));
+        assert!(
+            !allow
+                .iter()
+                .any(|v| v.as_str().map(|s| s.contains("git push")).unwrap_or(false))
+        );
         // pnpm should remain
         assert!(allow.iter().any(|v| v.as_str() == Some("Bash(pnpm *)")));
 

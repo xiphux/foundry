@@ -330,12 +330,11 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
     // If no pane has an explicit agent, apply the global agent to the first pane
     // that has no command (the default "agent" pane in the default layout).
     let has_any_agent_pane = panes.iter().any(|p| p.agent.is_some());
-    if !has_any_agent_pane {
-        if let Some(first) = panes.first_mut() {
-            if first.command.is_none() {
-                first.agent = Some(agent.clone());
-            }
-        }
+    if !has_any_agent_pane
+        && let Some(first) = panes.first_mut()
+        && first.command.is_none()
+    {
+        first.agent = Some(agent.clone());
     }
 
     let resolved = ResolvedConfig {
@@ -378,10 +377,10 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
 
 /// Expand ~ to home directory.
 pub fn expand_tilde(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
     }
     PathBuf::from(path)
 }
@@ -474,10 +473,12 @@ mod tests {
     fn validate_template_invalid_variable_name() {
         let result = validate_template("cd {nonexistent}");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("unknown template variable"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("unknown template variable")
+        );
     }
 
     #[test]
