@@ -60,10 +60,63 @@ fn test_has_uncommitted_changes_clean() {
 }
 
 #[test]
-fn test_has_uncommitted_changes_dirty() {
+fn test_has_uncommitted_changes_dirty_untracked() {
     let repo = init_test_repo();
     std::fs::write(repo.path().join("file.txt"), "hello").unwrap();
     assert!(foundry::git::has_uncommitted_changes(repo.path()).unwrap());
+}
+
+#[test]
+fn test_has_uncommitted_changes_dirty_modified() {
+    let repo = init_test_repo();
+    // Create and commit a tracked file, then modify it
+    std::fs::write(repo.path().join("tracked.txt"), "original").unwrap();
+    Command::new("git")
+        .args(["add", "tracked.txt"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "add tracked"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    std::fs::write(repo.path().join("tracked.txt"), "modified").unwrap();
+    assert!(foundry::git::has_uncommitted_changes(repo.path()).unwrap());
+}
+
+#[test]
+fn test_has_modified_tracked_files_clean() {
+    let repo = init_test_repo();
+    assert!(!foundry::git::has_modified_tracked_files(repo.path()).unwrap());
+}
+
+#[test]
+fn test_has_modified_tracked_files_ignores_untracked() {
+    let repo = init_test_repo();
+    std::fs::write(repo.path().join("untracked.txt"), "hello").unwrap();
+    // Untracked files should NOT be flagged
+    assert!(!foundry::git::has_modified_tracked_files(repo.path()).unwrap());
+}
+
+#[test]
+fn test_has_modified_tracked_files_detects_modified() {
+    let repo = init_test_repo();
+    // Create and commit a tracked file, then modify it
+    std::fs::write(repo.path().join("tracked.txt"), "original").unwrap();
+    Command::new("git")
+        .args(["add", "tracked.txt"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "add tracked"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    std::fs::write(repo.path().join("tracked.txt"), "modified").unwrap();
+    // Modified tracked file should be flagged
+    assert!(foundry::git::has_modified_tracked_files(repo.path()).unwrap());
 }
 
 #[test]

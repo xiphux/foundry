@@ -149,6 +149,14 @@ pub fn has_uncommitted_changes(repo_path: &Path) -> Result<bool> {
     Ok(!output.is_empty())
 }
 
+/// Check if a repo has uncommitted changes to tracked files only.
+/// Unlike `has_uncommitted_changes`, this ignores untracked files —
+/// useful for checking if a merge target is clean enough to proceed.
+pub fn has_modified_tracked_files(repo_path: &Path) -> Result<bool> {
+    let output = run_git(repo_path, &["status", "--porcelain", "-uno"])?;
+    Ok(!output.is_empty())
+}
+
 /// Get the porcelain status output listing changed files.
 pub fn status_porcelain(repo_path: &Path) -> Result<String> {
     run_git(repo_path, &["status", "--porcelain"])

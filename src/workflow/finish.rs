@@ -40,9 +40,10 @@ pub fn run(
         );
     }
 
-    if git::has_uncommitted_changes(source_path)? {
+    if git::has_modified_tracked_files(source_path)? {
         anyhow::bail!(
-            "main repo at '{}' has uncommitted changes. Commit or stash them before finishing.",
+            "main repo at '{}' has uncommitted changes to tracked files. \
+             Commit or stash them before finishing.",
             source_path.display()
         );
     }
