@@ -54,10 +54,15 @@ pub enum Commands {
         #[arg(long)]
         all: bool,
     },
-    /// Merge, teardown, delete worktree, archive branch
+    /// Finish workspace: merge PR (if created) or merge locally, teardown, clean up
+    #[command(visible_alias = "merge")]
     Finish {
         /// Worktree name (inferred from cwd if omitted)
         name: Option<String>,
+
+        /// Force local merge, ignoring any associated PR
+        #[arg(long)]
+        local: bool,
     },
     /// Push branch and create a pull request
     Pr {
@@ -71,11 +76,6 @@ pub enum Commands {
         /// PR body/description
         #[arg(long)]
         body: Option<String>,
-    },
-    /// Merge pull request and clean up workspace
-    Merge {
-        /// Worktree name (inferred from cwd if omitted)
-        name: Option<String>,
     },
     /// Teardown and delete worktree without merging
     #[command(visible_alias = "destroy")]

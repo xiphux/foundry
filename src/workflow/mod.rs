@@ -2,6 +2,7 @@ pub mod diff;
 pub mod discard;
 pub mod finish;
 pub mod open;
+pub mod pr;
 pub mod restore;
 pub mod start;
 pub mod status;

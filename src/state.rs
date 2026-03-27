@@ -17,6 +17,12 @@ pub struct Workspace {
     /// Allocated ports for this workspace (env var name -> port number)
     #[serde(default)]
     pub allocated_ports: HashMap<String, u16>,
+    /// PR number if a PR was created via `foundry pr` (None = no PR, use local merge)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_number: Option<u64>,
+    /// PR URL if a PR was created via `foundry pr`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -89,6 +95,32 @@ impl WorkspaceState {
             // has forward slashes from config while cwd uses backslashes).
             cwd.starts_with(Path::new(&w.worktree_path))
         })
+    }
+
+    /// Record that a PR was created for this workspace.
+    pub fn set_pr_info(&mut self, project: &str, name: &str, pr_number: u64, pr_url: &str) {
+        if let Some(ws) = self
+            .inner
+            .workspaces
+            .iter_mut()
+            .find(|w| w.project == project && w.name == name)
+        {
+            ws.pr_number = Some(pr_number);
+            ws.pr_url = Some(pr_url.to_string());
+        }
+    }
+
+    /// Clear PR info (e.g., after --local merge ignoring a closed PR).
+    pub fn clear_pr_info(&mut self, project: &str, name: &str) {
+        if let Some(ws) = self
+            .inner
+            .workspaces
+            .iter_mut()
+            .find(|w| w.project == project && w.name == name)
+        {
+            ws.pr_number = None;
+            ws.pr_url = None;
+        }
     }
 
     pub fn set_terminal_tab_id(&mut self, project: &str, name: &str, tab_id: String) {

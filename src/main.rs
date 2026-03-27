@@ -246,7 +246,7 @@ fn main() -> Result<()> {
                 workflow::open::list_workspaces(&state, &project_name);
             }
         }
-        cli::Commands::Finish { name } => {
+        cli::Commands::Finish { name, local } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
 
             // Resolve workspace name and project. When inferring from cwd,
@@ -290,6 +290,7 @@ fn main() -> Result<()> {
                 &mut state,
                 &state_path,
                 cli.verbose,
+                local,
             )?;
         }
         cli::Commands::Discard { name, force } => {
@@ -421,11 +422,50 @@ fn main() -> Result<()> {
             state.save_to(&state_path)?;
             workflow::status::run(&state)?;
         }
-        cli::Commands::Pr { .. } => {
-            todo!("pr command not yet implemented")
-        }
-        cli::Commands::Merge { .. } => {
-            todo!("merge command not yet implemented")
+        cli::Commands::Pr { name, title, body } => {
+            let mut state = WorkspaceState::load_from(&state_path)?;
+
+            let (name, project_name, source_path) = match name {
+                Some(n) => {
+                    let mut registry = Registry::load_from(&registry_path)?;
+                    let (pn, sp) = workflow::resolve_project(
+                        cli.project.as_deref(),
+                        &mut registry,
+                        &registry_path,
+                    )?;
+                    (n, pn, sp)
+                }
+                None => {
+                    let cwd = std::env::current_dir()?;
+                    let cwd_str = cwd.to_string_lossy();
+                    let ws = state
+                        .find_by_worktree_path(&cwd_str)
+                        .ok_or_else(|| anyhow::anyhow!(
+                            "could not infer workspace from current directory. Provide a name: `foundry pr <name>`"
+                        ))?;
+                    (
+                        ws.name.clone(),
+                        ws.project.clone(),
+                        std::path::PathBuf::from(&ws.source_path),
+                    )
+                }
+            };
+
+            let global_config = config::load_global_config()?;
+            let project_config = config::load_project_config(&source_path)?;
+            let resolved = config::merge_configs(&global_config, project_config.as_ref());
+
+            workflow::pr::run(
+                &name,
+                &project_name,
+                &source_path,
+                &resolved,
+                &mut state,
+                &state_path,
+                cli.verbose,
+                title.as_deref(),
+                body.as_deref(),
+            )?;
         }
         cli::Commands::Completions { shell } => {
             clap_complete::generate(

@@ -64,18 +64,43 @@ impl Forge for GitHubForge {
     fn pr_for_branch(&self, repo_path: &Path, branch: &str) -> Result<Option<PrInfo>> {
         check_gh()?;
 
+        // Use `gh pr list` with --head filter and --state open to find only
+        // open PRs for this branch. `gh pr view` returns the most recent PR
+        // regardless of state (open/closed/merged), which would incorrectly
+        // detect a closed PR from a previous workspace that reused the branch name.
         let output = Command::new("gh")
-            .args(["pr", "view", branch, "--json", "number,url"])
+            .args([
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--json",
+                "number,url",
+                "--limit",
+                "1",
+            ])
             .current_dir(repo_path)
             .output()
-            .context("failed to run gh pr view")?;
+            .context("failed to run gh pr list")?;
 
         if !output.status.success() {
-            // gh pr view returns non-zero when no PR exists for the branch
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("failed to check for existing PR: {}", stderr.trim());
+        }
+
+        let json: serde_json::Value =
+            serde_json::from_slice(&output.stdout).context("failed to parse gh output as JSON")?;
+
+        let arr = json
+            .as_array()
+            .context("expected JSON array from gh pr list")?;
+        if arr.is_empty() {
             return Ok(None);
         }
 
-        Ok(Some(parse_pr_json(&output.stdout)?))
+        Ok(Some(parse_pr_json_value(&arr[0])?))
     }
 }
 
@@ -89,7 +114,10 @@ fn check_gh() -> Result<()> {
 fn parse_pr_json(stdout: &[u8]) -> Result<PrInfo> {
     let json: serde_json::Value =
         serde_json::from_slice(stdout).context("failed to parse gh output as JSON")?;
+    parse_pr_json_value(&json)
+}
 
+fn parse_pr_json_value(json: &serde_json::Value) -> Result<PrInfo> {
     let number = json["number"]
         .as_u64()
         .context("PR response missing 'number' field")?;

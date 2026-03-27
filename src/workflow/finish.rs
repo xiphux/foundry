@@ -2,10 +2,12 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::config::{MergeStrategy, ResolvedConfig};
+use crate::forge;
 use crate::git;
 use crate::history;
 use crate::state::WorkspaceState;
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     name: &str,
     project_name: &str,
@@ -14,6 +16,7 @@ pub fn run(
     state: &mut WorkspaceState,
     state_path: &Path,
     verbose: bool,
+    force_local: bool,
 ) -> Result<()> {
     let worktree_path = config.worktree_dir.join(project_name).join(name);
 
@@ -29,6 +32,8 @@ pub fn run(
         .ok_or_else(|| anyhow::anyhow!("workspace '{name}' not found in state"))?;
     let branch = workspace.branch.clone();
     let tab_id = workspace.terminal_tab_id.clone();
+    let pr_number = workspace.pr_number;
+    let pr_url = workspace.pr_url.clone();
 
     if git::has_uncommitted_changes(&worktree_path)? {
         anyhow::bail!(
@@ -37,6 +42,144 @@ pub fn run(
         );
     }
 
+    // Decide: merge PR on GitHub, or merge locally?
+    if let Some(pr_num) = pr_number {
+        if force_local {
+            // User explicitly chose local merge, clear PR info
+            state.clear_pr_info(project_name, name);
+            state.save_to(state_path)?;
+            if verbose {
+                eprintln!("Ignoring PR #{pr_num}, merging locally...");
+            }
+            do_local_merge(
+                name,
+                project_name,
+                source_path,
+                &worktree_path,
+                &branch,
+                &tab_id,
+                config,
+                state,
+                state_path,
+                verbose,
+            )
+        } else {
+            do_pr_merge(
+                name,
+                project_name,
+                source_path,
+                &worktree_path,
+                &branch,
+                &tab_id,
+                pr_num,
+                pr_url.as_deref(),
+                config,
+                state,
+                state_path,
+                verbose,
+            )
+        }
+    } else {
+        if force_local && verbose {
+            eprintln!("No PR associated, merging locally...");
+        }
+        do_local_merge(
+            name,
+            project_name,
+            source_path,
+            &worktree_path,
+            &branch,
+            &tab_id,
+            config,
+            state,
+            state_path,
+            verbose,
+        )
+    }
+}
+
+/// Merge the PR on GitHub, then clean up the workspace.
+#[allow(clippy::too_many_arguments)]
+fn do_pr_merge(
+    name: &str,
+    project_name: &str,
+    source_path: &Path,
+    worktree_path: &Path,
+    branch: &str,
+    tab_id: &str,
+    pr_number: u64,
+    pr_url: Option<&str>,
+    config: &ResolvedConfig,
+    state: &mut WorkspaceState,
+    state_path: &Path,
+    verbose: bool,
+) -> Result<()> {
+    // Detect forge
+    let (forge_impl, remote) = forge::detect_forge(source_path, config.pr_remote.as_deref())?;
+
+    // Verify the PR is still open
+    let live_pr = forge_impl.pr_for_branch(source_path, branch)?;
+    if live_pr.is_none() {
+        let url_hint = pr_url.map(|u| format!(" ({u})")).unwrap_or_default();
+        anyhow::bail!(
+            "PR #{pr_number}{url_hint} for branch '{branch}' is no longer open.\n\
+             Reopen the PR on GitHub to merge via PR, or run:\n  \
+             foundry finish {name} --local\n\
+             to merge locally instead."
+        );
+    }
+
+    if verbose {
+        eprintln!("Merging PR #{pr_number} for branch '{branch}'...");
+    }
+
+    forge_impl.merge_pr(source_path, branch)?;
+
+    let history_event = history::HistoryEvent::pr_merged(project_name, name, branch, pr_number);
+
+    // Fetch to update local refs after the remote merge
+    let main_branch = git::detect_main_branch(source_path)?;
+    if verbose {
+        eprintln!("Fetching from '{remote}' to sync local refs...");
+    }
+    let _ = git::fetch(source_path, &remote);
+    let _ = git::ff_to_remote(source_path, &remote, &main_branch);
+
+    // Print success BEFORE cleanup
+    eprintln!("Merged PR #{pr_number}.");
+
+    super::cleanup_workspace(
+        name,
+        project_name,
+        source_path,
+        worktree_path,
+        branch,
+        tab_id,
+        config,
+        state,
+        state_path,
+        verbose,
+        super::BranchCleanup::Delete,
+        &history_event,
+    )?;
+
+    Ok(())
+}
+
+/// Merge the branch locally into main, then clean up the workspace.
+#[allow(clippy::too_many_arguments)]
+fn do_local_merge(
+    name: &str,
+    project_name: &str,
+    source_path: &Path,
+    worktree_path: &Path,
+    branch: &str,
+    tab_id: &str,
+    config: &ResolvedConfig,
+    state: &mut WorkspaceState,
+    state_path: &Path,
+    verbose: bool,
+) -> Result<()> {
     if git::has_modified_tracked_files(source_path)? {
         anyhow::bail!(
             "main repo at '{}' has uncommitted changes to tracked files. \
@@ -55,10 +198,9 @@ pub fn run(
         );
     }
 
-    // Check for commits BEFORE merging (after merge, branch matches main)
-    let has_commits = git::branch_has_commits(source_path, &branch, &main_branch).unwrap_or(true);
+    let has_commits = git::branch_has_commits(source_path, branch, &main_branch).unwrap_or(true);
     let commit_count = if has_commits {
-        git::log_commits(source_path, &main_branch, &branch)
+        git::log_commits(source_path, &main_branch, branch)
             .map(|log| log.lines().filter(|l| !l.is_empty()).count() as u64)
             .unwrap_or(0)
     } else {
@@ -70,7 +212,7 @@ pub fn run(
     }
     match config.merge_strategy {
         MergeStrategy::FfOnly => {
-            git::merge_ff_only(source_path, &branch).with_context(|| {
+            git::merge_ff_only(source_path, branch).with_context(|| {
                 format!(
                     "fast-forward merge failed. Rebase '{branch}' onto '{main_branch}' first, \
                      then re-run `foundry finish {name}`."
@@ -78,7 +220,7 @@ pub fn run(
             })?;
         }
         MergeStrategy::Merge => {
-            git::merge(source_path, &branch).with_context(|| {
+            git::merge(source_path, branch).with_context(|| {
                 format!(
                     "merge failed due to conflicts. Resolve conflicts manually, \
                      then re-run `foundry finish {name}`."
@@ -93,10 +235,9 @@ pub fn run(
     };
 
     let history_event =
-        history::HistoryEvent::finished(project_name, name, &branch, commit_count, strategy_str);
+        history::HistoryEvent::finished(project_name, name, branch, commit_count, strategy_str);
 
-    // Print success message BEFORE cleanup — cleanup closes the terminal tab
-    // as its last step, which kills the process if running from inside the tab.
+    // Print success BEFORE cleanup
     if has_commits {
         eprintln!("Finished workspace '{name}'. Branch '{branch}' archived.");
     } else {
@@ -107,9 +248,9 @@ pub fn run(
         name,
         project_name,
         source_path,
-        &worktree_path,
-        &branch,
-        &tab_id,
+        worktree_path,
+        branch,
+        tab_id,
         config,
         state,
         state_path,

@@ -127,6 +127,8 @@ pub fn run(
         created_at: Utc::now(),
         terminal_tab_id: String::new(),
         allocated_ports,
+        pr_number: None,
+        pr_url: None,
     });
     state.save_to(state_path)?;
 
