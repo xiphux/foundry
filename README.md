@@ -36,6 +36,12 @@ When you're done:
 # Merge to main and clean up:
 foundry finish
 
+# Or push and create a GitHub PR first:
+foundry pr
+
+# Then finish when CI passes (automatically merges the PR):
+foundry finish
+
 # Or discard without merging:
 foundry discard
 ```
@@ -50,7 +56,10 @@ foundry discard
 | `foundry start <name> --fetch` | Fetch and fast-forward main before branching |
 | `foundry open [name]` | Reopen workspace (resumes agent conversation if available) |
 | `foundry open --all` | Reopen all active workspaces for the project |
-| `foundry finish [name]` | Merge to main/master, teardown, clean up |
+| `foundry pr [name]` | Push branch and create a GitHub PR |
+| `foundry pr [name] --title "..."` | Create PR with a custom title |
+| `foundry finish [name]` | Finish workspace: merge PR (if created) or merge locally |
+| `foundry finish [name] --local` | Force local merge, ignoring any associated PR |
 | `foundry discard [name]` | Teardown and clean up without merging |
 | `foundry discard [name] --force` | Discard even if the branch has unmerged commits |
 | `foundry switch [name]` | Switch to a workspace's terminal tab |
@@ -78,7 +87,13 @@ foundry discard
 
 **`foundry start <name>`** is idempotent — if the worktree already exists, it skips creation and opens the workspace.
 
-**`foundry finish [name]`** and **`foundry discard [name]`** can infer the workspace name from your current directory if you're inside a worktree. When finishing, the merge uses the configured strategy (fast-forward only by default). Branches with commits are archived (e.g., `archive/my-feature-20260321`); branches with no commits are simply deleted.
+**`foundry pr [name]`** pushes the feature branch to the remote and creates a GitHub PR via the `gh` CLI. If a PR already exists for the branch (created manually on GitHub), foundry links it instead of creating a duplicate. The workspace stays open so you can fix issues if CI fails. The PR title is auto-generated from the branch name unless `--title` is provided.
+
+**`foundry finish [name]`** checks whether a PR was created (via `foundry pr`). If so, it merges the PR on GitHub, fetches to sync local refs, and cleans up. If not, it merges locally using the configured strategy (fast-forward only by default). Branches with commits are archived (e.g., `archive/my-feature-20260321`); branches with no commits are simply deleted. `foundry merge` is an alias for `foundry finish`.
+
+If the associated PR was closed or merged outside of foundry, `finish` will report an error with instructions to either reopen the PR or run `foundry finish --local` to merge locally instead.
+
+**`foundry finish [name]`** and **`foundry discard [name]`** can infer the workspace name from your current directory if you're inside a worktree.
 
 **`foundry restore [branch]`** accepts a full branch name (`archive/my-feature-20260321`) or just the branch name without the archive prefix. Run with no arguments to see available archived branches.
 
@@ -116,6 +131,10 @@ agent = "claude"
 
 # Remote to fetch from (default: "origin")
 # fetch_remote = "upstream"
+
+# Remote to push to for PR commands (default: auto-detect)
+# If there's one remote, uses it. If multiple, defaults to "origin".
+# pr_remote = "origin"
 
 # Prefix for archived branches (default: "archive")
 archive_prefix = "archive"
