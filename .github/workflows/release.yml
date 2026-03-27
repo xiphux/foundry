@@ -410,21 +410,26 @@ jobs:
           # Fetch existing release body
           EXISTING=$(gh release view "$TAG" --json body -q .body)
 
-          # Append Scoop instructions after the Homebrew section
-          SCOOP_SECTION=$(cat <<'SCOOP'
+          # Only add if not already present
+          if echo "$EXISTING" | grep -q "scoop bucket add"; then
+            exit 0
+          fi
 
-          ### Install prebuilt binaries via Scoop (Windows)
+          # Insert Scoop instructions before the Download table
+          SCOOP_BLOCK="### Install prebuilt binaries via Scoop (Windows)
 
-          ```sh
+          \`\`\`sh
           scoop bucket add xiphux https://github.com/xiphux/scoop-bucket
           scoop install foundry
-          ```
-          SCOOP
-          )
+          \`\`\`
 
-          # Only add if not already present
-          if ! echo "$EXISTING" | grep -q "scoop bucket add"; then
-            UPDATED="${EXISTING}${SCOOP_SECTION}"
-            echo "$UPDATED" > "$RUNNER_TEMP/release-body.md"
-            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/release-body.md"
+          "
+
+          # Insert before "## Download" line; if not found, append
+          if echo "$EXISTING" | grep -q "^## Download"; then
+            echo "$EXISTING" | awk -v scoop="$SCOOP_BLOCK" '/^## Download/{print scoop}{print}' > "$RUNNER_TEMP/release-body.md"
+          else
+            printf '%s\n%s' "$EXISTING" "$SCOOP_BLOCK" > "$RUNNER_TEMP/release-body.md"
           fi
+
+          gh release edit "$TAG" --notes-file "$RUNNER_TEMP/release-body.md"
