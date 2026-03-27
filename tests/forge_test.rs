@@ -157,3 +157,94 @@ fn test_resolve_pr_remote_empty_defaults_to_origin() {
     let remote = foundry::forge::resolve_pr_remote(None, &[]);
     assert_eq!(remote, "origin");
 }
+
+#[test]
+fn test_detect_forge_with_github_remote() {
+    let dir = init_test_repo();
+    Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/user/repo.git",
+        ])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    let result = foundry::forge::detect_forge(dir.path(), None);
+    assert!(result.is_ok());
+    let (_forge, remote) = result.unwrap();
+    assert_eq!(remote, "origin");
+}
+
+#[test]
+fn test_detect_forge_with_unknown_remote() {
+    let dir = init_test_repo();
+    Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://bitbucket.org/user/repo.git",
+        ])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    let result = foundry::forge::detect_forge(dir.path(), None);
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(
+        err.contains("could not detect forge"),
+        "Error should mention forge detection: {err}"
+    );
+}
+
+#[test]
+fn test_detect_forge_no_remotes() {
+    let dir = init_test_repo();
+
+    let result = foundry::forge::detect_forge(dir.path(), None);
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(
+        err.contains("not found"),
+        "Error should mention remote not found: {err}"
+    );
+}
+
+#[test]
+fn test_detect_forge_configured_remote() {
+    let dir = init_test_repo();
+    Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://bitbucket.org/user/repo.git",
+        ])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "github",
+            "https://github.com/user/repo.git",
+        ])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    // Without config, defaults to "origin" (bitbucket) — should fail
+    let result = foundry::forge::detect_forge(dir.path(), None);
+    assert!(result.is_err());
+
+    // With config pointing to "github" remote — should succeed
+    let result = foundry::forge::detect_forge(dir.path(), Some("github"));
+    assert!(result.is_ok());
+    let (_forge, remote) = result.unwrap();
+    assert_eq!(remote, "github");
+}

@@ -1,3 +1,4 @@
+use chrono::Utc;
 use tempfile::TempDir;
 
 #[test]
@@ -167,4 +168,147 @@ fn test_prune_stale() {
     state.prune_stale();
     assert_eq!(state.list().len(), 1);
     assert_eq!(state.list()[0].name, "valid");
+}
+
+#[test]
+fn test_set_pr_info() {
+    let dir = TempDir::new().unwrap();
+    let state_path = dir.path().join("state.toml");
+    let mut state = foundry::state::WorkspaceState::load_from(&state_path).unwrap();
+
+    state.add(foundry::state::Workspace {
+        project: "myapp".into(),
+        name: "feat".into(),
+        branch: "feat".into(),
+        worktree_path: "/tmp/test-worktree".into(),
+        source_path: "/tmp/test-source".into(),
+        created_at: Utc::now(),
+        terminal_tab_id: String::new(),
+        allocated_ports: std::collections::HashMap::new(),
+        pr_number: None,
+        pr_url: None,
+    });
+
+    state.set_pr_info("myapp", "feat", 42, "https://github.com/user/repo/pull/42");
+
+    let ws = state.list().iter().find(|w| w.name == "feat").unwrap();
+    assert_eq!(ws.pr_number, Some(42));
+    assert_eq!(
+        ws.pr_url.as_deref(),
+        Some("https://github.com/user/repo/pull/42")
+    );
+}
+
+#[test]
+fn test_clear_pr_info() {
+    let dir = TempDir::new().unwrap();
+    let state_path = dir.path().join("state.toml");
+    let mut state = foundry::state::WorkspaceState::load_from(&state_path).unwrap();
+
+    state.add(foundry::state::Workspace {
+        project: "myapp".into(),
+        name: "feat".into(),
+        branch: "feat".into(),
+        worktree_path: "/tmp/test-worktree".into(),
+        source_path: "/tmp/test-source".into(),
+        created_at: Utc::now(),
+        terminal_tab_id: String::new(),
+        allocated_ports: std::collections::HashMap::new(),
+        pr_number: Some(42),
+        pr_url: Some("https://github.com/user/repo/pull/42".into()),
+    });
+
+    state.clear_pr_info("myapp", "feat");
+
+    let ws = state.list().iter().find(|w| w.name == "feat").unwrap();
+    assert_eq!(ws.pr_number, None);
+    assert_eq!(ws.pr_url, None);
+}
+
+#[test]
+fn test_set_pr_info_wrong_workspace_is_noop() {
+    let dir = TempDir::new().unwrap();
+    let state_path = dir.path().join("state.toml");
+    let mut state = foundry::state::WorkspaceState::load_from(&state_path).unwrap();
+
+    state.add(foundry::state::Workspace {
+        project: "myapp".into(),
+        name: "feat".into(),
+        branch: "feat".into(),
+        worktree_path: "/tmp/test-worktree".into(),
+        source_path: "/tmp/test-source".into(),
+        created_at: Utc::now(),
+        terminal_tab_id: String::new(),
+        allocated_ports: std::collections::HashMap::new(),
+        pr_number: None,
+        pr_url: None,
+    });
+
+    // Set PR info for a non-existent workspace — should be a no-op
+    state.set_pr_info("myapp", "nonexistent", 99, "https://example.com");
+
+    let ws = state.list().iter().find(|w| w.name == "feat").unwrap();
+    assert_eq!(ws.pr_number, None);
+}
+
+#[test]
+fn test_pr_info_survives_save_load() {
+    let dir = TempDir::new().unwrap();
+    let state_path = dir.path().join("state.toml");
+    let mut state = foundry::state::WorkspaceState::load_from(&state_path).unwrap();
+
+    state.add(foundry::state::Workspace {
+        project: "myapp".into(),
+        name: "feat".into(),
+        branch: "feat".into(),
+        worktree_path: "/tmp/test-worktree".into(),
+        source_path: "/tmp/test-source".into(),
+        created_at: Utc::now(),
+        terminal_tab_id: String::new(),
+        allocated_ports: std::collections::HashMap::new(),
+        pr_number: Some(42),
+        pr_url: Some("https://github.com/user/repo/pull/42".into()),
+    });
+
+    state.save_to(&state_path).unwrap();
+
+    let reloaded = foundry::state::WorkspaceState::load_from(&state_path).unwrap();
+    let ws = reloaded.list().iter().find(|w| w.name == "feat").unwrap();
+    assert_eq!(ws.pr_number, Some(42));
+    assert_eq!(
+        ws.pr_url.as_deref(),
+        Some("https://github.com/user/repo/pull/42")
+    );
+}
+
+#[test]
+fn test_pr_info_none_not_serialized() {
+    let dir = TempDir::new().unwrap();
+    let state_path = dir.path().join("state.toml");
+    let mut state = foundry::state::WorkspaceState::load_from(&state_path).unwrap();
+
+    state.add(foundry::state::Workspace {
+        project: "myapp".into(),
+        name: "feat".into(),
+        branch: "feat".into(),
+        worktree_path: "/tmp/test-worktree".into(),
+        source_path: "/tmp/test-source".into(),
+        created_at: Utc::now(),
+        terminal_tab_id: String::new(),
+        allocated_ports: std::collections::HashMap::new(),
+        pr_number: None,
+        pr_url: None,
+    });
+
+    state.save_to(&state_path).unwrap();
+
+    let contents = std::fs::read_to_string(&state_path).unwrap();
+    assert!(
+        !contents.contains("pr_number"),
+        "None pr_number should not appear in TOML"
+    );
+    assert!(
+        !contents.contains("pr_url"),
+        "None pr_url should not appear in TOML"
+    );
 }
