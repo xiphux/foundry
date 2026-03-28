@@ -72,13 +72,10 @@ pub fn open_workspace(
             } else {
                 None
             };
-            // Resume previous conversation if the agent supports it,
-            // a conversation exists, and no new prompt is given.
-            let continue_session = pane_prompt.is_none()
-                && config::agent_capabilities(agent)
-                    .and_then(|c| c.resume_flag)
-                    .is_some()
-                && agent_hooks::has_agent_conversation(agent, worktree_path);
+            // Resume previous conversation if one exists and no new prompt is given.
+            // Each agent's build_command knows whether to add a resume flag.
+            let continue_session =
+                pane_prompt.is_none() && agent_hooks::has_agent_conversation(agent, worktree_path);
             Some(config::build_agent_command(
                 agent,
                 config.custom_agent_command.as_deref(),
