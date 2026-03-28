@@ -34,6 +34,8 @@ pub struct ResolvedConfig {
     pub issue_prompt: Option<String>,
     /// If true, agents use their most permissive mode, bypassing all permission prompts.
     pub unrestricted_permissions: bool,
+    /// Editor command for `foundry edit` (e.g., "code", "cursor", "zed").
+    pub editor: Option<String>,
     /// Shell executable to use in terminal panes (e.g., "bash", "powershell").
     pub shell: Option<String>,
     /// Starting port for dynamic port allocation (default: 10000)
@@ -381,6 +383,7 @@ const GLOBAL_CONFIG_KEYS: &[&str] = &[
     "pr_remote",
     "issue_prompt",
     "unrestricted_permissions",
+    "editor",
     "shell",
     "panes",
 ];
@@ -668,6 +671,7 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
         unrestricted_permissions: project
             .and_then(|p| p.unrestricted_permissions)
             .unwrap_or(global.unrestricted_permissions),
+        editor: global.editor.clone(),
         shell: project
             .and_then(|p| p.shell.clone())
             .or_else(|| global.shell.clone()),

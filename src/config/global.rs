@@ -30,6 +30,9 @@ pub struct GlobalConfig {
     /// unrestricted access to your system, not just the worktree.
     #[serde(default)]
     pub unrestricted_permissions: bool,
+    /// Editor command for `foundry edit` (e.g., "code", "cursor", "zed").
+    /// Falls back to $VISUAL, then $EDITOR if unset.
+    pub editor: Option<String>,
     /// Shell executable to use in terminal panes (e.g., "bash", "powershell").
     /// On Windows Terminal, defaults to "powershell" if unset.
     /// Other terminal backends use their default shell and ignore this setting.
@@ -78,6 +81,7 @@ impl Default for GlobalConfig {
             pr_remote: None,
             issue_prompt: None,
             unrestricted_permissions: false,
+            editor: None,
             shell: None,
             panes: default_panes(),
         }

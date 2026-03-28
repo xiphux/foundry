@@ -1,6 +1,7 @@
 pub mod checks;
 pub mod diff;
 pub mod discard;
+pub mod edit;
 pub mod finish;
 pub mod open;
 pub mod pr;

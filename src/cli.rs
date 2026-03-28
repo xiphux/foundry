@@ -92,6 +92,16 @@ pub enum Commands {
         #[arg(long, short)]
         force: bool,
     },
+    /// Open workspace in your configured editor
+    Edit {
+        /// Worktree name (inferred from cwd if omitted)
+        name: Option<String>,
+    },
+    /// Open workspace directory in the system file explorer
+    Browse {
+        /// Worktree name (inferred from cwd if omitted)
+        name: Option<String>,
+    },
     /// Show changes in a workspace vs main
     Diff {
         /// Worktree name (inferred from cwd if omitted)
