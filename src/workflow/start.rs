@@ -151,9 +151,14 @@ pub fn run(
     let agents: Vec<String> = seen_agents.into_keys().collect();
 
     for agent in &agents {
-        if let Err(e) =
-            agent_hooks::setup_agent_hooks(&worktree_path, source_path, project_name, name, agent)
-            && verbose
+        if let Err(e) = agent_hooks::setup_agent_hooks(
+            &worktree_path,
+            source_path,
+            project_name,
+            name,
+            agent,
+            config.unrestricted_permissions,
+        ) && verbose
         {
             eprintln!("Warning: failed to set up agent hooks for {agent}: {e}");
         }

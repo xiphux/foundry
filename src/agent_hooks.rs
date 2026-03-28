@@ -366,7 +366,15 @@ mod tests {
         )
         .unwrap();
 
-        setup_agent_hooks(worktree.path(), source.path(), "test_copy", "ws", "claude").unwrap();
+        setup_agent_hooks(
+            worktree.path(),
+            source.path(),
+            "test_copy",
+            "ws",
+            "claude",
+            false,
+        )
+        .unwrap();
 
         let settings_path = worktree.path().join(".claude").join("settings.local.json");
         let content = std::fs::read_to_string(&settings_path).unwrap();
@@ -387,6 +395,10 @@ mod tests {
         // Should have hooks
         assert!(settings.get("hooks").is_some());
         assert!(settings["hooks"].get("Stop").is_some());
+
+        // Should have sandbox enabled by default
+        assert_eq!(settings["sandbox"]["enabled"], true);
+        assert_eq!(settings["sandbox"]["autoAllow"], true);
 
         // Cleanup
         let _ = remove_status("test_copy", "ws");
@@ -410,7 +422,15 @@ mod tests {
         )
         .unwrap();
 
-        setup_agent_hooks(worktree.path(), source.path(), "test_strip", "ws", "claude").unwrap();
+        setup_agent_hooks(
+            worktree.path(),
+            source.path(),
+            "test_strip",
+            "ws",
+            "claude",
+            false,
+        )
+        .unwrap();
 
         let settings_path = worktree.path().join(".claude").join("settings.local.json");
         let content = std::fs::read_to_string(&settings_path).unwrap();
@@ -430,11 +450,48 @@ mod tests {
     }
 
     #[test]
+    fn setup_agent_hooks_unrestricted_skips_sandbox() {
+        let source = TempDir::new().unwrap();
+        let worktree = TempDir::new().unwrap();
+
+        setup_agent_hooks(
+            worktree.path(),
+            source.path(),
+            "test_unrestricted",
+            "ws",
+            "claude",
+            true,
+        )
+        .unwrap();
+
+        let settings_path = worktree.path().join(".claude").join("settings.local.json");
+        let content = std::fs::read_to_string(&settings_path).unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // Should NOT have sandbox when unrestricted
+        assert!(settings.get("sandbox").is_none());
+
+        // Should still have permissions and hooks
+        assert!(settings.get("permissions").is_some());
+        assert!(settings.get("hooks").is_some());
+
+        let _ = remove_status("test_unrestricted", "ws");
+    }
+
+    #[test]
     fn setup_agent_hooks_skips_for_codex() {
         let source = TempDir::new().unwrap();
         let worktree = TempDir::new().unwrap();
 
-        setup_agent_hooks(worktree.path(), source.path(), "test_codex", "ws", "codex").unwrap();
+        setup_agent_hooks(
+            worktree.path(),
+            source.path(),
+            "test_codex",
+            "ws",
+            "codex",
+            false,
+        )
+        .unwrap();
 
         // Should NOT create .claude/settings.local.json for codex
         let settings_path = worktree.path().join(".claude").join("settings.local.json");
@@ -452,6 +509,7 @@ mod tests {
             "test_other",
             "ws",
             "some-agent",
+            false,
         )
         .unwrap();
 
@@ -644,9 +702,10 @@ pub fn setup_agent_hooks(
     project: &str,
     name: &str,
     agent: &str,
+    unrestricted: bool,
 ) -> Result<()> {
     match agent {
-        "claude" => setup_claude(worktree_path, source_path, project, name),
+        "claude" => setup_claude(worktree_path, source_path, project, name, unrestricted),
         // Codex permissions are handled via CLI flags in resolve_agent_command.
         // No config file setup needed since .codex/config.toml is tracked in git.
         _ => Ok(()),
@@ -655,7 +714,13 @@ pub fn setup_agent_hooks(
 
 /// Claude-specific setup: create .claude/settings.local.json with status
 /// tracking hooks and worktree-scoped permissions.
-fn setup_claude(worktree_path: &Path, source_path: &Path, project: &str, name: &str) -> Result<()> {
+fn setup_claude(
+    worktree_path: &Path,
+    source_path: &Path,
+    project: &str,
+    name: &str,
+    unrestricted: bool,
+) -> Result<()> {
     let status_path = status_file_path(project, name, "claude")?;
     let status_path_str = status_path.to_string_lossy();
 
@@ -723,6 +788,17 @@ fn setup_claude(worktree_path: &Path, source_path: &Path, project: &str, name: &
     }
     settings["permissions"]["allow"] = serde_json::Value::Array(merged_allow);
     settings["permissions"]["deny"] = serde_json::Value::Array(merged_deny);
+
+    // Enable sandbox with auto-allow for worktree-scoped OS-level isolation.
+    // This restricts all bash subprocesses to writing only within the worktree,
+    // while auto-approving commands that stay within the sandbox boundaries.
+    // When unrestricted_permissions is set, skip sandbox to allow full access.
+    if !unrestricted {
+        settings["sandbox"] = serde_json::json!({
+            "enabled": true,
+            "autoAllow": true
+        });
+    }
 
     let settings_path = claude_dir.join("settings.local.json");
     let contents =
