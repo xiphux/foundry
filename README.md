@@ -119,8 +119,8 @@ Foundry uses two levels of TOML configuration:
 # "my-feature" becomes "xiphux/my-feature"
 branch_prefix = "xiphux"
 
-# Default AI agent: "claude" (default), "codex", "every-code", or "custom"
-# Used for the default pane layout when no panes have explicit agent fields
+# Default AI agent: "claude" (default), "codex", "every-code", "gemini",
+# "aider", "copilot", "kiro", "opencode", or "custom"
 agent = "claude"
 
 # Starting port for dynamic port allocation (default: 10000)
@@ -341,18 +341,31 @@ foundry projects remove myapp
 
 Foundry supports multiple AI coding agents. The agent is configured via `agent` in your global or project config.
 
-| Feature | Claude | Codex | Every Code | Custom |
+| Agent | Config value | Prompt | Resume | Auto-approve |
 |---|---|---|---|---|
-| Prompt passthrough | Yes | Yes | Yes | No |
-| Worktree permissions | Yes (settings.local.json) | Yes (CLI flags) | Yes (CLI flags) | N/A |
-| Status tracking | Yes (hooks) | Not yet | Not yet | N/A |
-| Settings merge from source | Yes | N/A | N/A | N/A |
+| Claude | `claude` | Positional | `--continue` | Worktree permissions |
+| Codex | `codex` | Positional | `--resume` | `--full-auto` |
+| Every Code | `every-code` | Positional | `--resume` | `--full-auto` |
+| Gemini CLI | `gemini` | `-p` flag | `--resume` | `-y` (YOLO) |
+| Aider | `aider` | Interactive | No | `--yes` |
+| GitHub Copilot | `copilot` | `-p` flag | No | `--yolo` |
+| Kiro | `kiro` | Positional | `--resume` | `--trust-all-tools` |
+| OpenCode | `opencode` | `-p` flag | `--continue` | `--yolo` |
+| Custom | `custom` | N/A | N/A | N/A |
 
 **Claude** gets the richest integration: foundry copies your source repo's `.claude/settings.local.json` into the worktree and merges in status-tracking hooks and worktree-scoped permissions (auto-approve file operations within the worktree, deny `git push` and `checkout main`).
 
-**Codex** uses the `--full-auto` flag for autonomous operation (sandbox scoped to workspace, approvals only on failure).
+**Codex** and **Every Code** use `--full-auto` for autonomous operation (sandbox scoped to workspace, approvals only on failure).
 
-**Every Code** (`every-code`) uses the `--full-auto` flag for autonomous operation (sandbox scoped to workspace, approvals only on failure).
+**Gemini CLI** launches with `-y` (YOLO mode) for automatic action approval. Prompts are passed via `-p` and sessions can be resumed with `--resume`.
+
+**Aider** launches as an interactive REPL with `--yes` for auto-approval. Since Aider auto-exits after processing `--message`, foundry launches it interactively and lets you type prompts directly.
+
+**GitHub Copilot** launches with `--yolo` to enable all permissions. Prompts are passed via `-p`.
+
+**Kiro** (formerly Amazon Q Developer CLI) launches with `kiro-cli chat --trust-all-tools` for autonomous tool usage. Prompts are passed as positional arguments and sessions can be resumed with `--resume`.
+
+**OpenCode** launches with `--yolo` to auto-approve permissions. Prompts are passed via `-p` and sessions can be resumed with `--continue`.
 
 **Custom** agents use whatever command you specify in `agent_command`. Foundry runs it as-is without additional configuration.
 

@@ -109,6 +109,77 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
             },
         },
     ),
+    (
+        "gemini",
+        AgentCapabilities {
+            names: &["gemini"],
+            build_command: |prompt, resume| {
+                let mut cmd = "gemini -y".to_string();
+                if resume {
+                    cmd += " --resume";
+                }
+                if let Some(p) = prompt {
+                    cmd += &format!(" -p '{}'", escape_prompt(p));
+                }
+                cmd
+            },
+        },
+    ),
+    (
+        "aider",
+        AgentCapabilities {
+            names: &["aider"],
+            // Aider is an interactive REPL. We launch with --yes for auto-approve
+            // but don't pass --message (which would auto-exit after processing).
+            // The user interacts with the REPL directly.
+            build_command: |_prompt, _resume| "aider --yes".to_string(),
+        },
+    ),
+    (
+        "copilot",
+        AgentCapabilities {
+            names: &["copilot"],
+            build_command: |prompt, _resume| {
+                let mut cmd = "copilot --yolo".to_string();
+                if let Some(p) = prompt {
+                    cmd += &format!(" -p '{}'", escape_prompt(p));
+                }
+                cmd
+            },
+        },
+    ),
+    (
+        "kiro",
+        AgentCapabilities {
+            names: &["kiro", "kiro-cli"],
+            build_command: |prompt, resume| {
+                let mut cmd = "kiro-cli chat --trust-all-tools".to_string();
+                if resume {
+                    cmd += " --resume";
+                }
+                if let Some(p) = prompt {
+                    cmd += &format!(" '{}'", escape_prompt(p));
+                }
+                cmd
+            },
+        },
+    ),
+    (
+        "opencode",
+        AgentCapabilities {
+            names: &["opencode"],
+            build_command: |prompt, resume| {
+                let mut cmd = "opencode --yolo".to_string();
+                if resume {
+                    cmd += " --continue";
+                }
+                if let Some(p) = prompt {
+                    cmd += &format!(" -p '{}'", escape_prompt(p));
+                }
+                cmd
+            },
+        },
+    ),
 ];
 
 /// Look up capabilities for a known agent. Returns None for unknown/custom agents.
@@ -504,6 +575,11 @@ mod tests {
         assert!(agent_capabilities("claude").is_some());
         assert!(agent_capabilities("codex").is_some());
         assert!(agent_capabilities("every-code").is_some());
+        assert!(agent_capabilities("gemini").is_some());
+        assert!(agent_capabilities("aider").is_some());
+        assert!(agent_capabilities("copilot").is_some());
+        assert!(agent_capabilities("kiro").is_some());
+        assert!(agent_capabilities("opencode").is_some());
         assert!(agent_capabilities("unknown").is_none());
     }
 
@@ -538,6 +614,68 @@ mod tests {
         let cmd = (caps.build_command)(None, false);
         assert!(cmd.starts_with("coder "));
         assert!(cmd.contains("--full-auto"));
+    }
+
+    #[test]
+    fn agent_build_command_gemini() {
+        let caps = agent_capabilities("gemini").unwrap();
+        assert_eq!((caps.build_command)(None, false), "gemini -y");
+        assert_eq!((caps.build_command)(None, true), "gemini -y --resume");
+        assert_eq!(
+            (caps.build_command)(Some("fix the bug"), false),
+            "gemini -y -p 'fix the bug'"
+        );
+    }
+
+    #[test]
+    fn agent_build_command_aider() {
+        let caps = agent_capabilities("aider").unwrap();
+        // Aider is always interactive — prompt and resume are ignored
+        assert_eq!((caps.build_command)(None, false), "aider --yes");
+        assert_eq!((caps.build_command)(Some("fix it"), true), "aider --yes");
+    }
+
+    #[test]
+    fn agent_build_command_copilot() {
+        let caps = agent_capabilities("copilot").unwrap();
+        assert_eq!((caps.build_command)(None, false), "copilot --yolo");
+        assert_eq!(
+            (caps.build_command)(Some("fix the bug"), false),
+            "copilot --yolo -p 'fix the bug'"
+        );
+        // No resume support — resume flag is ignored
+        assert_eq!((caps.build_command)(None, true), "copilot --yolo");
+    }
+
+    #[test]
+    fn agent_build_command_kiro() {
+        let caps = agent_capabilities("kiro").unwrap();
+        assert_eq!(
+            (caps.build_command)(None, false),
+            "kiro-cli chat --trust-all-tools"
+        );
+        assert_eq!(
+            (caps.build_command)(None, true),
+            "kiro-cli chat --trust-all-tools --resume"
+        );
+        assert_eq!(
+            (caps.build_command)(Some("fix the bug"), false),
+            "kiro-cli chat --trust-all-tools 'fix the bug'"
+        );
+    }
+
+    #[test]
+    fn agent_build_command_opencode() {
+        let caps = agent_capabilities("opencode").unwrap();
+        assert_eq!((caps.build_command)(None, false), "opencode --yolo");
+        assert_eq!(
+            (caps.build_command)(None, true),
+            "opencode --yolo --continue"
+        );
+        assert_eq!(
+            (caps.build_command)(Some("fix the bug"), false),
+            "opencode --yolo -p 'fix the bug'"
+        );
     }
 
     #[test]
