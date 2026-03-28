@@ -50,6 +50,8 @@ pub struct AgentCapabilities {
     /// Used by `warn_agent_in_command` to detect when users should use the
     /// `agent` field instead of `command`.
     pub names: &'static [&'static str],
+    /// The primary executable to check for on $PATH (e.g., "claude", "kiro-cli").
+    pub executable: &'static str,
     /// Build the full command string for this agent.
     /// Each agent knows its own executable, flags, and how to incorporate
     /// the prompt, resume, and permission parameters.
@@ -74,6 +76,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "claude",
         AgentCapabilities {
             names: &["claude"],
+            executable: "claude",
             // Default: Claude uses sandbox + settings.local.json for worktree-scoped
             // permissions (level #2). Unrestricted: no sandbox constraints.
             // Note: sandbox is configured separately in agent_hooks.rs via settings.
@@ -93,6 +96,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "codex",
         AgentCapabilities {
             names: &["codex"],
+            executable: "codex",
             // Codex has a built-in OS sandbox with --full-auto. The sandbox is
             // always active (level #2). unrestricted doesn't change behavior.
             build_command: |prompt, resume, _unrestricted| {
@@ -111,6 +115,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "every-code",
         AgentCapabilities {
             names: &["coder", "every-code"],
+            executable: "coder",
             // Same sandbox model as Codex.
             build_command: |prompt, resume, _unrestricted| {
                 let mut cmd = "coder --full-auto".to_string();
@@ -128,6 +133,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "gemini",
         AgentCapabilities {
             names: &["gemini"],
+            executable: "gemini",
             // Default: sandbox mode restricts writes to project directory (level #2).
             // Unrestricted: yolo mode without sandbox (level #3).
             build_command: |prompt, resume, unrestricted| {
@@ -150,6 +156,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "aider",
         AgentCapabilities {
             names: &["aider"],
+            executable: "aider",
             // Default: interactive REPL, user approves actions (level #1).
             // Unrestricted: --yes auto-approves all confirmations (level #3).
             // Never passes --message (which would auto-exit after processing).
@@ -166,6 +173,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "copilot",
         AgentCapabilities {
             names: &["copilot"],
+            executable: "copilot",
             // Default: standard permissions, user approves actions (level #1).
             // Unrestricted: --yolo enables all permissions (level #3).
             build_command: |prompt, _resume, unrestricted| {
@@ -185,6 +193,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "kiro",
         AgentCapabilities {
             names: &["kiro", "kiro-cli"],
+            executable: "kiro-cli",
             // Default: standard permissions, user approves tool usage (level #1).
             // Unrestricted: --trust-all-tools auto-approves (level #3).
             build_command: |prompt, resume, unrestricted| {
@@ -206,6 +215,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "opencode",
         AgentCapabilities {
             names: &["opencode"],
+            executable: "opencode",
             // Default: interactive TUI, standard permissions (level #1).
             // Unrestricted: no CLI flag available; permissions must be configured
             // via opencode.json ("permission": "allow"). Flag is a no-op.
@@ -234,6 +244,24 @@ pub fn agent_capabilities(agent: &str) -> Option<&'static AgentCapabilities> {
 /// Build the full agent command string for a given agent identifier,
 /// optionally including a prompt and/or session resume flag.
 /// Each agent's `build_command` knows how to construct its own CLI invocation.
+/// Check that the executable for a known agent is available on $PATH.
+/// Returns Ok for unknown/custom agents (no executable to check).
+pub fn check_agent_available(agent: &str) -> Result<()> {
+    if agent == "custom" {
+        return Ok(());
+    }
+    if let Some(caps) = agent_capabilities(agent) {
+        which::which(caps.executable).with_context(|| {
+            format!(
+                "'{}' is required for agent '{agent}' but was not found on your PATH. \
+                 Install it or change the agent in your foundry config.",
+                caps.executable
+            )
+        })?;
+    }
+    Ok(())
+}
+
 pub fn build_agent_command(
     agent: &str,
     custom_command: Option<&str>,

@@ -48,6 +48,14 @@ pub fn run(
         );
     }
 
+    // Verify that all configured agents are installed before doing any work.
+    // This prevents creating a worktree only to fail when launching the agent.
+    for pane in &config.panes {
+        if let Some(ref agent) = pane.agent {
+            config::check_agent_available(agent)?;
+        }
+    }
+
     // Clear stale conversation history if this worktree name was used before.
     // This prevents --continue from resuming a conversation from a previous
     // workspace that happened to have the same name.
