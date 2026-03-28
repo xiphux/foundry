@@ -81,6 +81,7 @@ pub fn open_workspace(
                 config.custom_agent_command.as_deref(),
                 pane_prompt,
                 continue_session,
+                config.unrestricted_permissions,
             ))
         } else if let Some(ref cmd) = pane.command {
             let resolved = config::resolve_template(cmd, &template_vars)?;

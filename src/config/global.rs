@@ -25,6 +25,11 @@ pub struct GlobalConfig {
     /// Custom prompt template for GitHub issues.
     /// Supports variables: {issue_number}, {title}, {body}
     pub issue_prompt: Option<String>,
+    /// If true, agents use their most permissive mode (YOLO/auto-approve-all),
+    /// bypassing all permission prompts. Use with caution — this grants the agent
+    /// unrestricted access to your system, not just the worktree.
+    #[serde(default)]
+    pub unrestricted_permissions: bool,
     /// Shell executable to use in terminal panes (e.g., "bash", "powershell").
     /// On Windows Terminal, defaults to "powershell" if unset.
     /// Other terminal backends use their default shell and ignore this setting.
@@ -72,6 +77,7 @@ impl Default for GlobalConfig {
             fetch_remote: None,
             pr_remote: None,
             issue_prompt: None,
+            unrestricted_permissions: false,
             shell: None,
             panes: default_panes(),
         }

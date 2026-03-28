@@ -14,6 +14,7 @@ pub struct ProjectConfig {
     pub auto_fetch: Option<bool>,
     pub fetch_remote: Option<String>,
     pub pr_remote: Option<String>,
+    pub unrestricted_permissions: Option<bool>,
     /// Override the global shell setting for this project.
     pub shell: Option<String>,
     #[serde(default)]

@@ -32,6 +32,8 @@ pub struct ResolvedConfig {
     pub teardown_scripts: Vec<ScriptConfig>,
     /// Custom prompt template for GitHub issues (None = use default)
     pub issue_prompt: Option<String>,
+    /// If true, agents use their most permissive mode, bypassing all permission prompts.
+    pub unrestricted_permissions: bool,
     /// Shell executable to use in terminal panes (e.g., "bash", "powershell").
     pub shell: Option<String>,
     /// Starting port for dynamic port allocation (default: 10000)
@@ -50,8 +52,15 @@ pub struct AgentCapabilities {
     pub names: &'static [&'static str],
     /// Build the full command string for this agent.
     /// Each agent knows its own executable, flags, and how to incorporate
-    /// the prompt and resume parameters.
-    pub build_command: fn(prompt: Option<&str>, resume: bool) -> String,
+    /// the prompt, resume, and permission parameters.
+    ///
+    /// When `unrestricted` is false (default), agents that support sandboxed/scoped
+    /// permissions use those for worktree-isolated operation. Agents without
+    /// sandboxing launch with standard permissions (the user approves actions).
+    ///
+    /// When `unrestricted` is true, agents use their most permissive mode
+    /// (e.g., YOLO/auto-approve-all), bypassing all permission prompts.
+    pub build_command: fn(prompt: Option<&str>, resume: bool, unrestricted: bool) -> String,
 }
 
 /// Escape a prompt string for use in a shell single-quoted argument.
@@ -65,7 +74,10 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "claude",
         AgentCapabilities {
             names: &["claude"],
-            build_command: |prompt, resume| {
+            // Default: Claude uses sandbox + settings.local.json for worktree-scoped
+            // permissions (level #2). Unrestricted: no sandbox constraints.
+            // Note: sandbox is configured separately in agent_hooks.rs via settings.
+            build_command: |prompt, resume, _unrestricted| {
                 let mut cmd = "claude".to_string();
                 if resume {
                     cmd += " --continue";
@@ -81,7 +93,9 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "codex",
         AgentCapabilities {
             names: &["codex"],
-            build_command: |prompt, resume| {
+            // Codex has a built-in OS sandbox with --full-auto. The sandbox is
+            // always active (level #2). unrestricted doesn't change behavior.
+            build_command: |prompt, resume, _unrestricted| {
                 let mut cmd = "codex --full-auto".to_string();
                 if resume {
                     cmd += " --resume";
@@ -97,7 +111,8 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "every-code",
         AgentCapabilities {
             names: &["coder", "every-code"],
-            build_command: |prompt, resume| {
+            // Same sandbox model as Codex.
+            build_command: |prompt, resume, _unrestricted| {
                 let mut cmd = "coder --full-auto".to_string();
                 if resume {
                     cmd += " --resume";
@@ -113,8 +128,14 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "gemini",
         AgentCapabilities {
             names: &["gemini"],
-            build_command: |prompt, resume| {
-                let mut cmd = "gemini -y".to_string();
+            // Default: sandbox mode restricts writes to project directory (level #2).
+            // Unrestricted: yolo mode without sandbox (level #3).
+            build_command: |prompt, resume, unrestricted| {
+                let mut cmd = if unrestricted {
+                    "gemini --approval-mode=yolo".to_string()
+                } else {
+                    "gemini --sandbox --approval-mode=yolo".to_string()
+                };
                 if resume {
                     cmd += " --resume";
                 }
@@ -129,18 +150,30 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "aider",
         AgentCapabilities {
             names: &["aider"],
-            // Aider is an interactive REPL. We launch with --yes for auto-approve
-            // but don't pass --message (which would auto-exit after processing).
-            // The user interacts with the REPL directly.
-            build_command: |_prompt, _resume| "aider --yes".to_string(),
+            // Default: interactive REPL, user approves actions (level #1).
+            // Unrestricted: --yes auto-approves all confirmations (level #3).
+            // Never passes --message (which would auto-exit after processing).
+            build_command: |_prompt, _resume, unrestricted| {
+                if unrestricted {
+                    "aider --yes".to_string()
+                } else {
+                    "aider".to_string()
+                }
+            },
         },
     ),
     (
         "copilot",
         AgentCapabilities {
             names: &["copilot"],
-            build_command: |prompt, _resume| {
-                let mut cmd = "copilot --yolo".to_string();
+            // Default: standard permissions, user approves actions (level #1).
+            // Unrestricted: --yolo enables all permissions (level #3).
+            build_command: |prompt, _resume, unrestricted| {
+                let mut cmd = if unrestricted {
+                    "copilot --yolo".to_string()
+                } else {
+                    "copilot".to_string()
+                };
                 if let Some(p) = prompt {
                     cmd += &format!(" -p '{}'", escape_prompt(p));
                 }
@@ -152,8 +185,13 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "kiro",
         AgentCapabilities {
             names: &["kiro", "kiro-cli"],
-            build_command: |prompt, resume| {
-                let mut cmd = "kiro-cli chat --trust-all-tools".to_string();
+            // Default: standard permissions, user approves tool usage (level #1).
+            // Unrestricted: --trust-all-tools auto-approves (level #3).
+            build_command: |prompt, resume, unrestricted| {
+                let mut cmd = "kiro-cli chat".to_string();
+                if unrestricted {
+                    cmd += " --trust-all-tools";
+                }
                 if resume {
                     cmd += " --resume";
                 }
@@ -168,9 +206,10 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "opencode",
         AgentCapabilities {
             names: &["opencode"],
-            // OpenCode launches as an interactive TUI. Auto-approve permissions
-            // are configured via opencode.json ("permission": "allow"), not CLI flags.
-            build_command: |prompt, resume| {
+            // Default: interactive TUI, standard permissions (level #1).
+            // Unrestricted: no CLI flag available; permissions must be configured
+            // via opencode.json ("permission": "allow"). Flag is a no-op.
+            build_command: |prompt, resume, _unrestricted| {
                 let mut cmd = "opencode".to_string();
                 if resume {
                     cmd += " --continue";
@@ -200,13 +239,14 @@ pub fn build_agent_command(
     custom_command: Option<&str>,
     prompt: Option<&str>,
     continue_session: bool,
+    unrestricted: bool,
 ) -> String {
     if agent == "custom" {
         return custom_command.unwrap_or("claude").to_string();
     }
     let non_empty_prompt = prompt.filter(|p| !p.is_empty());
     match agent_capabilities(agent) {
-        Some(caps) => (caps.build_command)(non_empty_prompt, continue_session),
+        Some(caps) => (caps.build_command)(non_empty_prompt, continue_session, unrestricted),
         None => agent.to_string(),
     }
 }
@@ -238,7 +278,7 @@ pub fn warn_agent_in_command(panes: &[PaneConfig]) {
 /// Resolve the base agent command from the agent identifier.
 /// For known agents, returns the command without prompt or resume flags.
 pub fn resolve_agent_command(agent: &str, custom_command: Option<&str>) -> String {
-    build_agent_command(agent, custom_command, None, false)
+    build_agent_command(agent, custom_command, None, false, false)
 }
 
 /// Values available for template variable substitution.
@@ -307,6 +347,7 @@ const GLOBAL_CONFIG_KEYS: &[&str] = &[
     "fetch_remote",
     "pr_remote",
     "issue_prompt",
+    "unrestricted_permissions",
     "shell",
     "panes",
 ];
@@ -322,6 +363,7 @@ const PROJECT_CONFIG_KEYS: &[&str] = &[
     "auto_fetch",
     "fetch_remote",
     "pr_remote",
+    "unrestricted_permissions",
     "shell",
     "scripts",
     "panes",
@@ -590,6 +632,9 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
             .map(|p| p.scripts.teardown.clone())
             .unwrap_or_default(),
         issue_prompt: global.issue_prompt.clone(),
+        unrestricted_permissions: project
+            .and_then(|p| p.unrestricted_permissions)
+            .unwrap_or(global.unrestricted_permissions),
         shell: project
             .and_then(|p| p.shell.clone())
             .or_else(|| global.shell.clone()),
@@ -740,32 +785,30 @@ mod tests {
     #[test]
     fn agent_build_command_claude() {
         let caps = agent_capabilities("claude").unwrap();
-        assert_eq!((caps.build_command)(None, false), "claude");
-        assert_eq!((caps.build_command)(None, true), "claude --continue");
+        // Claude command is the same regardless of unrestricted (sandbox is in settings)
+        assert_eq!((caps.build_command)(None, false, false), "claude");
+        assert_eq!((caps.build_command)(None, true, false), "claude --continue");
         assert_eq!(
-            (caps.build_command)(Some("fix the bug"), false),
+            (caps.build_command)(Some("fix the bug"), false, false),
             "claude 'fix the bug'"
-        );
-        assert_eq!(
-            (caps.build_command)(Some("fix the bug"), true),
-            "claude --continue 'fix the bug'"
         );
     }
 
     #[test]
     fn agent_build_command_codex() {
         let caps = agent_capabilities("codex").unwrap();
-        let cmd = (caps.build_command)(None, false);
+        // Codex always uses --full-auto (built-in sandbox)
+        let cmd = (caps.build_command)(None, false, false);
         assert!(cmd.starts_with("codex "));
         assert!(cmd.contains("--full-auto"));
-        let cmd_resume = (caps.build_command)(None, true);
+        let cmd_resume = (caps.build_command)(None, true, false);
         assert!(cmd_resume.contains("--resume"));
     }
 
     #[test]
     fn agent_build_command_every_code() {
         let caps = agent_capabilities("every-code").unwrap();
-        let cmd = (caps.build_command)(None, false);
+        let cmd = (caps.build_command)(None, false, false);
         assert!(cmd.starts_with("coder "));
         assert!(cmd.contains("--full-auto"));
     }
@@ -773,47 +816,64 @@ mod tests {
     #[test]
     fn agent_build_command_gemini() {
         let caps = agent_capabilities("gemini").unwrap();
-        assert_eq!((caps.build_command)(None, false), "gemini -y");
-        assert_eq!((caps.build_command)(None, true), "gemini -y --resume");
+        // Default: sandboxed
         assert_eq!(
-            (caps.build_command)(Some("fix the bug"), false),
-            "gemini -y -p 'fix the bug'"
+            (caps.build_command)(None, false, false),
+            "gemini --sandbox --approval-mode=yolo"
+        );
+        assert_eq!(
+            (caps.build_command)(None, true, false),
+            "gemini --sandbox --approval-mode=yolo --resume"
+        );
+        assert_eq!(
+            (caps.build_command)(Some("fix the bug"), false, false),
+            "gemini --sandbox --approval-mode=yolo -p 'fix the bug'"
+        );
+        // Unrestricted: no sandbox
+        assert_eq!(
+            (caps.build_command)(None, false, true),
+            "gemini --approval-mode=yolo"
         );
     }
 
     #[test]
     fn agent_build_command_aider() {
         let caps = agent_capabilities("aider").unwrap();
-        // Aider is always interactive — prompt and resume are ignored
-        assert_eq!((caps.build_command)(None, false), "aider --yes");
-        assert_eq!((caps.build_command)(Some("fix it"), true), "aider --yes");
+        // Default: interactive, no auto-approve
+        assert_eq!((caps.build_command)(None, false, false), "aider");
+        // Unrestricted: --yes auto-approves
+        assert_eq!((caps.build_command)(None, false, true), "aider --yes");
     }
 
     #[test]
     fn agent_build_command_copilot() {
         let caps = agent_capabilities("copilot").unwrap();
-        assert_eq!((caps.build_command)(None, false), "copilot --yolo");
+        // Default: standard permissions
+        assert_eq!((caps.build_command)(None, false, false), "copilot");
         assert_eq!(
-            (caps.build_command)(Some("fix the bug"), false),
-            "copilot --yolo -p 'fix the bug'"
+            (caps.build_command)(Some("fix the bug"), false, false),
+            "copilot -p 'fix the bug'"
         );
-        // No resume support — resume flag is ignored
-        assert_eq!((caps.build_command)(None, true), "copilot --yolo");
+        // Unrestricted: --yolo
+        assert_eq!((caps.build_command)(None, false, true), "copilot --yolo");
     }
 
     #[test]
     fn agent_build_command_kiro() {
         let caps = agent_capabilities("kiro").unwrap();
+        // Default: no --trust-all-tools
+        assert_eq!((caps.build_command)(None, false, false), "kiro-cli chat");
         assert_eq!(
-            (caps.build_command)(None, false),
+            (caps.build_command)(None, true, false),
+            "kiro-cli chat --resume"
+        );
+        // Unrestricted: --trust-all-tools
+        assert_eq!(
+            (caps.build_command)(None, false, true),
             "kiro-cli chat --trust-all-tools"
         );
         assert_eq!(
-            (caps.build_command)(None, true),
-            "kiro-cli chat --trust-all-tools --resume"
-        );
-        assert_eq!(
-            (caps.build_command)(Some("fix the bug"), false),
+            (caps.build_command)(Some("fix the bug"), false, true),
             "kiro-cli chat --trust-all-tools 'fix the bug'"
         );
     }
@@ -821,15 +881,15 @@ mod tests {
     #[test]
     fn agent_build_command_opencode() {
         let caps = agent_capabilities("opencode").unwrap();
-        assert_eq!((caps.build_command)(None, false), "opencode");
-        assert_eq!((caps.build_command)(None, true), "opencode --continue");
+        // OpenCode has no CLI auto-approve flag
+        assert_eq!((caps.build_command)(None, false, false), "opencode");
         assert_eq!(
-            (caps.build_command)(Some("fix the bug"), false),
-            "opencode --prompt 'fix the bug'"
+            (caps.build_command)(None, true, false),
+            "opencode --continue"
         );
         assert_eq!(
-            (caps.build_command)(Some("fix the bug"), true),
-            "opencode --continue --prompt 'fix the bug'"
+            (caps.build_command)(Some("fix the bug"), false, false),
+            "opencode --prompt 'fix the bug'"
         );
     }
 
