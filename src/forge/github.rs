@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
 
-use super::{Forge, PrInfo};
+use super::{CheckConclusion, CheckRun, ChecksStatus, Forge, PrInfo};
 
 pub struct GitHubForge;
 
@@ -101,6 +101,48 @@ impl Forge for GitHubForge {
         }
 
         Ok(Some(parse_pr_json_value(&arr[0])?))
+    }
+    fn pr_checks(&self, repo_path: &Path, branch: &str) -> Result<ChecksStatus> {
+        check_gh()?;
+
+        let output = Command::new("gh")
+            .args(["pr", "checks", branch, "--json", "name,state"])
+            .current_dir(repo_path)
+            .output()
+            .context("failed to run gh pr checks")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // If there are no checks configured, gh returns an error
+            if stderr.contains("no checks") || stderr.contains("no status checks") {
+                return Ok(ChecksStatus { checks: Vec::new() });
+            }
+            bail!("failed to get PR checks: {}", stderr.trim());
+        }
+
+        let json: serde_json::Value =
+            serde_json::from_slice(&output.stdout).context("failed to parse gh output as JSON")?;
+
+        let arr = json
+            .as_array()
+            .context("expected JSON array from gh pr checks")?;
+
+        let checks = arr
+            .iter()
+            .map(|item| {
+                let name = item["name"].as_str().unwrap_or("unknown").to_string();
+                let state = item["state"].as_str().unwrap_or("");
+                let conclusion = match state {
+                    "SUCCESS" => CheckConclusion::Pass,
+                    "FAILURE" | "ERROR" => CheckConclusion::Fail,
+                    "SKIPPED" | "NEUTRAL" => CheckConclusion::Skipped,
+                    _ => CheckConclusion::Pending,
+                };
+                CheckRun { name, conclusion }
+            })
+            .collect();
+
+        Ok(ChecksStatus { checks })
     }
 }
 

@@ -18,6 +18,49 @@ pub struct PrInfo {
     pub url: String,
 }
 
+/// Status of a single CI check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckConclusion {
+    Pass,
+    Fail,
+    Pending,
+    Skipped,
+}
+
+/// A single CI check result.
+#[derive(Debug, Clone)]
+pub struct CheckRun {
+    pub name: String,
+    pub conclusion: CheckConclusion,
+}
+
+/// Summary of all checks on a PR.
+#[derive(Debug)]
+pub struct ChecksStatus {
+    pub checks: Vec<CheckRun>,
+}
+
+impl ChecksStatus {
+    /// True if any check has failed.
+    pub fn has_failures(&self) -> bool {
+        self.checks
+            .iter()
+            .any(|c| c.conclusion == CheckConclusion::Fail)
+    }
+
+    /// True if any check is still pending.
+    pub fn has_pending(&self) -> bool {
+        self.checks
+            .iter()
+            .any(|c| c.conclusion == CheckConclusion::Pending)
+    }
+
+    /// True if all checks passed (or were skipped) and none are pending.
+    pub fn all_passed(&self) -> bool {
+        !self.has_failures() && !self.has_pending()
+    }
+}
+
 /// Trait for forge (GitHub, GitLab, etc.) operations.
 /// Analogous to `TerminalBackend` — implementations shell out to
 /// CLI tools (`gh`, `glab`) for the actual operations.
@@ -37,6 +80,9 @@ pub trait Forge {
 
     /// Get the PR/MR info for a branch, if one exists.
     fn pr_for_branch(&self, repo_path: &std::path::Path, branch: &str) -> Result<Option<PrInfo>>;
+
+    /// Get CI check status for a PR branch.
+    fn pr_checks(&self, repo_path: &std::path::Path, branch: &str) -> Result<ChecksStatus>;
 }
 
 /// Detect the forge kind from a remote URL.
@@ -99,5 +145,59 @@ pub fn detect_forge(
             "GitLab support is not yet implemented. \
              See https://github.com/xiphux/foundry/issues/35"
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_status(conclusions: &[CheckConclusion]) -> ChecksStatus {
+        ChecksStatus {
+            checks: conclusions
+                .iter()
+                .enumerate()
+                .map(|(i, c)| CheckRun {
+                    name: format!("check-{i}"),
+                    conclusion: c.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn checks_status_all_passed() {
+        let status = make_status(&[CheckConclusion::Pass, CheckConclusion::Pass]);
+        assert!(status.all_passed());
+        assert!(!status.has_failures());
+        assert!(!status.has_pending());
+    }
+
+    #[test]
+    fn checks_status_with_failure() {
+        let status = make_status(&[CheckConclusion::Pass, CheckConclusion::Fail]);
+        assert!(!status.all_passed());
+        assert!(status.has_failures());
+        assert!(!status.has_pending());
+    }
+
+    #[test]
+    fn checks_status_with_pending() {
+        let status = make_status(&[CheckConclusion::Pass, CheckConclusion::Pending]);
+        assert!(!status.all_passed());
+        assert!(!status.has_failures());
+        assert!(status.has_pending());
+    }
+
+    #[test]
+    fn checks_status_skipped_counts_as_passed() {
+        let status = make_status(&[CheckConclusion::Pass, CheckConclusion::Skipped]);
+        assert!(status.all_passed());
+    }
+
+    #[test]
+    fn checks_status_empty_is_all_passed() {
+        let status = make_status(&[]);
+        assert!(status.all_passed());
     }
 }

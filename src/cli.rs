@@ -77,6 +77,11 @@ pub enum Commands {
         #[arg(long)]
         body: Option<String>,
     },
+    /// Show CI check status for a workspace's PR
+    Checks {
+        /// Worktree name (inferred from cwd if omitted)
+        name: Option<String>,
+    },
     /// Teardown and delete worktree without merging
     #[command(visible_alias = "destroy")]
     Discard {

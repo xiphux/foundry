@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+use std::io::{self, Write as _};
+
 use crate::config::{MergeStrategy, ResolvedConfig};
 use crate::forge;
 use crate::git;
@@ -17,6 +19,7 @@ pub fn run(
     state_path: &Path,
     verbose: bool,
     force_local: bool,
+    skip_confirm: bool,
 ) -> Result<()> {
     let worktree_path = config.worktree_dir.join(project_name).join(name);
 
@@ -77,6 +80,7 @@ pub fn run(
                 state,
                 state_path,
                 verbose,
+                skip_confirm,
             )
         }
     } else {
@@ -113,6 +117,7 @@ fn do_pr_merge(
     state: &mut WorkspaceState,
     state_path: &Path,
     verbose: bool,
+    skip_confirm: bool,
 ) -> Result<()> {
     // Detect forge
     let (forge_impl, remote) = forge::detect_forge(source_path, config.pr_remote.as_deref())?;
@@ -127,6 +132,34 @@ fn do_pr_merge(
              foundry finish {name} --local\n\
              to merge locally instead."
         );
+    }
+
+    // Check CI status before merging
+    if !skip_confirm {
+        match forge_impl.pr_checks(source_path, branch) {
+            Ok(status) if !status.checks.is_empty() && !status.all_passed() => {
+                super::checks::print_checks(pr_number, &status);
+                if status.has_failures() {
+                    eprint!("PR has failing checks. Merge anyway? [y/N] ");
+                } else {
+                    eprint!("PR has pending checks. Merge anyway? [y/N] ");
+                }
+                io::stderr().flush()?;
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+                if !input.trim().eq_ignore_ascii_case("y") {
+                    eprintln!("Aborted.");
+                    return Ok(());
+                }
+            }
+            Ok(status) if verbose && !status.checks.is_empty() => {
+                eprintln!("All {} checks passed.", status.checks.len());
+            }
+            Err(e) if verbose => {
+                eprintln!("Warning: could not check CI status: {e}");
+            }
+            _ => {}
+        }
     }
 
     if verbose {

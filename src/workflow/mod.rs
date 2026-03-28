@@ -1,3 +1,4 @@
+pub mod checks;
 pub mod diff;
 pub mod discard;
 pub mod finish;
