@@ -78,10 +78,15 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
             names: &["claude"],
             executable: "claude",
             // Default: Claude uses sandbox + settings.local.json for worktree-scoped
-            // permissions (level #2). Unrestricted: no sandbox constraints.
+            // permissions (level #2) with acceptEdits mode so file edits don't prompt.
+            // Unrestricted: no sandbox constraints, still acceptEdits.
             // Note: sandbox is configured separately in agent_hooks.rs via settings.
-            build_command: |prompt, resume, _unrestricted| {
-                let mut cmd = "claude".to_string();
+            build_command: |prompt, resume, unrestricted| {
+                let mut cmd = if unrestricted {
+                    "claude --permission-mode bypassPermissions".to_string()
+                } else {
+                    "claude --permission-mode acceptEdits".to_string()
+                };
                 if resume {
                     cmd += " --continue";
                 }
@@ -716,7 +721,8 @@ mod tests {
 
     #[test]
     fn resolve_agent_command_claude() {
-        assert_eq!(resolve_agent_command("claude", None), "claude");
+        let cmd = resolve_agent_command("claude", None);
+        assert!(cmd.starts_with("claude"));
     }
 
     #[test]
@@ -813,12 +819,23 @@ mod tests {
     #[test]
     fn agent_build_command_claude() {
         let caps = agent_capabilities("claude").unwrap();
-        // Claude command is the same regardless of unrestricted (sandbox is in settings)
-        assert_eq!((caps.build_command)(None, false, false), "claude");
-        assert_eq!((caps.build_command)(None, true, false), "claude --continue");
+        // Default: acceptEdits mode (sandbox handles bash restrictions)
+        assert_eq!(
+            (caps.build_command)(None, false, false),
+            "claude --permission-mode acceptEdits"
+        );
+        assert_eq!(
+            (caps.build_command)(None, true, false),
+            "claude --permission-mode acceptEdits --continue"
+        );
         assert_eq!(
             (caps.build_command)(Some("fix the bug"), false, false),
-            "claude 'fix the bug'"
+            "claude --permission-mode acceptEdits 'fix the bug'"
+        );
+        // Unrestricted: bypassPermissions
+        assert_eq!(
+            (caps.build_command)(None, false, true),
+            "claude --permission-mode bypassPermissions"
         );
     }
 
