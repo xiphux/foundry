@@ -350,22 +350,22 @@ Foundry supports multiple AI coding agents. The agent is configured via `agent` 
 | Aider | `aider` | Interactive | No | `--yes` |
 | GitHub Copilot | `copilot` | `-p` flag | No | `--yolo` |
 | Kiro | `kiro` | Positional | `--resume` | `--trust-all-tools` |
-| OpenCode | `opencode` | `-p` flag | `--continue` | `--yolo` |
+| OpenCode | `opencode` | Interactive | No | Via config file |
 | Custom | `custom` | N/A | N/A | N/A |
 
 **Claude** gets the richest integration: foundry copies your source repo's `.claude/settings.local.json` into the worktree and merges in status-tracking hooks and worktree-scoped permissions (auto-approve file operations within the worktree, deny `git push` and `checkout main`).
 
 **Codex** and **Every Code** use `--full-auto` for autonomous operation (sandbox scoped to workspace, approvals only on failure).
 
-**Gemini CLI** launches with `-y` (YOLO mode) for automatic action approval. Prompts are passed via `-p` and sessions can be resumed with `--resume`.
+**Gemini CLI** launches with `-y` (YOLO mode) for automatic action approval. Prompts are passed via `-p` and sessions can be resumed with `--resume`. Note: Gemini may prompt to trust the worktree directory on first use. To avoid this for every workspace, trust the parent worktree directory (e.g., `~/.foundry/worktrees/`) which grants trust to all subdirectories.
 
 **Aider** launches as an interactive REPL with `--yes` for auto-approval. Since Aider auto-exits after processing `--message`, foundry launches it interactively and lets you type prompts directly.
 
-**GitHub Copilot** launches with `--yolo` to enable all permissions. Prompts are passed via `-p`.
+**GitHub Copilot** launches with `--yolo` to enable all permissions. Prompts are passed via `-p`. Note: Copilot may prompt to trust the worktree directory on first use. You can choose "Remember this folder" when prompted, or use `/add-dir` within a session to trust directories permanently.
 
 **Kiro** (formerly Amazon Q Developer CLI) launches with `kiro-cli chat --trust-all-tools` for autonomous tool usage. Prompts are passed as positional arguments and sessions can be resumed with `--resume`.
 
-**OpenCode** launches with `--yolo` to auto-approve permissions. Prompts are passed via `-p` and sessions can be resumed with `--continue`.
+**OpenCode** launches as an interactive TUI. Permissions are configured via the `opencode.json` config file rather than CLI flags.
 
 **Custom** agents use whatever command you specify in `agent_command`. Foundry runs it as-is without additional configuration.
 

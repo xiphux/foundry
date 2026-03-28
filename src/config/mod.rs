@@ -168,16 +168,10 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         "opencode",
         AgentCapabilities {
             names: &["opencode"],
-            build_command: |prompt, resume| {
-                let mut cmd = "opencode --yolo".to_string();
-                if resume {
-                    cmd += " --continue";
-                }
-                if let Some(p) = prompt {
-                    cmd += &format!(" -p '{}'", escape_prompt(p));
-                }
-                cmd
-            },
+            // OpenCode is an interactive TUI. No CLI auto-approve flag exists;
+            // permissions are configured via opencode.json config file.
+            // Launch interactively and let the user drive.
+            build_command: |_prompt, _resume| "opencode".to_string(),
         },
     ),
 ];
@@ -667,15 +661,9 @@ mod tests {
     #[test]
     fn agent_build_command_opencode() {
         let caps = agent_capabilities("opencode").unwrap();
-        assert_eq!((caps.build_command)(None, false), "opencode --yolo");
-        assert_eq!(
-            (caps.build_command)(None, true),
-            "opencode --yolo --continue"
-        );
-        assert_eq!(
-            (caps.build_command)(Some("fix the bug"), false),
-            "opencode --yolo -p 'fix the bug'"
-        );
+        // OpenCode is interactive — prompt and resume are ignored
+        assert_eq!((caps.build_command)(None, false), "opencode");
+        assert_eq!((caps.build_command)(Some("fix it"), true), "opencode");
     }
 
     #[test]
