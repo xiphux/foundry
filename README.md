@@ -350,7 +350,7 @@ Foundry supports multiple AI coding agents. The agent is configured via `agent` 
 | Aider | `aider` | Interactive | No | `--yes` |
 | GitHub Copilot | `copilot` | `-p` flag | No | `--yolo` |
 | Kiro | `kiro` | Positional | `--resume` | `--trust-all-tools` |
-| OpenCode | `opencode` | Interactive | No | Via config file |
+| OpenCode | `opencode` | `--prompt` flag | `--continue` | Via config file |
 | Custom | `custom` | N/A | N/A | N/A |
 
 **Claude** gets the richest integration: foundry copies your source repo's `.claude/settings.local.json` into the worktree and merges in status-tracking hooks and worktree-scoped permissions (auto-approve file operations within the worktree, deny `git push` and `checkout main`).
@@ -365,7 +365,7 @@ Foundry supports multiple AI coding agents. The agent is configured via `agent` 
 
 **Kiro** (formerly Amazon Q Developer CLI) launches with `kiro-cli chat --trust-all-tools` for autonomous tool usage. Prompts are passed as positional arguments and sessions can be resumed with `--resume`.
 
-**OpenCode** launches as an interactive TUI. Permissions are configured via the `opencode.json` config file rather than CLI flags.
+**OpenCode** launches as an interactive TUI. Prompts are passed via `--prompt` and sessions can be resumed with `--continue`. Auto-approve permissions are configured via `opencode.json` (`"permission": "allow"`) rather than CLI flags.
 
 **Custom** agents use whatever command you specify in `agent_command`. Foundry runs it as-is without additional configuration.
 
