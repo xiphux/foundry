@@ -136,6 +136,11 @@ agent = "claude"
 # If there's one remote, uses it. If multiple, defaults to "origin".
 # pr_remote = "origin"
 
+# Bypass all permission checks and sandbox constraints (default: false).
+# Agents use their most permissive mode (YOLO/auto-approve-all).
+# Use with caution — this grants agents unrestricted system access.
+# unrestricted_permissions = true
+
 # Prefix for archived branches (default: "archive")
 archive_prefix = "archive"
 
@@ -341,31 +346,42 @@ foundry projects remove myapp
 
 Foundry supports multiple AI coding agents. The agent is configured via `agent` in your global or project config.
 
-| Agent | Config value | Prompt | Resume | Auto-approve |
-|---|---|---|---|---|
-| Claude | `claude` | Positional | `--continue` | Worktree permissions |
-| Codex | `codex` | Positional | `--resume` | `--full-auto` |
-| Every Code | `every-code` | Positional | `--resume` | `--full-auto` |
-| Gemini CLI | `gemini` | `-p` flag | `--resume` | `-y` (YOLO) |
-| Aider | `aider` | Interactive | No | `--yes` |
-| GitHub Copilot | `copilot` | `-p` flag | No | `--yolo` |
-| Kiro | `kiro` | Positional | `--resume` | `--trust-all-tools` |
-| OpenCode | `opencode` | `--prompt` flag | `--continue` | Via config file |
-| Custom | `custom` | N/A | N/A | N/A |
+| Agent | Config value | Default | With `unrestricted_permissions` | Prompt | Resume |
+|---|---|---|---|---|---|
+| Claude | `claude` | Sandbox (worktree-scoped) | No sandbox | Positional | `--continue` |
+| Codex | `codex` | Sandbox (built-in) | Same | Positional | `--resume` |
+| Every Code | `every-code` | Sandbox (built-in) | Same | Positional | `--resume` |
+| Gemini CLI | `gemini` | Sandbox (worktree-scoped) | No sandbox, YOLO | `-p` flag | `--resume` |
+| Aider | `aider` | Ask for permission | `--yes` (auto-approve) | Interactive | No |
+| GitHub Copilot | `copilot` | Ask for permission | `--yolo` (auto-approve) | `-p` flag | No |
+| Kiro | `kiro` | Ask for permission | `--trust-all-tools` | Positional | `--resume` |
+| OpenCode | `opencode` | Ask for permission | No CLI flag (use config) | `--prompt` flag | `--continue` |
+| Custom | `custom` | N/A | N/A | N/A | N/A |
 
-**Claude** gets the richest integration: foundry copies your source repo's `.claude/settings.local.json` into the worktree and merges in status-tracking hooks and worktree-scoped permissions (auto-approve file operations within the worktree, deny `git push` and `checkout main`).
+### Permission Levels
 
-**Codex** and **Every Code** use `--full-auto` for autonomous operation (sandbox scoped to workspace, approvals only on failure).
+By default, foundry uses the safest available permission level for each agent:
 
-**Gemini CLI** launches with `-y` (YOLO mode) for automatic action approval. Prompts are passed via `-p` and sessions can be resumed with `--resume`. Note: Gemini may prompt to trust the worktree directory on first use. To avoid this for every workspace, trust the parent worktree directory (e.g., `~/.foundry/worktrees/`) which grants trust to all subdirectories.
+- **Worktree-scoped sandbox** (Claude, Codex, Every Code, Gemini): The agent can read/write freely within the worktree, but OS-level sandboxing prevents modifications outside it. Commands are auto-approved within sandbox boundaries.
+- **Ask for permission** (Aider, Copilot, Kiro, OpenCode): The agent launches with standard permissions and prompts the user before taking actions.
 
-**Aider** launches as an interactive REPL with `--yes` for auto-approval. Since Aider auto-exits after processing `--message`, foundry launches it interactively and lets you type prompts directly.
+Setting `unrestricted_permissions = true` in your config bumps agents to their most permissive mode — auto-approving all actions without sandbox constraints. Use with caution.
 
-**GitHub Copilot** launches with `--yolo` to enable all permissions. Prompts are passed via `-p`. Note: Copilot may prompt to trust the worktree directory on first use. You can choose "Remember this folder" when prompted, or use `/add-dir` within a session to trust directories permanently.
+### Agent Details
 
-**Kiro** (formerly Amazon Q Developer CLI) launches with `kiro-cli chat --trust-all-tools` for autonomous tool usage. Prompts are passed as positional arguments and sessions can be resumed with `--resume`.
+**Claude** gets the richest integration: foundry copies your source repo's `.claude/settings.local.json` into the worktree and merges in status-tracking hooks, worktree-scoped permissions (auto-approve file operations within the worktree, deny `git push` and `checkout main`), and OS-level sandbox configuration (Seatbelt on macOS, bubblewrap on Linux).
 
-**OpenCode** launches as an interactive TUI. Prompts are passed via `--prompt` and sessions can be resumed with `--continue`. Auto-approve permissions are configured via `opencode.json` (`"permission": "allow"`) rather than CLI flags.
+**Codex** and **Every Code** use `--full-auto` for autonomous operation with a built-in OS sandbox scoped to the workspace.
+
+**Gemini CLI** launches with `--sandbox --approval-mode=yolo` — the sandbox restricts writes to the project directory while YOLO mode auto-approves within those boundaries. Note: Gemini may prompt to trust the worktree directory on first use. To avoid this for every workspace, trust the parent worktree directory (e.g., `~/.foundry/worktrees/`).
+
+**Aider** launches as an interactive REPL. Since Aider auto-exits after processing `--message`, foundry launches it interactively and lets you type prompts directly.
+
+**GitHub Copilot** launches with standard permissions by default. Note: Copilot may prompt to trust the worktree directory on first use. You can choose "Remember this folder" when prompted.
+
+**Kiro** (formerly Amazon Q Developer CLI) launches with `kiro-cli chat`. Prompts are passed as positional arguments and sessions can be resumed with `--resume`.
+
+**OpenCode** launches as an interactive TUI. Prompts are passed via `--prompt` and sessions can be resumed with `--continue`. Auto-approve permissions can be configured via `opencode.json` (`"permission": "allow"`).
 
 **Custom** agents use whatever command you specify in `agent_command`. Foundry runs it as-is without additional configuration.
 
