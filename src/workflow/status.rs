@@ -30,10 +30,10 @@ fn render_dashboard(state: &WorkspaceState) -> Result<()> {
 
     // Print header
     println!(
-        "  {:<30} {:<10} {:<14} {:<26} ACTIVITY",
-        "WORKSPACE", "GIT", "COMMITS", "AGENT"
+        "  {:<30} {:<10} {:<14} AGENT",
+        "WORKSPACE", "GIT", "COMMITS"
     );
-    println!("  {}", "\u{2500}".repeat(95));
+    println!("  {}", "\u{2500}".repeat(80));
 
     for ws in workspaces {
         let worktree = Path::new(&ws.worktree_path);
@@ -116,11 +116,15 @@ fn render_dashboard(state: &WorkspaceState) -> Result<()> {
         // Pad visible text first, then wrap with color codes so ANSI escapes
         // don't interfere with column widths.
         let git_padded = format!("{:<10}", git_label);
-        let agent_padded = format!("{:<26}", agent_label);
         println!(
-            "  {:<30} {}{}\x1b[0m {:<14} {}{}\x1b[0m {}",
-            workspace_name, git_color, git_padded, commit_info, agent_color, agent_padded, activity
+            "  {:<30} {}{}\x1b[0m {:<14} {}{}\x1b[0m",
+            workspace_name, git_color, git_padded, commit_info, agent_color, agent_label
         );
+
+        // Activity on a second indented line (only if non-empty)
+        if !activity.is_empty() {
+            println!("    \x1b[90mActivity:\x1b[0m {activity}");
+        }
     }
 
     Ok(())
