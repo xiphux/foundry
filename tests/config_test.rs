@@ -164,7 +164,6 @@ fn test_build_agent_command_claude_with_prompt() {
         Some("fix the auth bug"),
         false,
         false,
-        None,
     );
     assert!(cmd.contains("claude"));
     assert!(cmd.contains("'fix the auth bug'"));
@@ -172,7 +171,7 @@ fn test_build_agent_command_claude_with_prompt() {
 
 #[test]
 fn test_build_agent_command_claude_without_prompt() {
-    let cmd = foundry::config::build_agent_command("claude", None, None, false, false, None);
+    let cmd = foundry::config::build_agent_command("claude", None, None, false, false);
     assert!(cmd.starts_with("claude"));
     assert!(!cmd.contains("'"));
 }
@@ -185,7 +184,6 @@ fn test_build_agent_command_prompt_with_quotes() {
         Some("fix the user's auth bug"),
         false,
         false,
-        None,
     );
     assert!(cmd.contains("fix the user"));
     assert!(cmd.contains("auth bug"));
@@ -193,26 +191,20 @@ fn test_build_agent_command_prompt_with_quotes() {
 
 #[test]
 fn test_build_agent_command_claude_continue() {
-    let cmd = foundry::config::build_agent_command("claude", None, None, true, false, None);
+    let cmd = foundry::config::build_agent_command("claude", None, None, true, false);
     assert!(cmd.contains("--continue"));
 }
 
 #[test]
 fn test_build_agent_command_codex_resume() {
-    let cmd = foundry::config::build_agent_command("codex", None, None, true, false, None);
+    let cmd = foundry::config::build_agent_command("codex", None, None, true, false);
     assert!(cmd.contains("--resume"));
 }
 
 #[test]
 fn test_build_agent_command_continue_with_prompt() {
-    let cmd = foundry::config::build_agent_command(
-        "claude",
-        None,
-        Some("do something"),
-        true,
-        false,
-        None,
-    );
+    let cmd =
+        foundry::config::build_agent_command("claude", None, Some("do something"), true, false);
     assert!(cmd.contains("--continue"));
     assert!(cmd.contains("do something"));
 }

@@ -373,6 +373,7 @@ mod tests {
             "ws",
             "claude",
             false,
+            None,
         )
         .unwrap();
 
@@ -429,6 +430,7 @@ mod tests {
             "ws",
             "claude",
             false,
+            None,
         )
         .unwrap();
 
@@ -461,6 +463,7 @@ mod tests {
             "ws",
             "claude",
             true,
+            None,
         )
         .unwrap();
 
@@ -490,6 +493,7 @@ mod tests {
             "ws",
             "codex",
             false,
+            None,
         )
         .unwrap();
 
@@ -510,6 +514,7 @@ mod tests {
             "ws",
             "some-agent",
             false,
+            None,
         )
         .unwrap();
 
@@ -703,9 +708,17 @@ pub fn setup_agent_hooks(
     name: &str,
     agent: &str,
     unrestricted: bool,
+    context: Option<&str>,
 ) -> Result<()> {
     match agent {
-        "claude" => setup_claude(worktree_path, source_path, project, name, unrestricted),
+        "claude" => setup_claude(
+            worktree_path,
+            source_path,
+            project,
+            name,
+            unrestricted,
+            context,
+        ),
         // Codex permissions are handled via CLI flags in resolve_agent_command.
         // No config file setup needed since .codex/config.toml is tracked in git.
         _ => Ok(()),
@@ -720,6 +733,7 @@ fn setup_claude(
     project: &str,
     name: &str,
     unrestricted: bool,
+    context: Option<&str>,
 ) -> Result<()> {
     let status_path = status_file_path(project, name, "claude")?;
     let status_path_str = status_path.to_string_lossy();
@@ -798,6 +812,38 @@ fn setup_claude(
             "enabled": true,
             "autoAllow": true
         });
+    }
+
+    // Write worktree context file and add SessionStart hook if context is provided
+    if let Some(ctx) = context {
+        let context_path = claude_dir.join("foundry-context.txt");
+        std::fs::write(&context_path, ctx)
+            .with_context(|| format!("failed to write {}", context_path.display()))?;
+
+        // Add SessionStart hook that cats the context file
+        let context_path_str = context_path.to_string_lossy();
+        let session_hook = serde_json::json!({
+            "SessionStart": [
+                {
+                    "matcher": "*",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": format!("cat '{context_path_str}'"),
+                            "timeout": 5
+                        }
+                    ]
+                }
+            ]
+        });
+
+        // Merge SessionStart into existing hooks
+        let existing_hooks = settings
+            .get("hooks")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let merged_hooks = merge_hooks(&existing_hooks, &session_hook);
+        settings["hooks"] = merged_hooks;
     }
 
     let settings_path = claude_dir.join("settings.local.json");
