@@ -814,9 +814,18 @@ fn setup_claude(
         });
     }
 
-    // Write worktree context file and add SessionStart hook if context is provided
+    // Write worktree context file and add SessionStart hook if context is provided.
+    // The context file lives in ~/.foundry/context/ (outside the worktree) so it
+    // doesn't appear as an untracked file in git status.
     if let Some(ctx) = context {
-        let context_path = claude_dir.join("foundry-context.txt");
+        let context_dir = config::foundry_dir()?.join("context").join(project);
+        std::fs::create_dir_all(&context_dir).with_context(|| {
+            format!(
+                "failed to create context directory {}",
+                context_dir.display()
+            )
+        })?;
+        let context_path = context_dir.join(format!("{name}.txt"));
         std::fs::write(&context_path, ctx)
             .with_context(|| format!("failed to write {}", context_path.display()))?;
 
