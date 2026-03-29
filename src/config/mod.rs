@@ -50,6 +50,8 @@ pub struct ResolvedConfig {
     pub port_range_start: u16,
     /// Named port slots to allocate per workspace (env var names)
     pub ports: Vec<String>,
+    /// User-configured context message appended to the agent system prompt.
+    pub context: Option<String>,
 }
 
 /// Load the global config from ~/.foundry/config.toml.
@@ -217,6 +219,7 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
             .or_else(|| global.shell.clone()),
         port_range_start: global.port_range_start.unwrap_or(10000),
         ports: project.map(|p| p.ports.clone()).unwrap_or_default(),
+        context: project.and_then(|p| p.context.clone()),
     };
 
     warn_agent_in_command(&resolved.panes);

@@ -51,6 +51,9 @@ pub fn open_workspace(
         project: project_name.into(),
     };
 
+    // Build system context for agents that support --append-system-prompt.
+    let system_context = build_system_context(config, state, worktree_path);
+
     // Build PaneSpecs from the resolved config, resolving template variables.
     // Only the first agent pane receives the prompt — multiple agents acting on
     // the same prompt simultaneously would interfere with each other.
@@ -82,6 +85,7 @@ pub fn open_workspace(
                 pane_prompt,
                 continue_session,
                 config.unrestricted_permissions,
+                system_context.as_deref(),
             ))
         } else if let Some(ref cmd) = pane.command {
             let resolved = config::resolve_template(cmd, &template_vars)?;
@@ -120,6 +124,80 @@ pub fn open_workspace(
     state.save_to(state_path)?;
 
     Ok(())
+}
+
+/// Build the system context string for agents that support appending to
+/// their system prompt (e.g., Claude's `--append-system-prompt`).
+///
+/// Includes: isolation note, pane descriptions, allocated ports, and
+/// any user-configured context from `.foundry.toml`.
+fn build_system_context(
+    config: &ResolvedConfig,
+    state: &WorkspaceState,
+    worktree_path: &Path,
+) -> Option<String> {
+    let mut parts = Vec::new();
+
+    // Isolation note
+    parts.push(
+        "You are working in a Foundry-managed worktree — an isolated copy of the repository. \
+         Changes here do not affect the main branch or other workspaces."
+            .to_string(),
+    );
+
+    // Pane descriptions
+    let pane_lines: Vec<String> = config
+        .panes
+        .iter()
+        .map(|pane| {
+            if let Some(ref agent) = pane.agent {
+                format!("- \"{}\": {} (agent)", pane.name, agent)
+            } else if let Some(ref cmd) = pane.command {
+                format!("- \"{}\": {}", pane.name, cmd)
+            } else {
+                format!("- \"{}\": shell", pane.name)
+            }
+        })
+        .collect();
+    if !pane_lines.is_empty() {
+        parts.push(format!(
+            "Workspace panes started by the user:\n{}",
+            pane_lines.join("\n")
+        ));
+    }
+
+    // Allocated ports
+    if let Some(ws) = state.find_by_worktree_path(&worktree_path.to_string_lossy())
+        && !ws.allocated_ports.is_empty()
+    {
+        let mut sorted: Vec<_> = ws.allocated_ports.iter().collect();
+        sorted.sort_by_key(|(_, v)| *v);
+        let port_lines: Vec<String> = sorted
+            .iter()
+            .map(|(name, port)| format!("- {name}: {port}"))
+            .collect();
+        parts.push(format!("Allocated ports:\n{}", port_lines.join("\n")));
+    }
+
+    // User-configured context from .foundry.toml
+    if let Some(ref user_context) = config.context {
+        // Expand port variables in the user context (e.g., {VITE_PORT} → 10042)
+        let expanded =
+            if let Some(ws) = state.find_by_worktree_path(&worktree_path.to_string_lossy()) {
+                let mut ctx = user_context.clone();
+                for (port_name, port_value) in &ws.allocated_ports {
+                    ctx = ctx.replace(&format!("{{{port_name}}}"), &port_value.to_string());
+                }
+                ctx
+            } else {
+                user_context.clone()
+            };
+        if !expanded.trim().is_empty() {
+            parts.push(expanded);
+        }
+    }
+
+    Some(parts.join("\n\n"))
 }
 
 /// List active worktrees for a project.

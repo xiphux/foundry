@@ -24,4 +24,7 @@ pub struct ProjectConfig {
     #[serde(default)]
     /// Named port slots to allocate per workspace (e.g., ["VITE_PORT", "API_PORT"])
     pub ports: Vec<String>,
+    /// Additional context message appended to the agent's system prompt.
+    /// Supports port variable expansion (e.g., `{VITE_PORT}` → `10042`).
+    pub context: Option<String>,
 }

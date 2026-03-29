@@ -33,6 +33,7 @@ const PROJECT_CONFIG_KEYS: &[&str] = &[
     "scripts",
     "panes",
     "ports",
+    "context",
 ];
 
 /// Known keys for `[[panes]]` entries in the global config.
