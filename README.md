@@ -269,6 +269,9 @@ working_dir = "{worktree}"
 # Allocate unique ports per workspace (available as env vars in all panes)
 ports = ["VITE_PORT", "API_PORT"]
 
+# Additional context injected into the agent's session (supports port variables)
+# context = "The dev server runs at http://localhost:{VITE_PORT}"
+
 # Opt in to optional panes and/or override pane commands
 [panes.server]
 command = "npm run dev"
@@ -304,6 +307,27 @@ ports = ["VITE_PORT", "API_PORT", "DYNAMODB_PORT"]
 Each workspace gets a contiguous block of ports (starting from 10000 by default). The variables `$VITE_PORT`, `$API_PORT`, `$DYNAMODB_PORT` are available in all panes and setup scripts. Ports are assigned once at `foundry start` and remain stable for the life of the workspace.
 
 Configure your dev servers to use these variables instead of hardcoded ports (e.g., `vite --port $VITE_PORT`).
+
+### Worktree Context
+
+Foundry automatically injects workspace context into agents that support it (currently Claude via a SessionStart hook). This context tells the agent:
+
+- That it's working in an isolated worktree (safe to make changes freely)
+- What panes the user started the workspace with (e.g., "server": npm run dev)
+- Allocated port values
+
+You can append project-specific context with the `context` field in `.foundry.toml`. Port variables are expanded automatically:
+
+```toml
+# .foundry.toml
+context = """
+The Vite dev server runs at http://localhost:{VITE_PORT}.
+The API server runs at http://localhost:{API_PORT}.
+Run tests with: npm test
+"""
+```
+
+This is useful for giving agents information they can't easily discover on their own, such as where the dev server is running (since it runs in a separate pane with a dynamically allocated port).
 
 To customize the starting port, set `port_range_start` in your global config:
 
