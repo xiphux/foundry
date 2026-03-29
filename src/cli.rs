@@ -133,7 +133,11 @@ pub enum Commands {
     /// List all active workspaces across all projects
     List,
     /// Show status dashboard of all active workspaces
-    Status,
+    Status {
+        /// Continuously refresh the display (every 2 seconds)
+        #[arg(long, short)]
+        watch: bool,
+    },
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for

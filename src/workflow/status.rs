@@ -6,7 +6,21 @@ use crate::git;
 use crate::state::WorkspaceState;
 
 /// Display a status dashboard of all active workspaces.
-pub fn run(state: &WorkspaceState) -> Result<()> {
+pub fn run(state: &WorkspaceState, watch: bool) -> Result<()> {
+    if watch {
+        loop {
+            print!("\x1b[2J\x1b[H"); // clear screen
+            render_dashboard(state)?;
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    } else {
+        render_dashboard(state)?;
+    }
+    Ok(())
+}
+
+/// Render the status dashboard once.
+fn render_dashboard(state: &WorkspaceState) -> Result<()> {
     let workspaces = state.list();
 
     if workspaces.is_empty() {
@@ -16,10 +30,10 @@ pub fn run(state: &WorkspaceState) -> Result<()> {
 
     // Print header
     println!(
-        "  {:<30} {:<10} {:<14} {:<26} LAST COMMIT",
+        "  {:<30} {:<10} {:<14} {:<26} ACTIVITY",
         "WORKSPACE", "GIT", "COMMITS", "AGENT"
     );
-    println!("  {}", "-".repeat(90));
+    println!("  {}", "\u{2500}".repeat(95));
 
     for ws in workspaces {
         let worktree = Path::new(&ws.worktree_path);
@@ -59,43 +73,44 @@ pub fn run(state: &WorkspaceState) -> Result<()> {
         };
 
         // Agent status (may have multiple agents per workspace)
-        let agent_statuses = agent_hooks::read_all_statuses(&ws.project, &ws.name);
-        let (agent_label, agent_color) = if agent_statuses.is_empty() {
-            ("unknown".to_string(), "")
-        } else if agent_statuses.len() == 1 {
-            let (agent_name, status) = &agent_statuses[0];
-            let (label, color) = status_display(status);
-            (format!("{agent_name}: {label}"), color)
+        let agent_infos = agent_hooks::read_all_status_infos(&ws.project, &ws.name);
+        let (agent_label, agent_color, activity) = if agent_infos.is_empty() {
+            ("unknown".to_string(), "", String::new())
+        } else if agent_infos.len() == 1 {
+            let (agent_name, info) = &agent_infos[0];
+            let (label, color) = status_display(&info.status);
+            let act = activity_text(info);
+            (format!("{agent_name}: {label}"), color, act)
         } else {
             // Multiple agents — show each
-            let parts: Vec<String> = agent_statuses
+            let parts: Vec<String> = agent_infos
                 .iter()
-                .map(|(agent_name, status)| {
-                    let (label, _) = status_display(status);
+                .map(|(agent_name, info)| {
+                    let (label, _) = status_display(&info.status);
                     format!("{agent_name}:{label}")
                 })
                 .collect();
             // Use the most urgent color
-            let color = if agent_statuses
+            let color = if agent_infos
                 .iter()
-                .any(|(_, s)| matches!(s, agent_hooks::AgentStatus::WaitingPermission))
+                .any(|(_, i)| matches!(i.status, agent_hooks::AgentStatus::WaitingPermission))
             {
                 "\x1b[31m"
-            } else if agent_statuses
+            } else if agent_infos
                 .iter()
-                .any(|(_, s)| matches!(s, agent_hooks::AgentStatus::Working))
+                .any(|(_, i)| matches!(i.status, agent_hooks::AgentStatus::Working))
             {
                 "\x1b[34m"
             } else {
                 "\x1b[33m"
             };
-            (parts.join(" "), color)
-        };
-
-        // Time since last commit
-        let time_ago = match git::last_commit_timestamp(worktree) {
-            Ok(Some(ts)) => format_time_ago(ts),
-            _ => "-".to_string(),
+            // Activity from the first non-empty result
+            let act = agent_infos
+                .iter()
+                .map(|(_, i)| activity_text(i))
+                .find(|s| !s.is_empty())
+                .unwrap_or_default();
+            (parts.join(" "), color, act)
         };
 
         // Pad visible text first, then wrap with color codes so ANSI escapes
@@ -104,7 +119,7 @@ pub fn run(state: &WorkspaceState) -> Result<()> {
         let agent_padded = format!("{:<26}", agent_label);
         println!(
             "  {:<30} {}{}\x1b[0m {:<14} {}{}\x1b[0m {}",
-            workspace_name, git_color, git_padded, commit_info, agent_color, agent_padded, time_ago
+            workspace_name, git_color, git_padded, commit_info, agent_color, agent_padded, activity
         );
     }
 
@@ -123,6 +138,40 @@ fn status_display(status: &agent_hooks::AgentStatus) -> (&'static str, &'static 
     }
 }
 
+/// Build an activity string from rich status info.
+fn activity_text(info: &agent_hooks::AgentStatusInfo) -> String {
+    match info.status {
+        agent_hooks::AgentStatus::Working => info
+            .last_tool
+            .as_deref()
+            .map(|t| {
+                if t.len() > 50 {
+                    format!("{}...", &t[..47])
+                } else {
+                    t.to_string()
+                }
+            })
+            .unwrap_or_default(),
+        agent_hooks::AgentStatus::Idle => info
+            .last_message
+            .as_deref()
+            .map(|m| {
+                let truncated = if m.len() > 60 {
+                    format!("{}...", &m[..57])
+                } else {
+                    m.to_string()
+                };
+                format!("\"{truncated}\"")
+            })
+            .unwrap_or_default(),
+        agent_hooks::AgentStatus::Error => info
+            .error
+            .clone()
+            .unwrap_or_else(|| "unknown error".to_string()),
+        _ => String::new(),
+    }
+}
+
 /// Get the number of commits a branch has beyond base.
 fn commit_count(repo_path: &Path, branch: &str, base: &str) -> u64 {
     let range = format!("{base}..{branch}");
@@ -136,46 +185,46 @@ fn commit_count(repo_path: &Path, branch: &str, base: &str) -> u64 {
         .unwrap_or(0)
 }
 
-/// Format a Unix timestamp as a human-readable "X ago" string.
-fn format_time_ago(timestamp: i64) -> String {
-    let now = chrono::Utc::now().timestamp();
-    let diff = now - timestamp;
-
-    if diff < 0 {
-        return "just now".to_string();
-    }
-
-    let seconds = diff as u64;
-    let minutes = seconds / 60;
-    let hours = minutes / 60;
-    let days = hours / 24;
-
-    if days > 0 {
-        if days == 1 {
-            "1d ago".to_string()
-        } else {
-            format!("{days}d ago")
-        }
-    } else if hours > 0 {
-        if hours == 1 {
-            "1h ago".to_string()
-        } else {
-            format!("{hours}h ago")
-        }
-    } else if minutes > 0 {
-        if minutes == 1 {
-            "1m ago".to_string()
-        } else {
-            format!("{minutes}m ago")
-        }
-    } else {
-        "just now".to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Format a Unix timestamp as a human-readable "X ago" string.
+    fn format_time_ago(timestamp: i64) -> String {
+        let now = chrono::Utc::now().timestamp();
+        let diff = now - timestamp;
+
+        if diff < 0 {
+            return "just now".to_string();
+        }
+
+        let seconds = diff as u64;
+        let minutes = seconds / 60;
+        let hours = minutes / 60;
+        let days = hours / 24;
+
+        if days > 0 {
+            if days == 1 {
+                "1d ago".to_string()
+            } else {
+                format!("{days}d ago")
+            }
+        } else if hours > 0 {
+            if hours == 1 {
+                "1h ago".to_string()
+            } else {
+                format!("{hours}h ago")
+            }
+        } else if minutes > 0 {
+            if minutes == 1 {
+                "1m ago".to_string()
+            } else {
+                format!("{minutes}m ago")
+            }
+        } else {
+            "just now".to_string()
+        }
+    }
 
     #[test]
     fn test_commit_count_no_commits() {

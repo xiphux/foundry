@@ -411,11 +411,11 @@ fn main() -> Result<()> {
                 }
             }
         }
-        cli::Commands::Status => {
+        cli::Commands::Status { watch } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
             state.prune_stale();
             state.save_to(&state_path)?;
-            workflow::status::run(&state)?;
+            workflow::status::run(&state, watch)?;
         }
         cli::Commands::Pr { name, title, body } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
