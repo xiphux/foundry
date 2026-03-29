@@ -3,6 +3,41 @@ use std::path::{Path, PathBuf};
 
 use crate::config;
 
+const HOOK_SCRIPT_VERSION: &str = "v1";
+const HOOK_SCRIPT: &str = include_str!("hook_script.js");
+
+/// Install the Node.js hook script to `~/.foundry/hooks/status-update.js`.
+/// Skips if the file already contains the current version marker.
+/// Returns the path to the installed script.
+pub fn install_hook_script() -> Result<PathBuf> {
+    let base_dir = config::foundry_dir()?;
+    install_hook_script_to(&base_dir)
+}
+
+/// Install the hook script relative to `base_dir` (for testability).
+fn install_hook_script_to(base_dir: &Path) -> Result<PathBuf> {
+    let hooks_dir = base_dir.join("hooks");
+    let script_path = hooks_dir.join("status-update.js");
+
+    let version_marker = format!("foundry-status-hook {HOOK_SCRIPT_VERSION}");
+
+    // Skip if already current version
+    if script_path.exists()
+        && let Ok(existing) = std::fs::read_to_string(&script_path)
+        && existing.contains(&version_marker)
+    {
+        return Ok(script_path);
+    }
+
+    std::fs::create_dir_all(&hooks_dir)
+        .with_context(|| format!("failed to create hooks directory {}", hooks_dir.display()))?;
+
+    std::fs::write(&script_path, HOOK_SCRIPT)
+        .with_context(|| format!("failed to write hook script to {}", script_path.display()))?;
+
+    Ok(script_path)
+}
+
 /// The possible agent statuses we track.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AgentStatus {
@@ -571,6 +606,44 @@ mod tests {
         let dir = TempDir::new().unwrap();
         // Should not panic
         clear_agent_conversations(dir.path());
+    }
+
+    #[test]
+    fn install_hook_script_creates_file() {
+        let dir = TempDir::new().unwrap();
+        install_hook_script_to(dir.path()).unwrap();
+        let script_path = dir.path().join("hooks").join("status-update.js");
+        assert!(script_path.exists());
+        let content = std::fs::read_to_string(&script_path).unwrap();
+        assert!(content.contains("foundry-status-hook v"));
+    }
+
+    #[test]
+    fn install_hook_script_skips_if_current_version() {
+        let dir = TempDir::new().unwrap();
+        install_hook_script_to(dir.path()).unwrap();
+        let script_path = dir.path().join("hooks").join("status-update.js");
+        let mtime_before = std::fs::metadata(&script_path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        install_hook_script_to(dir.path()).unwrap();
+        let mtime_after = std::fs::metadata(&script_path).unwrap().modified().unwrap();
+        assert_eq!(mtime_before, mtime_after);
+    }
+
+    #[test]
+    fn install_hook_script_overwrites_old_version() {
+        let dir = TempDir::new().unwrap();
+        let hooks_dir = dir.path().join("hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+        std::fs::write(
+            hooks_dir.join("status-update.js"),
+            "// foundry-status-hook v0\nold",
+        )
+        .unwrap();
+        install_hook_script_to(dir.path()).unwrap();
+        let content = std::fs::read_to_string(hooks_dir.join("status-update.js")).unwrap();
+        assert!(!content.contains("v0"));
+        assert!(content.contains("foundry-status-hook v"));
     }
 }
 
