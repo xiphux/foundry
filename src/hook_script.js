@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// foundry-status-hook v2
+// foundry-status-hook v3
 'use strict';
 
 const fs = require('fs');
@@ -78,15 +78,23 @@ try {
           error: event.error || null,
         };
       } else if (hookName === 'Notification') {
-        if (event.notification_type !== 'permission_prompt') {
+        if (event.notification_type === 'permission_prompt') {
+          statusObj = {
+            status: 'waiting_permission',
+            last_tool: null,
+            last_message: null,
+            error: null,
+          };
+        } else if (event.notification_type === 'idle_prompt') {
+          statusObj = {
+            status: 'idle',
+            last_tool: null,
+            last_message: null,
+            error: null,
+          };
+        } else {
           process.exit(0);
         }
-        statusObj = {
-          status: 'waiting_permission',
-          last_tool: null,
-          last_message: null,
-          error: null,
-        };
       } else if (hookName === 'SessionEnd') {
         statusObj = {
           status: 'offline',

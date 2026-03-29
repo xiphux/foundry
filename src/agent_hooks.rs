@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config;
 
-const HOOK_SCRIPT_VERSION: &str = "v2";
+const HOOK_SCRIPT_VERSION: &str = "v3";
 const HOOK_SCRIPT: &str = include_str!("hook_script.js");
 
 /// Install the Node.js hook script to `~/.foundry/hooks/status-update.js`.
@@ -904,7 +904,16 @@ fn build_status_hooks(status_path_str: &str) -> serde_json::Value {
         "PostToolUse": make_hook("*"),
         "Stop": make_hook("*"),
         "StopFailure": make_hook("*"),
-        "Notification": make_hook("permission_prompt"),
+        "Notification": serde_json::json!([
+            {
+                "matcher": "permission_prompt",
+                "hooks": [{ "type": "command", "command": command, "timeout": 5 }]
+            },
+            {
+                "matcher": "idle_prompt",
+                "hooks": [{ "type": "command", "command": command, "timeout": 5 }]
+            }
+        ]),
         "SessionEnd": make_hook("*"),
     })
 }
