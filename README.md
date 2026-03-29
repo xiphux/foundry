@@ -64,7 +64,7 @@ foundry discard
 | `foundry discard [name] --force` | Discard even if the branch has unmerged commits |
 | `foundry switch [name]` | Switch to a workspace's terminal tab |
 | `foundry restore [branch]` | Restore workspace from an archived branch |
-| `foundry status` | Show status dashboard of all workspaces |
+| `foundry status` | Show status dashboard of all workspaces (use `--watch`/`-w` to continuously refresh) |
 | `foundry diff [name]` | Show changes in a workspace vs main |
 | `foundry diff [name] --stat` | Show file change summary vs main |
 | `foundry history` | Show workspace activity history |
@@ -102,6 +102,8 @@ If the associated PR was closed or merged outside of foundry, `finish` will repo
 **`foundry discard`** requires `--force` (or `-f`) if the branch has unmerged commits, similar to `git branch -D`. Workspaces with no commits can be discarded freely.
 
 **`foundry history`** shows recent workspace lifecycle events (started, finished, discarded, restored) with timestamps and metadata. Use `--limit` to control how many events are shown (default: 20).
+
+**`foundry status`** displays a dashboard of all active workspaces with their current state. The dashboard includes git status (clean/dirty), commit count vs main, and agent activity. Use `--watch` / `-w` to continuously refresh the display every 2 seconds, useful for monitoring progress while agents work. For Claude workspaces, the dashboard shows rich activity info: the current tool being used while working, the last message from the agent when idle, and error details (rate limit, auth failure, etc.) when an error occurs.
 
 ## Configuration
 
