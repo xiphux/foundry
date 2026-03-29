@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// foundry-status-hook v1
+// foundry-status-hook v2
 'use strict';
 
 const fs = require('fs');
@@ -24,7 +24,14 @@ try {
 
       let statusObj = null;
 
-      if (hookName === 'SessionStart' || hookName === 'UserPromptSubmit') {
+      if (hookName === 'SessionStart') {
+        statusObj = {
+          status: 'idle',
+          last_tool: null,
+          last_message: null,
+          error: null,
+        };
+      } else if (hookName === 'UserPromptSubmit') {
         statusObj = {
           status: 'working',
           last_tool: null,

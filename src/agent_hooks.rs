@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config;
 
-const HOOK_SCRIPT_VERSION: &str = "v1";
+const HOOK_SCRIPT_VERSION: &str = "v2";
 const HOOK_SCRIPT: &str = include_str!("hook_script.js");
 
 /// Install the Node.js hook script to `~/.foundry/hooks/status-update.js`.
