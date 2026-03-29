@@ -64,7 +64,7 @@ pub fn status_file_path(project: &str, name: &str, agent: &str) -> Result<PathBu
     Ok(foundry_dir
         .join("status")
         .join(project)
-        .join(format!("{name}-{agent}.status")))
+        .join(format!("{name}-{agent}.json")))
 }
 
 /// Read the current agent status from the status file.
@@ -75,12 +75,25 @@ pub fn read_status(project: &str, name: &str, agent: &str) -> AgentStatus {
     };
 
     match std::fs::read_to_string(&path) {
-        Ok(content) => match content.trim() {
-            "working" => AgentStatus::Working,
-            "idle" => AgentStatus::Idle,
-            "waiting_permission" => AgentStatus::WaitingPermission,
-            _ => AgentStatus::Unknown,
-        },
+        Ok(content) => {
+            let trimmed = content.trim();
+            // Try JSON first
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                return match json.get("status").and_then(|v| v.as_str()) {
+                    Some("working") => AgentStatus::Working,
+                    Some("idle") => AgentStatus::Idle,
+                    Some("waiting_permission") => AgentStatus::WaitingPermission,
+                    _ => AgentStatus::Unknown,
+                };
+            }
+            // Fallback: plain text
+            match trimmed {
+                "working" => AgentStatus::Working,
+                "idle" => AgentStatus::Idle,
+                "waiting_permission" => AgentStatus::WaitingPermission,
+                _ => AgentStatus::Unknown,
+            }
+        }
         Err(_) => AgentStatus::Unknown,
     }
 }
@@ -94,7 +107,6 @@ pub fn read_all_statuses(project: &str, name: &str) -> Vec<(String, AgentStatus)
 
     let status_dir = foundry_dir.join("status").join(project);
     let prefix = format!("{name}-");
-    let suffix = ".status";
 
     let entries = match std::fs::read_dir(&status_dir) {
         Ok(e) => e,
@@ -104,8 +116,11 @@ pub fn read_all_statuses(project: &str, name: &str) -> Vec<(String, AgentStatus)
     let mut statuses = Vec::new();
     for entry in entries.flatten() {
         let filename = entry.file_name().to_string_lossy().to_string();
-        if filename.starts_with(&prefix) && filename.ends_with(suffix) {
-            let agent = &filename[prefix.len()..filename.len() - suffix.len()];
+        if filename.starts_with(&prefix)
+            && (filename.ends_with(".json") || filename.ends_with(".status"))
+        {
+            let suffix_len = if filename.ends_with(".json") { 5 } else { 7 };
+            let agent = &filename[prefix.len()..filename.len() - suffix_len];
             if !agent.is_empty() {
                 let status = read_status(project, name, agent);
                 statuses.push((agent.to_string(), status));
@@ -129,7 +144,9 @@ pub fn remove_status(project: &str, name: &str) {
     if let Ok(entries) = std::fs::read_dir(&status_dir) {
         for entry in entries.flatten() {
             let filename = entry.file_name().to_string_lossy().to_string();
-            if filename.starts_with(&prefix) && filename.ends_with(".status") {
+            if filename.starts_with(&prefix)
+                && (filename.ends_with(".json") || filename.ends_with(".status"))
+            {
                 let _ = std::fs::remove_file(entry.path());
             }
         }
@@ -216,7 +233,7 @@ mod tests {
     #[test]
     fn status_file_path_construction() {
         let path = status_file_path("myproject", "my-workspace", "claude").unwrap();
-        assert!(path.ends_with("status/myproject/my-workspace-claude.status"));
+        assert!(path.ends_with("status/myproject/my-workspace-claude.json"));
         assert!(path.to_string_lossy().contains(".foundry"));
     }
 
@@ -226,7 +243,11 @@ mod tests {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
-        std::fs::write(&path, "working").unwrap();
+        std::fs::write(
+            &path,
+            r#"{"status":"working","last_tool":null,"last_message":null,"error":null}"#,
+        )
+        .unwrap();
         assert_eq!(
             read_status("testproj_read2", "testws", "claude"),
             AgentStatus::Working
@@ -240,7 +261,11 @@ mod tests {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
-        std::fs::write(&path, "idle").unwrap();
+        std::fs::write(
+            &path,
+            r#"{"status":"idle","last_tool":null,"last_message":null,"error":null}"#,
+        )
+        .unwrap();
         assert_eq!(
             read_status("testproj_idle2", "testws", "claude"),
             AgentStatus::Idle
@@ -254,7 +279,11 @@ mod tests {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
-        std::fs::write(&path, "waiting_permission").unwrap();
+        std::fs::write(
+            &path,
+            r#"{"status":"waiting_permission","last_tool":null,"last_message":null,"error":null}"#,
+        )
+        .unwrap();
         assert_eq!(
             read_status("testproj_wait2", "testws", "claude"),
             AgentStatus::WaitingPermission
@@ -290,7 +319,11 @@ mod tests {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
-        std::fs::write(&path, "idle").unwrap();
+        std::fs::write(
+            &path,
+            r#"{"status":"idle","last_tool":null,"last_message":null,"error":null}"#,
+        )
+        .unwrap();
         assert!(path.exists());
         remove_status("testproj_rm2", "testws");
         assert!(!path.exists());
@@ -649,43 +682,32 @@ mod tests {
 
 /// Build the foundry-specific hooks for agent status tracking.
 fn build_status_hooks(status_path_str: &str) -> serde_json::Value {
+    let script_path = install_hook_script()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| String::from("~/.foundry/hooks/status-update.js"));
+    let command = format!("node '{script_path}' '{status_path_str}'");
+    let make_hook = |matcher: &str| {
+        serde_json::json!([
+            {
+                "matcher": matcher,
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": command,
+                        "timeout": 5
+                    }
+                ]
+            }
+        ])
+    };
     serde_json::json!({
-        "UserPromptSubmit": [
-            {
-                "matcher": "*",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": format!("echo working > '{status_path_str}'"),
-                        "timeout": 5
-                    }
-                ]
-            }
-        ],
-        "Stop": [
-            {
-                "matcher": "*",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": format!("echo idle > '{status_path_str}'"),
-                        "timeout": 5
-                    }
-                ]
-            }
-        ],
-        "Notification": [
-            {
-                "matcher": "permission_prompt",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": format!("echo waiting_permission > '{status_path_str}'"),
-                        "timeout": 5
-                    }
-                ]
-            }
-        ]
+        "SessionStart": make_hook("*"),
+        "UserPromptSubmit": make_hook("*"),
+        "PostToolUse": make_hook("*"),
+        "Stop": make_hook("*"),
+        "StopFailure": make_hook("*"),
+        "Notification": make_hook("permission_prompt"),
+        "SessionEnd": make_hook("*"),
     })
 }
 
@@ -818,7 +840,8 @@ fn setup_claude(
     }
 
     // Write initial status
-    std::fs::write(&status_path, "idle")
+    let initial_status = r#"{"status":"idle","last_tool":null,"last_message":null,"error":null}"#;
+    std::fs::write(&status_path, initial_status)
         .with_context(|| format!("failed to write status file {}", status_path.display()))?;
 
     let claude_dir = worktree_path.join(".claude");
