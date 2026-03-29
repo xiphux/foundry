@@ -44,6 +44,8 @@ pub enum AgentStatus {
     Working,
     Idle,
     WaitingPermission,
+    Error,
+    Offline,
     Unknown,
 }
 
@@ -53,7 +55,29 @@ impl AgentStatus {
             AgentStatus::Working => "working",
             AgentStatus::Idle => "idle",
             AgentStatus::WaitingPermission => "waiting for permission",
+            AgentStatus::Error => "error",
+            AgentStatus::Offline => "offline",
             AgentStatus::Unknown => "unknown",
+        }
+    }
+}
+
+/// Rich status information parsed from a JSON status file.
+#[derive(Debug, Clone)]
+pub struct AgentStatusInfo {
+    pub status: AgentStatus,
+    pub last_tool: Option<String>,
+    pub last_message: Option<String>,
+    pub error: Option<String>,
+}
+
+impl Default for AgentStatusInfo {
+    fn default() -> Self {
+        Self {
+            status: AgentStatus::Unknown,
+            last_tool: None,
+            last_message: None,
+            error: None,
         }
     }
 }
@@ -83,6 +107,8 @@ pub fn read_status(project: &str, name: &str, agent: &str) -> AgentStatus {
                     Some("working") => AgentStatus::Working,
                     Some("idle") => AgentStatus::Idle,
                     Some("waiting_permission") => AgentStatus::WaitingPermission,
+                    Some("error") => AgentStatus::Error,
+                    Some("offline") => AgentStatus::Offline,
                     _ => AgentStatus::Unknown,
                 };
             }
@@ -129,6 +155,92 @@ pub fn read_all_statuses(project: &str, name: &str) -> Vec<(String, AgentStatus)
     }
     statuses.sort_by(|a, b| a.0.cmp(&b.0));
     statuses
+}
+
+/// Read rich status info (JSON with metadata) for a specific agent in a workspace.
+/// Falls back to plain text for backwards compatibility.
+pub fn read_status_info(project: &str, name: &str, agent: &str) -> AgentStatusInfo {
+    let path = match status_file_path(project, name, agent) {
+        Ok(p) => p,
+        Err(_) => return AgentStatusInfo::default(),
+    };
+
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return AgentStatusInfo::default(),
+    };
+
+    let trimmed = content.trim();
+
+    // Try JSON parse first
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        let status = match json.get("status").and_then(|v| v.as_str()) {
+            Some("working") => AgentStatus::Working,
+            Some("idle") => AgentStatus::Idle,
+            Some("waiting_permission") => AgentStatus::WaitingPermission,
+            Some("error") => AgentStatus::Error,
+            Some("offline") => AgentStatus::Offline,
+            _ => AgentStatus::Unknown,
+        };
+        return AgentStatusInfo {
+            status,
+            last_tool: json
+                .get("last_tool")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            last_message: json
+                .get("last_message")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            error: json.get("error").and_then(|v| v.as_str()).map(String::from),
+        };
+    }
+
+    // Backwards compatibility: plain text format
+    let status = match trimmed {
+        "working" => AgentStatus::Working,
+        "idle" => AgentStatus::Idle,
+        "waiting_permission" => AgentStatus::WaitingPermission,
+        _ => AgentStatus::Unknown,
+    };
+    AgentStatusInfo {
+        status,
+        ..Default::default()
+    }
+}
+
+/// Read rich status infos for all agents in a workspace. Returns a list of
+/// (agent_name, AgentStatusInfo) pairs. Supports both `.json` and `.status` extensions.
+pub fn read_all_status_infos(project: &str, name: &str) -> Vec<(String, AgentStatusInfo)> {
+    let foundry_dir = match config::foundry_dir() {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+
+    let status_dir = foundry_dir.join("status").join(project);
+    let prefix = format!("{name}-");
+
+    let entries = match std::fs::read_dir(&status_dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut infos = Vec::new();
+    for entry in entries.flatten() {
+        let filename = entry.file_name().to_string_lossy().to_string();
+        if filename.starts_with(&prefix)
+            && (filename.ends_with(".json") || filename.ends_with(".status"))
+        {
+            let suffix_len = if filename.ends_with(".json") { 5 } else { 7 };
+            let agent = &filename[prefix.len()..filename.len() - suffix_len];
+            if !agent.is_empty() {
+                let info = read_status_info(project, name, agent);
+                infos.push((agent.to_string(), info));
+            }
+        }
+    }
+    infos.sort_by(|a, b| a.0.cmp(&b.0));
+    infos
 }
 
 /// Remove all status files for a workspace (cleanup on finish/discard).
@@ -677,6 +789,92 @@ mod tests {
         let content = std::fs::read_to_string(hooks_dir.join("status-update.js")).unwrap();
         assert!(!content.contains("v0"));
         assert!(content.contains("foundry-status-hook v"));
+    }
+
+    #[test]
+    fn read_status_json_working_with_tool() {
+        let path = status_file_path("testproj_json1", "testws", "claude").unwrap();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(
+            &path,
+            r#"{"status":"working","last_tool":"Edit auth.rs","last_message":null,"error":null}"#,
+        )
+        .unwrap();
+        let info = read_status_info("testproj_json1", "testws", "claude");
+        assert_eq!(info.status, AgentStatus::Working);
+        assert_eq!(info.last_tool.as_deref(), Some("Edit auth.rs"));
+        assert!(info.last_message.is_none());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn read_status_json_idle_with_message() {
+        let path = status_file_path("testproj_json2", "testws", "claude").unwrap();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(
+            &path,
+            r#"{"status":"idle","last_tool":null,"last_message":"Done refactoring","error":null}"#,
+        )
+        .unwrap();
+        let info = read_status_info("testproj_json2", "testws", "claude");
+        assert_eq!(info.status, AgentStatus::Idle);
+        assert_eq!(info.last_message.as_deref(), Some("Done refactoring"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn read_status_json_error() {
+        let path = status_file_path("testproj_json3", "testws", "claude").unwrap();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(
+            &path,
+            r#"{"status":"error","last_tool":null,"last_message":null,"error":"rate_limit"}"#,
+        )
+        .unwrap();
+        let info = read_status_info("testproj_json3", "testws", "claude");
+        assert_eq!(info.status, AgentStatus::Error);
+        assert_eq!(info.error.as_deref(), Some("rate_limit"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn read_status_json_offline() {
+        let path = status_file_path("testproj_json4", "testws", "claude").unwrap();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(
+            &path,
+            r#"{"status":"offline","last_tool":null,"last_message":null,"error":null}"#,
+        )
+        .unwrap();
+        let info = read_status_info("testproj_json4", "testws", "claude");
+        assert_eq!(info.status, AgentStatus::Offline);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn read_status_json_missing_file_returns_unknown() {
+        let info = read_status_info("nonexistent_json_proj", "testws", "claude");
+        assert_eq!(info.status, AgentStatus::Unknown);
+    }
+
+    #[test]
+    fn read_status_json_backwards_compat_plain_text() {
+        let path = status_file_path("testproj_compat", "testws", "claude").unwrap();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, "working").unwrap();
+        let info = read_status_info("testproj_compat", "testws", "claude");
+        assert_eq!(info.status, AgentStatus::Working);
+        let _ = std::fs::remove_file(&path);
     }
 }
 

@@ -117,6 +117,8 @@ fn status_display(status: &agent_hooks::AgentStatus) -> (&'static str, &'static 
         agent_hooks::AgentStatus::Working => ("working", "\x1b[34m"),
         agent_hooks::AgentStatus::Idle => ("idle", "\x1b[33m"),
         agent_hooks::AgentStatus::WaitingPermission => ("waiting", "\x1b[31m"),
+        agent_hooks::AgentStatus::Error => ("error", "\x1b[31m"),
+        agent_hooks::AgentStatus::Offline => ("offline", "\x1b[90m"),
         agent_hooks::AgentStatus::Unknown => ("unknown", ""),
     }
 }
