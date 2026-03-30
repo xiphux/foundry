@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config;
 
-const HOOK_SCRIPT_VERSION: &str = "v3";
+const HOOK_SCRIPT_VERSION: &str = "v4";
 const HOOK_SCRIPT: &str = include_str!("hook_script.js");
 
 /// Install the Node.js hook script to `~/.foundry/hooks/status-update.js`.
@@ -69,6 +69,8 @@ pub struct AgentStatusInfo {
     pub last_tool: Option<String>,
     pub last_message: Option<String>,
     pub error: Option<String>,
+    /// Millisecond timestamp of the last status update (from Date.now() in JS).
+    pub updated_at: Option<u64>,
 }
 
 impl Default for AgentStatusInfo {
@@ -78,6 +80,29 @@ impl Default for AgentStatusInfo {
             last_tool: None,
             last_message: None,
             error: None,
+            updated_at: None,
+        }
+    }
+}
+
+/// How long a "working" status can go without an update before we consider it stale.
+const STALE_WORKING_THRESHOLD_MS: u64 = 300_000; // 5 minutes
+
+impl AgentStatusInfo {
+    /// Returns true if the status is "working" but hasn't been updated recently,
+    /// suggesting the agent was interrupted or stalled without a proper Stop event.
+    pub fn is_stale(&self) -> bool {
+        if self.status != AgentStatus::Working {
+            return false;
+        }
+        if let Some(updated_at) = self.updated_at {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            now_ms.saturating_sub(updated_at) > STALE_WORKING_THRESHOLD_MS
+        } else {
+            false // no timestamp means old format, can't determine staleness
         }
     }
 }
@@ -193,6 +218,7 @@ pub fn read_status_info(project: &str, name: &str, agent: &str) -> AgentStatusIn
                 .and_then(|v| v.as_str())
                 .map(String::from),
             error: json.get("error").and_then(|v| v.as_str()).map(String::from),
+            updated_at: json.get("updated_at").and_then(|v| v.as_u64()),
         };
     }
 

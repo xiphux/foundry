@@ -78,16 +78,28 @@ fn render_dashboard(state: &WorkspaceState) -> Result<()> {
             ("unknown".to_string(), "", String::new())
         } else if agent_infos.len() == 1 {
             let (agent_name, info) = &agent_infos[0];
-            let (label, color) = status_display(&info.status);
-            let act = activity_text(info);
-            (format!("{agent_name}: {label}"), color, act)
+            if info.is_stale() {
+                (
+                    format!("{agent_name}: idle?"),
+                    "\x1b[33m",
+                    "no activity for 5+ minutes".to_string(),
+                )
+            } else {
+                let (label, color) = status_display(&info.status);
+                let act = activity_text(info);
+                (format!("{agent_name}: {label}"), color, act)
+            }
         } else {
             // Multiple agents — show each
             let parts: Vec<String> = agent_infos
                 .iter()
                 .map(|(agent_name, info)| {
-                    let (label, _) = status_display(&info.status);
-                    format!("{agent_name}:{label}")
+                    if info.is_stale() {
+                        format!("{agent_name}:idle?")
+                    } else {
+                        let (label, _) = status_display(&info.status);
+                        format!("{agent_name}:{label}")
+                    }
                 })
                 .collect();
             // Use the most urgent color

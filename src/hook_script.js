@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// foundry-status-hook v3
+// foundry-status-hook v4
 'use strict';
 
 const fs = require('fs');
@@ -105,6 +105,9 @@ try {
       } else {
         process.exit(0);
       }
+
+      // Add timestamp to all status updates
+      statusObj.updated_at = Date.now();
 
       const dir = path.dirname(statusFilePath);
       if (!fs.existsSync(dir)) {
