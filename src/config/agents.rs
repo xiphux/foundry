@@ -232,14 +232,42 @@ pub fn build_agent_command(
     continue_session: bool,
     unrestricted: bool,
 ) -> String {
+    build_agent_command_with_plan(
+        agent,
+        custom_command,
+        prompt,
+        continue_session,
+        unrestricted,
+        false,
+    )
+}
+
+/// Build agent command with optional plan mode.
+/// When `plan` is true, Claude uses `--permission-mode plan` instead of `acceptEdits`,
+/// requiring plan approval before any edits. Other agents ignore the flag.
+pub fn build_agent_command_with_plan(
+    agent: &str,
+    custom_command: Option<&str>,
+    prompt: Option<&str>,
+    continue_session: bool,
+    unrestricted: bool,
+    plan: bool,
+) -> String {
     if agent == "custom" {
         return custom_command.unwrap_or("claude").to_string();
     }
     let non_empty_prompt = prompt.filter(|p| !p.is_empty());
-    match agent_capabilities(agent) {
+    let mut cmd = match agent_capabilities(agent) {
         Some(caps) => (caps.build_command)(non_empty_prompt, continue_session, unrestricted),
-        None => agent.to_string(),
+        None => return agent.to_string(),
+    };
+
+    // Override permission mode for plan mode (Claude only)
+    if plan && !unrestricted && cmd.contains("--permission-mode acceptEdits") {
+        cmd = cmd.replace("--permission-mode acceptEdits", "--permission-mode plan");
     }
+
+    cmd
 }
 
 /// Resolve the base agent command from the agent identifier.
@@ -308,6 +336,30 @@ mod tests {
             (caps.build_command)(None, false, true),
             "claude --permission-mode bypassPermissions"
         );
+    }
+
+    #[test]
+    fn agent_build_command_claude_plan_mode() {
+        let cmd =
+            build_agent_command_with_plan("claude", None, Some("plan this"), false, false, true);
+        assert!(cmd.contains("--permission-mode plan"));
+        assert!(!cmd.contains("acceptEdits"));
+        assert!(cmd.contains("'plan this'"));
+    }
+
+    #[test]
+    fn agent_build_command_plan_mode_ignored_when_unrestricted() {
+        // unrestricted takes precedence — plan flag is ignored
+        let cmd = build_agent_command_with_plan("claude", None, None, false, true, true);
+        assert!(cmd.contains("--permission-mode bypassPermissions"));
+        assert!(!cmd.contains("plan"));
+    }
+
+    #[test]
+    fn agent_build_command_plan_mode_ignored_for_non_claude() {
+        let cmd = build_agent_command_with_plan("codex", None, None, false, false, true);
+        assert!(cmd.contains("--full-auto"));
+        assert!(!cmd.contains("plan"));
     }
 
     #[test]

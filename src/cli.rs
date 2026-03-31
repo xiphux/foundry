@@ -44,6 +44,10 @@ pub enum Commands {
         /// Fetch and fast-forward main from remote before branching
         #[arg(long)]
         fetch: bool,
+
+        /// Start Claude in plan mode (requires plan approval before edits)
+        #[arg(long)]
+        plan: bool,
     },
     /// Reopen workspace for an existing worktree
     Open {

@@ -23,6 +23,7 @@ pub fn run(
     prompt: Option<&str>,
     fetch: bool,
     issue_ref: Option<&str>,
+    plan: bool,
 ) -> Result<()> {
     let branch = super::compute_branch_name(name, config.branch_prefix.as_deref());
     let worktree_path = config.worktree_dir.join(project_name).join(name);
@@ -45,6 +46,7 @@ pub fn run(
             &HashSet::new(),
             prompt,
             &std::collections::HashMap::new(),
+            plan,
         );
     }
 
@@ -320,6 +322,7 @@ pub fn run(
         &skip_command_panes,
         prompt,
         &deferred_commands,
+        plan,
     )?;
 
     // For backends that support run_in_pane, send deferred scripts now

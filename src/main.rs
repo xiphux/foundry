@@ -75,6 +75,7 @@ fn main() -> Result<()> {
             prompt,
             prompt_file,
             fetch,
+            plan,
         } => {
             let mut registry = Registry::load_from(&registry_path)?;
             let (project_name, source_path) =
@@ -128,6 +129,7 @@ fn main() -> Result<()> {
                 prompt_text.as_deref(),
                 fetch,
                 issue.as_deref(),
+                plan,
             )?;
         }
         cli::Commands::Open { name, all } => {
@@ -174,6 +176,7 @@ fn main() -> Result<()> {
                             &std::collections::HashSet::new(),
                             None,
                             &std::collections::HashMap::new(),
+                            false,
                         )?;
 
                         // Brief pause between opens to let the terminal settle
@@ -210,6 +213,7 @@ fn main() -> Result<()> {
                     &std::collections::HashSet::new(),
                     None, // no prompt for open
                     &std::collections::HashMap::new(),
+                    false,
                 )?;
             } else {
                 let mut registry = Registry::load_from(&registry_path)?;

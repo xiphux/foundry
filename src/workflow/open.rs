@@ -23,6 +23,7 @@ pub fn open_workspace(
     skip_command_panes: &HashSet<String>,
     prompt: Option<&str>,
     deferred_commands: &std::collections::HashMap<String, String>,
+    plan: bool,
 ) -> Result<()> {
     let backend = terminal::detect_terminal()?;
 
@@ -76,12 +77,13 @@ pub fn open_workspace(
             // Each agent's build_command knows whether to add a resume flag.
             let continue_session =
                 pane_prompt.is_none() && agent_hooks::has_agent_conversation(agent, worktree_path);
-            Some(config::build_agent_command(
+            Some(config::build_agent_command_with_plan(
                 agent,
                 config.custom_agent_command.as_deref(),
                 pane_prompt,
                 continue_session,
                 config.unrestricted_permissions,
+                plan,
             ))
         } else if let Some(ref cmd) = pane.command {
             let resolved = config::resolve_template(cmd, &template_vars)?;
