@@ -381,7 +381,8 @@ fn build_agent_context(
     // Isolation note
     parts.push(
         "You are working in a Foundry-managed worktree — an isolated copy of the repository. \
-         Changes here do not affect the main branch or other workspaces."
+         Changes here do not affect the main branch or other workspaces. \
+         Git push is intentionally blocked — the user handles pushing and PR creation externally."
             .to_string(),
     );
 
