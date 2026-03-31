@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.3.0
+
+### Status Monitoring
+
+- `foundry status` now shows rich agent activity: current tool being used, last message when idle, error state (rate limit, auth failure, etc.)
+- `foundry status --watch` (`-w`) continuously refreshes the dashboard every 2 seconds for live monitoring
+- Status tracking powered by a Node.js hook script that captures Claude Code hook events (PostToolUse, Stop, StopFailure, SessionEnd, etc.)
+- Stale detection: if a "working" agent hasn't updated in 5+ minutes, the dashboard shows "idle?" as a hint that it may have been interrupted
+
+### Agent Context Injection
+
+- Foundry now injects workspace context into Claude's session via a SessionStart hook, including:
+  - Worktree isolation note (safe to make changes freely, git push blocked)
+  - Pane descriptions (what the user started in each pane)
+  - Allocated port values (so the agent knows where dev servers are running)
+- `context` field in `.foundry.toml` for project-specific context with port variable expansion (e.g., `{VITE_PORT}` → `10042`)
+
+### New Commands
+
+- `foundry checks [name]` — show CI check status for a workspace's PR
+- `foundry edit [name]` — open workspace in your configured editor (`editor` config option, falls back to `$VISUAL`/`$EDITOR`)
+- `foundry browse [name]` — open workspace directory in the system file explorer
+
+### Quality of Life
+
+- `--plan` flag on `foundry start` starts Claude in plan mode (`--permission-mode plan`), requiring plan approval before any edits — useful for complex issues
+- `foundry finish` now checks CI status before merging a PR and prompts for confirmation if checks are failing or pending (bypass with `--yes`)
+- `foundry finish` auto-fetches and fast-forwards main before local merge (reuses `auto_fetch` config)
+
+### Code Quality
+
+- Deduplicated `main.rs` with `resolve_workspace()` and `load_config()` helpers (594 → 468 lines)
+- Split `config/mod.rs` into focused submodules: `agents.rs`, `template.rs`, `validation.rs` (1,066 → 265 lines)
+- Extracted `workflow/cleanup.rs` from `workflow/mod.rs` (352 → 188 lines)
+
 ## v0.2.0
 
 ### PR Workflow
