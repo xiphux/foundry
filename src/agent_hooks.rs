@@ -291,6 +291,20 @@ pub fn remove_status(project: &str, name: &str) {
     }
 }
 
+/// Remove the context file for a workspace (cleanup on finish/discard).
+pub fn remove_context(project: &str, name: &str) {
+    let foundry_dir = match config::foundry_dir() {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+
+    let context_path = foundry_dir
+        .join("context")
+        .join(project)
+        .join(format!("{name}.txt"));
+    let _ = std::fs::remove_file(context_path);
+}
+
 /// Compute the Claude project directory path for a worktree.
 /// Claude stores conversations at ~/.claude/projects/<mangled-path>/
 /// where the path has slashes replaced with dashes.

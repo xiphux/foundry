@@ -154,6 +154,7 @@ pub fn cleanup_workspace(
     state.remove(project_name, name);
     state.save_to(state_path)?;
     agent_hooks::remove_status(project_name, name);
+    agent_hooks::remove_context(project_name, name);
 
     // Close terminal tab LAST
     if !tab_id.is_empty() {
