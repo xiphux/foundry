@@ -1153,7 +1153,10 @@ fn setup_claude(
     if !unrestricted {
         settings["sandbox"] = serde_json::json!({
             "enabled": true,
-            "autoAllow": true
+            "autoAllow": true,
+            "filesystem": {
+                "allowWrite": ["~/.gnupg"]
+            }
         });
     }
 
