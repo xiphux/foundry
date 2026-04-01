@@ -1154,9 +1154,11 @@ fn setup_claude(
         settings["sandbox"] = serde_json::json!({
             "enabled": true,
             "autoAllow": true,
-            "filesystem": {
-                "allowWrite": ["~/.gnupg"]
-            }
+            // Exclude git from the sandbox so it can write to the source repo's
+            // .git directory (worktrees store data in the parent repo) and so its
+            // child process (gpg) can access keys and the agent socket for signing.
+            // Git operations are still controlled by the permission allow/deny rules.
+            "excludedCommands": ["git"]
         });
     }
 
