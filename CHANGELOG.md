@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.1
+
+- Fix: exclude `git` from Claude sandbox so GPG commit signing and worktree `.git` writes work correctly
+
 ## v0.3.0
 
 ### Status Monitoring
