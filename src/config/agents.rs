@@ -195,6 +195,27 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
             },
         },
     ),
+    (
+        "crush",
+        AgentCapabilities {
+            names: &["crush"],
+            executable: "crush",
+            // Default: interactive TUI, user approves tool calls (level #1).
+            // Unrestricted: --yolo skips all permission prompts (level #3).
+            // No prompt passthrough in interactive mode (crush run exits after prompt).
+            build_command: |_prompt, resume, unrestricted| {
+                let mut cmd = if unrestricted {
+                    "crush --yolo".to_string()
+                } else {
+                    "crush".to_string()
+                };
+                if resume {
+                    cmd += " --continue";
+                }
+                cmd
+            },
+        },
+    ),
 ];
 
 /// Look up capabilities for a known agent. Returns None for unknown/custom agents.
@@ -314,6 +335,7 @@ mod tests {
         assert!(agent_capabilities("copilot").is_some());
         assert!(agent_capabilities("kiro").is_some());
         assert!(agent_capabilities("opencode").is_some());
+        assert!(agent_capabilities("crush").is_some());
         assert!(agent_capabilities("unknown").is_none());
     }
 
@@ -448,6 +470,22 @@ mod tests {
         assert_eq!(
             (caps.build_command)(Some("fix the bug"), false, false),
             "opencode --prompt 'fix the bug'"
+        );
+    }
+
+    #[test]
+    fn agent_build_command_crush() {
+        let caps = agent_capabilities("crush").unwrap();
+        // Default: interactive TUI, no auto-approve
+        assert_eq!((caps.build_command)(None, false, false), "crush");
+        // Resume
+        assert_eq!((caps.build_command)(None, true, false), "crush --continue");
+        // Unrestricted: --yolo
+        assert_eq!((caps.build_command)(None, false, true), "crush --yolo");
+        // Prompt ignored (no interactive prompt passthrough)
+        assert_eq!(
+            (caps.build_command)(Some("fix the bug"), false, false),
+            "crush"
         );
     }
 
