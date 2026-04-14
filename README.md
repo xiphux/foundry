@@ -122,7 +122,7 @@ Foundry uses two levels of TOML configuration:
 branch_prefix = "xiphux"
 
 # Default AI agent: "claude" (default), "codex", "every-code", "gemini",
-# "aider", "copilot", "kiro", "opencode", "crush", or "custom"
+# "aider", "copilot", "kiro", "opencode", "crush", "nanocoder", or "custom"
 agent = "claude"
 
 # Starting port for dynamic port allocation (default: 10000)
@@ -383,6 +383,7 @@ Foundry supports multiple AI coding agents. The agent is configured via `agent` 
 | Kiro | `kiro` | Ask for permission | `--trust-all-tools` | Positional | `--resume` |
 | OpenCode | `opencode` | Ask for permission | No CLI flag (use config) | `--prompt` flag | `--continue` |
 | Crush | `crush` | Ask for permission | `--yolo` (auto-approve) | No | `--continue` |
+| Nanocoder | `nanocoder` | Ask for permission | No | Positional | No |
 | Custom | `custom` | N/A | N/A | N/A | N/A |
 
 ### Permission Levels
@@ -390,7 +391,7 @@ Foundry supports multiple AI coding agents. The agent is configured via `agent` 
 By default, foundry uses the safest available permission level for each agent:
 
 - **Worktree-scoped sandbox** (Claude, Codex, Every Code, Gemini): The agent can read/write freely within the worktree, but OS-level sandboxing prevents modifications outside it. Commands are auto-approved within sandbox boundaries.
-- **Ask for permission** (Aider, Copilot, Kiro, OpenCode, Crush): The agent launches with standard permissions and prompts the user before taking actions.
+- **Ask for permission** (Aider, Copilot, Kiro, OpenCode, Crush, Nanocoder): The agent launches with standard permissions and prompts the user before taking actions.
 
 Setting `unrestricted_permissions = true` in your config bumps agents to their most permissive mode — auto-approving all actions without sandbox constraints. Use with caution.
 
@@ -411,6 +412,8 @@ Setting `unrestricted_permissions = true` in your config bumps agents to their m
 **OpenCode** launches as an interactive TUI. Prompts are passed via `--prompt` and sessions can be resumed with `--continue`. Auto-approve permissions can be configured via `opencode.json` (`"permission": "allow"`).
 
 **Crush** (by Charmbracelet, the original project OpenCode was forked from) launches as an interactive TUI. Sessions can be resumed with `--continue`. Use `--yolo` for auto-approve mode. No interactive prompt passthrough.
+
+**Nanocoder** is a local-first coding agent. Prompts are passed as positional arguments. No session resume or auto-approve CLI flags are currently available.
 
 **Custom** agents use whatever command you specify in `agent_command`. Foundry runs it as-is without additional configuration.
 

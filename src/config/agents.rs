@@ -216,6 +216,23 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
             },
         },
     ),
+    (
+        "nanocoder",
+        AgentCapabilities {
+            names: &["nanocoder"],
+            executable: "nanocoder",
+            // Default: interactive TUI, user approves tool calls (level #1).
+            // No CLI auto-approve flag available.
+            // Prompt is passed as a positional argument.
+            build_command: |prompt, _resume, _unrestricted| {
+                let mut cmd = "nanocoder".to_string();
+                if let Some(p) = prompt {
+                    cmd += &format!(" '{}'", escape_prompt(p));
+                }
+                cmd
+            },
+        },
+    ),
 ];
 
 /// Look up capabilities for a known agent. Returns None for unknown/custom agents.
@@ -336,6 +353,7 @@ mod tests {
         assert!(agent_capabilities("kiro").is_some());
         assert!(agent_capabilities("opencode").is_some());
         assert!(agent_capabilities("crush").is_some());
+        assert!(agent_capabilities("nanocoder").is_some());
         assert!(agent_capabilities("unknown").is_none());
     }
 
@@ -487,6 +505,19 @@ mod tests {
             (caps.build_command)(Some("fix the bug"), false, false),
             "crush"
         );
+    }
+
+    #[test]
+    fn agent_build_command_nanocoder() {
+        let caps = agent_capabilities("nanocoder").unwrap();
+        assert_eq!((caps.build_command)(None, false, false), "nanocoder");
+        assert_eq!(
+            (caps.build_command)(Some("fix the bug"), false, false),
+            "nanocoder 'fix the bug'"
+        );
+        // No resume or unrestricted support
+        assert_eq!((caps.build_command)(None, true, false), "nanocoder");
+        assert_eq!((caps.build_command)(None, false, true), "nanocoder");
     }
 
     #[test]
