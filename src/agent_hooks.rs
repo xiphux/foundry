@@ -1151,14 +1151,27 @@ fn setup_claude(
     // while auto-approving commands that stay within the sandbox boundaries.
     // When unrestricted_permissions is set, skip sandbox to allow full access.
     if !unrestricted {
+        // The source repo's .git directory needs write access because:
+        // - Worktree commits write to source/.git/worktrees/<name>/
+        // - fsmonitor daemon socket lives there
+        // - Pre-commit hooks (lint-staged etc.) run as node, not git,
+        //   so excludedCommands alone doesn't cover them
+        let source_git_dir = source_path.join(".git").to_string_lossy().to_string();
+
         settings["sandbox"] = serde_json::json!({
             "enabled": true,
             "autoAllow": true,
-            // Exclude git from the sandbox so it can write to the source repo's
-            // .git directory (worktrees store data in the parent repo) and so its
-            // child process (gpg) can access keys and the agent socket for signing.
-            // Git operations are still controlled by the permission allow/deny rules.
-            "excludedCommands": ["git"]
+            // Exclude git so its child process (gpg) can access keys and
+            // the agent socket for signing.
+            "excludedCommands": ["git"],
+            "filesystem": {
+                "allowWrite": [
+                    // GPG signing needs key access and agent socket
+                    "~/.gnupg",
+                    // Source repo .git dir for worktree commits and fsmonitor
+                    source_git_dir,
+                ]
+            }
         });
     }
 
