@@ -408,7 +408,7 @@ impl TerminalBackend for WindowsTerminalBackend {
 
         // Kill in reverse order (highest index first) so the pane running
         // foundry (typically index 0) is terminated last.
-        pids.sort_by(|a, b| b.0.cmp(&a.0));
+        pids.sort_by_key(|p| std::cmp::Reverse(p.0));
 
         for (_, pid) in &pids {
             // /T kills the entire process tree, /F forces termination.
