@@ -48,6 +48,10 @@ pub enum Commands {
         /// Start Claude in plan mode (requires plan approval before edits)
         #[arg(long)]
         plan: bool,
+
+        /// Override the configured agent for this workspace
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// Reopen workspace for an existing worktree
     Open {

@@ -54,6 +54,18 @@ pub struct ResolvedConfig {
     pub context: Option<String>,
 }
 
+impl ResolvedConfig {
+    /// Override the primary agent (first agent pane) with a different agent.
+    /// Used by `--agent` CLI flag for one-time agent overrides.
+    pub fn override_primary_agent(&mut self, agent: &str) {
+        // Update the first pane that has an agent configured
+        if let Some(pane) = self.panes.iter_mut().find(|p| p.agent.is_some()) {
+            pane.agent = Some(agent.to_string());
+        }
+        self.agent = agent.to_string();
+    }
+}
+
 /// Load the global config from ~/.foundry/config.toml.
 /// Returns defaults if the file doesn't exist.
 pub fn load_global_config() -> Result<GlobalConfig> {
@@ -264,5 +276,55 @@ mod tests {
     fn expand_tilde_in_middle_of_path() {
         let result = expand_tilde("/some/~/path");
         assert_eq!(result, PathBuf::from("/some/~/path"));
+    }
+
+    #[test]
+    fn override_primary_agent_changes_first_agent_pane() {
+        let global = GlobalConfig {
+            agent: "claude".into(),
+            ..Default::default()
+        };
+        let mut resolved = merge_configs(&global, None);
+        assert_eq!(resolved.panes[0].agent.as_deref(), Some("claude"));
+
+        resolved.override_primary_agent("crush");
+        assert_eq!(resolved.panes[0].agent.as_deref(), Some("crush"));
+        assert_eq!(resolved.agent, "crush");
+    }
+
+    #[test]
+    fn override_primary_agent_only_changes_first_agent_pane() {
+        let global = GlobalConfig {
+            agent: "claude".into(),
+            panes: vec![
+                PaneConfig {
+                    name: "agent".into(),
+                    agent: Some("claude".into()),
+                    command: None,
+                    split_from: None,
+                    direction: None,
+                    optional: false,
+                    env: Default::default(),
+                    deferred: false,
+                },
+                PaneConfig {
+                    name: "helper".into(),
+                    agent: Some("codex".into()),
+                    command: None,
+                    split_from: Some("agent".into()),
+                    direction: Some(SplitDirection::Right),
+                    optional: false,
+                    env: Default::default(),
+                    deferred: false,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut resolved = merge_configs(&global, None);
+        resolved.override_primary_agent("gemini");
+        // First agent pane changed
+        assert_eq!(resolved.panes[0].agent.as_deref(), Some("gemini"));
+        // Second agent pane unchanged
+        assert_eq!(resolved.panes[1].agent.as_deref(), Some("codex"));
     }
 }

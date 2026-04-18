@@ -76,11 +76,17 @@ fn main() -> Result<()> {
             prompt_file,
             fetch,
             plan,
+            agent,
         } => {
             let mut registry = Registry::load_from(&registry_path)?;
             let (project_name, source_path) =
                 workflow::resolve_project(cli.project.as_deref(), &mut registry, &registry_path)?;
-            let resolved = load_config(&source_path)?;
+            let mut resolved = load_config(&source_path)?;
+
+            // Override the primary agent if --agent is specified
+            if let Some(ref agent_override) = agent {
+                resolved.override_primary_agent(agent_override);
+            }
 
             let mut state = WorkspaceState::load_from(&state_path)?;
 
