@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.0
+
+### New Agent Support
+
+- Crush (`crush`) — by Charmbracelet, the original project OpenCode was forked from. Interactive TUI with `--continue` for session resume and `--yolo` for auto-approve.
+- Nanocoder (`nanocoder`) — local-first coding agent with positional prompt passing.
+
+### Quality of Life
+
+- `--agent` flag on `foundry start` overrides the configured agent for a single workspace (e.g., `foundry start my-feature --agent claude` to use Claude instead of your default agent). In multi-agent setups, overrides only the primary agent pane.
+
+### Fixes
+
+- Add `~/.gnupg` and source repo `.git` directory to Claude sandbox `allowWrite` — fixes GPG commit signing and fsmonitor errors from pre-commit hooks (lint-staged etc.) running inside the sandbox
+
 ## v0.3.1
 
 - Fix: exclude `git` from Claude sandbox so GPG commit signing and worktree `.git` writes work correctly
