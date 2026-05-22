@@ -122,7 +122,7 @@ Foundry uses two levels of TOML configuration:
 branch_prefix = "xiphux"
 
 # Default AI agent: "claude" (default), "codex", "every-code", "gemini",
-# "aider", "copilot", "kiro", "opencode", "crush", "nanocoder", or "custom"
+# "aider", "copilot", "kiro", "opencode", "crush", "nanocoder", "pi", or "custom"
 agent = "claude"
 
 # Starting port for dynamic port allocation (default: 10000)
@@ -384,6 +384,7 @@ Foundry supports multiple AI coding agents. The agent is configured via `agent` 
 | OpenCode | `opencode` | Ask for permission | No CLI flag (use config) | `--prompt` flag | `--continue` |
 | Crush | `crush` | Ask for permission | `--yolo` (auto-approve) | No | `--continue` |
 | Nanocoder | `nanocoder` | Ask for permission | No | Positional | No |
+| Pi | `pi` | No permission prompts | Same (no flag) | Positional | `--continue` |
 | Custom | `custom` | N/A | N/A | N/A | N/A |
 
 ### Permission Levels
@@ -392,6 +393,7 @@ By default, foundry uses the safest available permission level for each agent:
 
 - **Worktree-scoped sandbox** (Claude, Codex, Every Code, Gemini): The agent can read/write freely within the worktree, but OS-level sandboxing prevents modifications outside it. Commands are auto-approved within sandbox boundaries.
 - **Ask for permission** (Aider, Copilot, Kiro, OpenCode, Crush, Nanocoder): The agent launches with standard permissions and prompts the user before taking actions.
+- **No permission prompts** (Pi): Pi executes tools without approval prompts by design and offers no flag to change this. Foundry runs Pi inside the isolated worktree; for stronger isolation, Pi's docs recommend running it in a container.
 
 Setting `unrestricted_permissions = true` in your config bumps agents to their most permissive mode — auto-approving all actions without sandbox constraints. Use with caution.
 
@@ -414,6 +416,8 @@ Setting `unrestricted_permissions = true` in your config bumps agents to their m
 **Crush** (by Charmbracelet, the original project OpenCode was forked from) launches as an interactive TUI. Sessions can be resumed with `--continue`. Use `--yolo` for auto-approve mode. No interactive prompt passthrough.
 
 **Nanocoder** is a local-first coding agent. Prompts are passed as positional arguments. No session resume or auto-approve CLI flags are currently available.
+
+**Pi** ([pi.dev](https://pi.dev/)) is a minimal terminal coding agent. Prompts are passed as positional arguments and sessions can be resumed with `--continue`. Pi has no permission popups by design — it executes tools directly — and provides no auto-approve flag, so `unrestricted_permissions` has no effect.
 
 **Custom** agents use whatever command you specify in `agent_command`. Foundry runs it as-is without additional configuration.
 

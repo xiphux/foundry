@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### New Agent Support
+
+- Pi (`pi`) — minimal terminal coding agent ([pi.dev](https://pi.dev/)). Positional prompt passing and `--continue` for session resume. Pi has no permission popups by design and offers no auto-approve flag, so `unrestricted_permissions` has no effect.
+
 ## v0.4.0
 
 ### New Agent Support

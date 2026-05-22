@@ -233,6 +233,28 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
             },
         },
     ),
+    (
+        "pi",
+        AgentCapabilities {
+            names: &["pi"],
+            executable: "pi",
+            // Pi has no permission popups by design — it executes tools without
+            // approval prompts and offers no auto-approve/restrict flag, so the
+            // unrestricted flag is a no-op (Pi is always permissive). Pi's docs
+            // recommend running it in a container for isolation.
+            // Prompt is passed as a positional argument; --continue resumes.
+            build_command: |prompt, resume, _unrestricted| {
+                let mut cmd = "pi".to_string();
+                if resume {
+                    cmd += " --continue";
+                }
+                if let Some(p) = prompt {
+                    cmd += &format!(" '{}'", escape_prompt(p));
+                }
+                cmd
+            },
+        },
+    ),
 ];
 
 /// Look up capabilities for a known agent. Returns None for unknown/custom agents.
@@ -354,6 +376,7 @@ mod tests {
         assert!(agent_capabilities("opencode").is_some());
         assert!(agent_capabilities("crush").is_some());
         assert!(agent_capabilities("nanocoder").is_some());
+        assert!(agent_capabilities("pi").is_some());
         assert!(agent_capabilities("unknown").is_none());
     }
 
@@ -518,6 +541,19 @@ mod tests {
         // No resume or unrestricted support
         assert_eq!((caps.build_command)(None, true, false), "nanocoder");
         assert_eq!((caps.build_command)(None, false, true), "nanocoder");
+    }
+
+    #[test]
+    fn agent_build_command_pi() {
+        let caps = agent_capabilities("pi").unwrap();
+        assert_eq!((caps.build_command)(None, false, false), "pi");
+        assert_eq!((caps.build_command)(None, true, false), "pi --continue");
+        assert_eq!(
+            (caps.build_command)(Some("fix the bug"), false, false),
+            "pi 'fix the bug'"
+        );
+        // No auto-approve flag — unrestricted is a no-op
+        assert_eq!((caps.build_command)(None, false, true), "pi");
     }
 
     #[test]
