@@ -1,0 +1,12 @@
+# Keep GitHub Actions pins current via reviewed PRs. Dependabot opens a PR
+# whenever a workflow action ships a new release. Dependency updates (cargo)
+# are handled security-only via the repo's Dependabot security-updates
+# setting, not here, to avoid routine version-bump noise.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
