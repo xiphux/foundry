@@ -374,14 +374,14 @@ Foundry supports multiple AI coding agents. The agent is configured via `agent` 
 
 | Agent | Config value | Default | With `unrestricted_permissions` | Prompt | Resume |
 |---|---|---|---|---|---|
-| Claude | `claude` | Sandbox (worktree-scoped) | No sandbox | Positional | `--continue` |
+| Claude | `claude` | Auto mode (worktree-scoped) | Bypass all prompts | Positional | `--continue` |
 | Codex | `codex` | Sandbox (built-in) | Same | Positional | `--resume` |
 | Every Code | `every-code` | Sandbox (built-in) | Same | Positional | `--resume` |
 | Gemini CLI | `gemini` | Sandbox (worktree-scoped) | No sandbox, YOLO | `-p` flag | `--resume` |
 | Aider | `aider` | Ask for permission | `--yes` (auto-approve) | Interactive | No |
 | GitHub Copilot | `copilot` | Ask for permission | `--yolo` (auto-approve) | `-p` flag | No |
 | Kiro | `kiro` | Ask for permission | `--trust-all-tools` | Positional | `--resume` |
-| OpenCode | `opencode` | Ask for permission | No CLI flag (use config) | `--prompt` flag | `--continue` |
+| OpenCode | `opencode` | Ask for permission | `--auto` (auto-approve) | `--prompt` flag | `--continue` |
 | Crush | `crush` | Ask for permission | `--yolo` (auto-approve) | No | `--continue` |
 | Nanocoder | `nanocoder` | Ask for permission | No | Positional | No |
 | Pi | `pi` | No permission prompts | Same (no flag) | Positional | `--continue` |
@@ -391,7 +391,8 @@ Foundry supports multiple AI coding agents. The agent is configured via `agent` 
 
 By default, foundry uses the safest available permission level for each agent:
 
-- **Worktree-scoped sandbox** (Claude, Codex, Every Code, Gemini): The agent can read/write freely within the worktree, but OS-level sandboxing prevents modifications outside it. Commands are auto-approved within sandbox boundaries.
+- **Auto mode** (Claude): Claude launches with `--permission-mode auto`, where a model analyzes each permission request and auto-approves the ones it judges safe, falling back to a prompt otherwise. Worktree-scoped allow/deny rules still apply on top.
+- **Worktree-scoped sandbox** (Codex, Every Code, Gemini): The agent can read/write freely within the worktree, but OS-level sandboxing prevents modifications outside it. Commands are auto-approved within sandbox boundaries.
 - **Ask for permission** (Aider, Copilot, Kiro, OpenCode, Crush, Nanocoder): The agent launches with standard permissions and prompts the user before taking actions.
 - **No permission prompts** (Pi): Pi executes tools without approval prompts by design and offers no flag to change this. Foundry runs Pi inside the isolated worktree; for stronger isolation, Pi's docs recommend running it in a container.
 
@@ -399,7 +400,7 @@ Setting `unrestricted_permissions = true` in your config bumps agents to their m
 
 ### Agent Details
 
-**Claude** gets the richest integration: foundry copies your source repo's `.claude/settings.local.json` into the worktree and merges in status-tracking hooks, worktree-scoped permissions (auto-approve file operations within the worktree, deny `git push` and `checkout main`), and OS-level sandbox configuration (Seatbelt on macOS, bubblewrap on Linux).
+**Claude** gets the richest integration: foundry copies your source repo's `.claude/settings.local.json` into the worktree and merges in status-tracking hooks and worktree-scoped permissions (auto-approve file operations within the worktree, deny `git push` and `checkout main`). Claude launches in `auto` permission mode, which uses model analysis to auto-approve most permission requests.
 
 **Codex** and **Every Code** use `--full-auto` for autonomous operation with a built-in OS sandbox scoped to the workspace.
 
@@ -411,7 +412,7 @@ Setting `unrestricted_permissions = true` in your config bumps agents to their m
 
 **Kiro** (formerly Amazon Q Developer CLI) launches with `kiro-cli chat`. Prompts are passed as positional arguments and sessions can be resumed with `--resume`.
 
-**OpenCode** launches as an interactive TUI. Prompts are passed via `--prompt` and sessions can be resumed with `--continue`. Auto-approve permissions can be configured via `opencode.json` (`"permission": "allow"`).
+**OpenCode** launches as an interactive TUI. Prompts are passed via `--prompt` and sessions can be resumed with `--continue`. With `unrestricted_permissions`, it launches with `--auto`, which approves every permission not explicitly denied in `opencode.json`. Auto-approval can also be configured persistently there (`"permission": "allow"`).
 
 **Crush** (by Charmbracelet, the original project OpenCode was forked from) launches as an interactive TUI. Sessions can be resumed with `--continue`. Use `--yolo` for auto-approve mode. No interactive prompt passthrough.
 

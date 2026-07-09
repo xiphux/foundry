@@ -592,7 +592,6 @@ mod tests {
             "test_copy",
             "ws",
             "claude",
-            false,
             None,
         )
         .unwrap();
@@ -616,10 +615,6 @@ mod tests {
         // Should have hooks
         assert!(settings.get("hooks").is_some());
         assert!(settings["hooks"].get("Stop").is_some());
-
-        // Should have sandbox enabled by default
-        assert_eq!(settings["sandbox"]["enabled"], true);
-        assert_eq!(settings["sandbox"]["autoAllow"], true);
 
         // Cleanup
         let _ = remove_status("test_copy", "ws");
@@ -649,7 +644,6 @@ mod tests {
             "test_strip",
             "ws",
             "claude",
-            false,
             None,
         )
         .unwrap();
@@ -672,17 +666,16 @@ mod tests {
     }
 
     #[test]
-    fn setup_agent_hooks_unrestricted_skips_sandbox() {
+    fn setup_agent_hooks_writes_no_sandbox() {
         let source = TempDir::new().unwrap();
         let worktree = TempDir::new().unwrap();
 
         setup_agent_hooks(
             worktree.path(),
             source.path(),
-            "test_unrestricted",
+            "test_no_sandbox",
             "ws",
             "claude",
-            true,
             None,
         )
         .unwrap();
@@ -691,14 +684,14 @@ mod tests {
         let content = std::fs::read_to_string(&settings_path).unwrap();
         let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
 
-        // Should NOT have sandbox when unrestricted
+        // Claude runs in `auto` permission mode, not the OS sandbox
         assert!(settings.get("sandbox").is_none());
 
         // Should still have permissions and hooks
         assert!(settings.get("permissions").is_some());
         assert!(settings.get("hooks").is_some());
 
-        let _ = remove_status("test_unrestricted", "ws");
+        let _ = remove_status("test_no_sandbox", "ws");
     }
 
     #[test]
@@ -712,7 +705,6 @@ mod tests {
             "test_codex",
             "ws",
             "codex",
-            false,
             None,
         )
         .unwrap();
@@ -733,7 +725,6 @@ mod tests {
             "test_other",
             "ws",
             "some-agent",
-            false,
             None,
         )
         .unwrap();
@@ -1049,18 +1040,10 @@ pub fn setup_agent_hooks(
     project: &str,
     name: &str,
     agent: &str,
-    unrestricted: bool,
     context: Option<&str>,
 ) -> Result<()> {
     match agent {
-        "claude" => setup_claude(
-            worktree_path,
-            source_path,
-            project,
-            name,
-            unrestricted,
-            context,
-        ),
+        "claude" => setup_claude(worktree_path, source_path, project, name, context),
         // Codex permissions are handled via CLI flags in resolve_agent_command.
         // No config file setup needed since .codex/config.toml is tracked in git.
         _ => Ok(()),
@@ -1074,7 +1057,6 @@ fn setup_claude(
     source_path: &Path,
     project: &str,
     name: &str,
-    unrestricted: bool,
     context: Option<&str>,
 ) -> Result<()> {
     let status_path = status_file_path(project, name, "claude")?;
@@ -1145,35 +1127,6 @@ fn setup_claude(
     }
     settings["permissions"]["allow"] = serde_json::Value::Array(merged_allow);
     settings["permissions"]["deny"] = serde_json::Value::Array(merged_deny);
-
-    // Enable sandbox with auto-allow for worktree-scoped OS-level isolation.
-    // This restricts all bash subprocesses to writing only within the worktree,
-    // while auto-approving commands that stay within the sandbox boundaries.
-    // When unrestricted_permissions is set, skip sandbox to allow full access.
-    if !unrestricted {
-        // The source repo's .git directory needs write access because:
-        // - Worktree commits write to source/.git/worktrees/<name>/
-        // - fsmonitor daemon socket lives there
-        // - Pre-commit hooks (lint-staged etc.) run as node, not git,
-        //   so excludedCommands alone doesn't cover them
-        let source_git_dir = source_path.join(".git").to_string_lossy().to_string();
-
-        settings["sandbox"] = serde_json::json!({
-            "enabled": true,
-            "autoAllow": true,
-            // Exclude git so its child process (gpg) can access keys and
-            // the agent socket for signing.
-            "excludedCommands": ["git"],
-            "filesystem": {
-                "allowWrite": [
-                    // GPG signing needs key access and agent socket
-                    "~/.gnupg",
-                    // Source repo .git dir for worktree commits and fsmonitor
-                    source_git_dir,
-                ]
-            }
-        });
-    }
 
     // Write worktree context file and add SessionStart hook if context is provided.
     // The context file lives in ~/.foundry/context/ (outside the worktree) so it

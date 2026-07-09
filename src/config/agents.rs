@@ -36,15 +36,15 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         AgentCapabilities {
             names: &["claude"],
             executable: "claude",
-            // Default: Claude uses sandbox + settings.local.json for worktree-scoped
-            // permissions (level #2) with acceptEdits mode so file edits don't prompt.
-            // Unrestricted: no sandbox constraints, still acceptEdits.
-            // Note: sandbox is configured separately in agent_hooks.rs via settings.
+            // Default: `auto` mode, where Claude uses model analysis to approve
+            // most permission prompts, combined with settings.local.json for
+            // worktree-scoped allow/deny rules (level #2).
+            // Unrestricted: bypass permission checks entirely.
             build_command: |prompt, resume, unrestricted| {
                 let mut cmd = if unrestricted {
                     "claude --permission-mode bypassPermissions".to_string()
                 } else {
-                    "claude --permission-mode acceptEdits".to_string()
+                    "claude --permission-mode auto".to_string()
                 };
                 if resume {
                     cmd += " --continue";
@@ -181,10 +181,15 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
             names: &["opencode"],
             executable: "opencode",
             // Default: interactive TUI, standard permissions (level #1).
-            // Unrestricted: no CLI flag available; permissions must be configured
-            // via opencode.json ("permission": "allow"). Flag is a no-op.
-            build_command: |prompt, resume, _unrestricted| {
-                let mut cmd = "opencode".to_string();
+            // Unrestricted: --auto approves every permission not explicitly
+            // denied in opencode.json (level #3). Unlike Claude's `auto` mode,
+            // there is no model analysis and no fallback prompt.
+            build_command: |prompt, resume, unrestricted| {
+                let mut cmd = if unrestricted {
+                    "opencode --auto".to_string()
+                } else {
+                    "opencode".to_string()
+                };
                 if resume {
                     cmd += " --continue";
                 }
@@ -303,7 +308,7 @@ pub fn build_agent_command(
 }
 
 /// Build agent command with optional plan mode.
-/// When `plan` is true, Claude uses `--permission-mode plan` instead of `acceptEdits`,
+/// When `plan` is true, Claude uses `--permission-mode plan` instead of `auto`,
 /// requiring plan approval before any edits. Other agents ignore the flag.
 pub fn build_agent_command_with_plan(
     agent: &str,
@@ -323,8 +328,8 @@ pub fn build_agent_command_with_plan(
     };
 
     // Override permission mode for plan mode (Claude only)
-    if plan && !unrestricted && cmd.contains("--permission-mode acceptEdits") {
-        cmd = cmd.replace("--permission-mode acceptEdits", "--permission-mode plan");
+    if plan && !unrestricted && cmd.contains("--permission-mode auto") {
+        cmd = cmd.replace("--permission-mode auto", "--permission-mode plan");
     }
 
     cmd
@@ -385,15 +390,15 @@ mod tests {
         let caps = agent_capabilities("claude").unwrap();
         assert_eq!(
             (caps.build_command)(None, false, false),
-            "claude --permission-mode acceptEdits"
+            "claude --permission-mode auto"
         );
         assert_eq!(
             (caps.build_command)(None, true, false),
-            "claude --permission-mode acceptEdits --continue"
+            "claude --permission-mode auto --continue"
         );
         assert_eq!(
             (caps.build_command)(Some("fix the bug"), false, false),
-            "claude --permission-mode acceptEdits 'fix the bug'"
+            "claude --permission-mode auto 'fix the bug'"
         );
         assert_eq!(
             (caps.build_command)(None, false, true),
@@ -406,7 +411,7 @@ mod tests {
         let cmd =
             build_agent_command_with_plan("claude", None, Some("plan this"), false, false, true);
         assert!(cmd.contains("--permission-mode plan"));
-        assert!(!cmd.contains("acceptEdits"));
+        assert!(!cmd.contains("--permission-mode auto"));
         assert!(cmd.contains("'plan this'"));
     }
 
@@ -511,6 +516,11 @@ mod tests {
         assert_eq!(
             (caps.build_command)(Some("fix the bug"), false, false),
             "opencode --prompt 'fix the bug'"
+        );
+        assert_eq!((caps.build_command)(None, false, true), "opencode --auto");
+        assert_eq!(
+            (caps.build_command)(Some("fix the bug"), true, true),
+            "opencode --auto --continue --prompt 'fix the bug'"
         );
     }
 

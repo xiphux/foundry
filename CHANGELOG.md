@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Claude now launches with `--permission-mode auto` instead of `acceptEdits` plus the OS sandbox. Auto mode uses model analysis to approve most permission requests, which covers the cases the sandbox was working around (GPG signing, worktree `.git` writes, pre-commit hooks) without the sandbox's escape hatches. Foundry no longer writes a `sandbox` block into the worktree's `.claude/settings.local.json`; worktree-scoped allow/deny rules and status hooks are unchanged.
+- `unrestricted_permissions = true` now launches OpenCode with `--auto` (approve everything not explicitly denied in `opencode.json`). Previously the setting was a no-op for OpenCode. Its default remains ask-for-permission — unlike Claude's `auto`, OpenCode's `--auto` performs no model analysis and never falls back to a prompt.
+
 ## v0.5.0
 
 ### New Agent Support

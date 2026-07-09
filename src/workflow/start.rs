@@ -170,7 +170,6 @@ pub fn run(
             project_name,
             name,
             agent,
-            config.unrestricted_permissions,
             Some(&agent_context),
         ) && verbose
         {

@@ -42,7 +42,7 @@ Foundry is a CLI that manages AI agent workspaces using git worktrees and termin
 - **`forge/`** — `Forge` trait (analogous to `TerminalBackend`) for PR operations. `GitHubForge` shells out to `gh` CLI. `detect_forge()` resolves the remote and returns the right implementation.
 - **`terminal/`** — `TerminalBackend` trait with implementations for Ghostty, iTerm2, WezTerm, tmux, Zellij, Windows Terminal, and a bare fallback. The trait uses `open_workspace()` (not individual split/command calls) because some backends (Ghostty, iTerm2) need all pane references within a single script execution.
 - **`workflow/`** — One module per command (start, open, finish, discard, restore, pr, checks, diff, edit, status). Each follows: validate → record state → run scripts → git ops → terminal ops → cleanup state. Shared cleanup logic lives in `cleanup.rs`.
-- **`agent_hooks.rs`** — Per-agent workspace setup (Claude settings.local.json, sandbox config, conversation detection). Agent status tracking for the status dashboard.
+- **`agent_hooks.rs`** — Per-agent workspace setup (Claude settings.local.json, worktree-scoped permissions, conversation detection). Agent status tracking for the status dashboard.
 - **`github.rs`** — GitHub issue fetching (`gh issue view`), issue-to-prompt conversion, slugification for branch names.
 - **`history.rs`** — JSONL-based activity log (`~/.foundry/history.jsonl`). Events: started, finished, discarded, restored, pr_created, pr_merged.
 - **`registry.rs`** / **`state.rs`** — TOML-backed persistence for project registry (`~/.foundry/projects.toml`) and active workspace state (`~/.foundry/state.toml`).
