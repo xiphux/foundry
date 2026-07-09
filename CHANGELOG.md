@@ -7,6 +7,10 @@
 - Claude now launches with `--permission-mode auto` instead of `acceptEdits` plus the OS sandbox. Auto mode uses model analysis to approve most permission requests, which covers the cases the sandbox was working around (GPG signing, worktree `.git` writes, pre-commit hooks) without the sandbox's escape hatches. Foundry no longer writes a `sandbox` block into the worktree's `.claude/settings.local.json`; worktree-scoped allow/deny rules and status hooks are unchanged.
 - `unrestricted_permissions = true` now launches OpenCode with `--auto` (approve everything not explicitly denied in `opencode.json`). Previously the setting was a no-op for OpenCode. Its default remains ask-for-permission — unlike Claude's `auto`, OpenCode's `--auto` performs no model analysis and never falls back to a prompt.
 
+### Fixed
+
+- Ghostty: deferred setup scripts now run, and `finish`/`discard` now close the workspace tab. Both operations located the tab by matching a terminal's `working directory` against the worktree path, but Ghostty never populates that property (empty on 1.3.1 even with shell integration active), so the lookup silently matched nothing. Foundry now records the tab id when it creates the tab and addresses the tab by id. Note that Ghostty's `confirm-close-surface` (on by default) prompts before closing a tab whose panes still have running processes.
+
 ## v0.5.0
 
 ### New Agent Support

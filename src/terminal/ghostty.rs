@@ -35,6 +35,7 @@ impl GhosttyBackend {
             let escaped_path = escape_applescript(path_str);
             lines.push(format!("    input text \"cd {escaped_path}\" to t"));
             lines.push("    send key \"enter\" to t".to_string());
+            lines.push("    return id of selected tab of front window".to_string());
             lines.push("end tell".to_string());
             return Ok(lines.join("\n"));
         }
@@ -129,9 +130,74 @@ impl GhosttyBackend {
         // Focus the first pane
         lines.push(format!("    focus {first_var}"));
 
+        // Hand back the tab's id so later operations can find this tab again.
+        lines.push("    return id of selected tab of front window".to_string());
+
         lines.push("end tell".to_string());
 
         Ok(lines.join("\n"))
+    }
+
+    /// Wrap `body` in a loop that binds `t` to the tab whose id is `tab_id`.
+    ///
+    /// Tabs are located by the id captured when the tab was created. Ghostty's
+    /// `working directory` property on a terminal is declared in its scripting
+    /// dictionary but never populated (empty on 1.3.1 even with shell
+    /// integration active), so matching on the worktree path never fires.
+    fn with_tab(tab_id: &str, body: &str) -> String {
+        let escaped_id = escape_applescript(tab_id);
+        format!(
+            r#"tell application "Ghostty"
+    repeat with w in windows
+        repeat with t in tabs of w
+            if id of t is "{escaped_id}" then
+{body}
+            end if
+        end repeat
+    end repeat
+    return "not_found"
+end tell"#
+        )
+    }
+
+    fn build_close_script(tab_id: &str) -> String {
+        Self::with_tab(
+            tab_id,
+            "                close tab t\n                return \"found\"",
+        )
+    }
+
+    fn build_run_in_pane_script(tab_id: &str, pane_index: usize, command: &str) -> String {
+        let escaped_cmd = escape_applescript(command);
+        // AppleScript uses 1-based indexing
+        let as_index = pane_index + 1;
+        Self::with_tab(
+            tab_id,
+            &format!(
+                r#"                set targetTerm to item {as_index} of (terminals of t)
+                input text "{escaped_cmd}" to targetTerm
+                send key "enter" to targetTerm
+                return "found""#
+            ),
+        )
+    }
+
+    fn build_focus_script(tab_id: &str) -> String {
+        let escaped_id = escape_applescript(tab_id);
+        format!(
+            r#"tell application "Ghostty"
+    activate
+    repeat with w in windows
+        repeat with t in tabs of w
+            if id of t is "{escaped_id}" then
+                select tab t
+                return "found"
+            end if
+        end repeat
+    end repeat
+    return "not_found"
+end tell"#
+        )
     }
 
     /// Build an AppleScript list literal for environment variables.
@@ -164,10 +230,18 @@ impl TerminalBackend for GhosttyBackend {
             eprintln!("Setting up workspace layout...");
         }
 
-        run_applescript(&script)?;
+        // The layout script hands back the new tab's id, which is the handle
+        // every later operation (close, focus, run_in_pane) uses.
+        let tab_id = run_applescript(&script)?;
 
-        // Return the worktree path as the tab identifier.
-        Ok(path.to_string_lossy().into())
+        if tab_id.is_empty() {
+            eprintln!(
+                "warning: Ghostty did not report a tab id; \
+                 this workspace's tab cannot be closed or focused automatically"
+            );
+        }
+
+        Ok(tab_id)
     }
 
     fn close_tab(&self, tab_id: &str) -> Result<()> {
@@ -175,29 +249,10 @@ impl TerminalBackend for GhosttyBackend {
             return Ok(());
         }
 
-        // Iterate through all tabs in all windows, find the tab containing
-        // a terminal whose working directory matches the worktree path,
-        // and close the entire tab (not just one pane).
-        let escaped_path = escape_applescript(tab_id);
-        let script = format!(
-            r#"tell application "Ghostty"
-    try
-        repeat with w in windows
-            repeat with t in tabs of w
-                set terms to terminals of t
-                repeat with term in terms
-                    if working directory of term contains "{escaped_path}" then
-                        close tab t
-                        return
-                    end if
-                end repeat
-            end repeat
-        end repeat
-    end try
-end tell"#
-        );
-
-        let _ = run_applescript(&script);
+        // Ghostty prompts before closing a tab whose panes still have running
+        // processes (`confirm-close-surface`, on by default), so the tab may
+        // linger until the user confirms.
+        let _ = run_applescript(&Self::build_close_script(tab_id));
         Ok(())
     }
 
@@ -206,30 +261,10 @@ end tell"#
             return Ok(());
         }
 
-        let escaped_path = escape_applescript(tab_id);
-        let escaped_cmd = escape_applescript(command);
-        // AppleScript uses 1-based indexing
-        let as_index = pane_index + 1;
-
-        let script = format!(
-            r#"tell application "Ghostty"
-    repeat with w in windows
-        repeat with t in tabs of w
-            set terms to terminals of t
-            repeat with term in terms
-                if working directory of term contains "{escaped_path}" then
-                    set targetTerm to item {as_index} of terms
-                    input text "{escaped_cmd}" to targetTerm
-                    send key "enter" to targetTerm
-                    return
-                end if
-            end repeat
-        end repeat
-    end repeat
-end tell"#
-        );
-
-        run_applescript(&script)?;
+        let result = run_applescript(&Self::build_run_in_pane_script(tab_id, pane_index, command))?;
+        if result == "not_found" {
+            anyhow::bail!("Ghostty tab '{tab_id}' not found; cannot run command in pane");
+        }
         Ok(())
     }
 
@@ -238,26 +273,80 @@ end tell"#
             return Ok(false);
         }
 
-        let escaped_path = escape_applescript(tab_id);
-        let script = format!(
-            r#"tell application "Ghostty"
-    activate
-    repeat with w in windows
-        repeat with t in tabs of w
-            set terms to terminals of t
-            repeat with term in terms
-                if working directory of term contains "{escaped_path}" then
-                    select tab t
-                    return "found"
-                end if
-            end repeat
-        end repeat
-    end repeat
-    return "not_found"
-end tell"#
-        );
+        let result = run_applescript(&Self::build_focus_script(tab_id))?;
+        Ok(result == "found")
+    }
+}
 
-        let result = run_applescript(&script)?;
-        Ok(result.contains("found") && !result.contains("not_found"))
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn panes() -> Vec<PaneSpec> {
+        vec![PaneSpec {
+            name: "agent".into(),
+            split_from: None,
+            direction: None,
+            command: Some("claude".into()),
+            env: HashMap::new(),
+            shell: None,
+        }]
+    }
+
+    #[test]
+    fn layout_script_returns_the_tab_id() {
+        let script = GhosttyBackend::build_layout_script(Path::new("/tmp/wt"), &panes()).unwrap();
+        assert!(script.contains("return id of selected tab of front window"));
+    }
+
+    #[test]
+    fn layout_script_without_panes_returns_the_tab_id() {
+        let script = GhosttyBackend::build_layout_script(Path::new("/tmp/wt"), &[]).unwrap();
+        assert!(script.contains("return id of selected tab of front window"));
+    }
+
+    /// Ghostty never populates `working directory`, so no script may depend on it.
+    #[test]
+    fn scripts_never_match_on_working_directory() {
+        let scripts = [
+            GhosttyBackend::build_close_script("tab-abc"),
+            GhosttyBackend::build_run_in_pane_script("tab-abc", 1, "ls"),
+            GhosttyBackend::build_focus_script("tab-abc"),
+        ];
+        for script in &scripts {
+            assert!(
+                !script.contains("working directory"),
+                "script must not match on working directory: {script}"
+            );
+            assert!(script.contains(r#"id of t is "tab-abc""#), "{script}");
+        }
+    }
+
+    #[test]
+    fn close_script_closes_the_tab_not_a_pane() {
+        let script = GhosttyBackend::build_close_script("tab-abc");
+        assert!(script.contains("close tab t"));
+    }
+
+    #[test]
+    fn run_in_pane_script_uses_one_based_index() {
+        let script = GhosttyBackend::build_run_in_pane_script("tab-abc", 2, "pnpm install");
+        assert!(script.contains("item 3 of (terminals of t)"));
+        assert!(script.contains(r#"input text "pnpm install" to targetTerm"#));
+    }
+
+    #[test]
+    fn scripts_escape_quotes_in_commands() {
+        let script = GhosttyBackend::build_run_in_pane_script("tab-abc", 0, r#"echo "hi""#);
+        assert!(script.contains(r#"echo \"hi\""#));
+    }
+
+    #[test]
+    fn lookup_scripts_report_not_found() {
+        assert!(GhosttyBackend::build_focus_script("tab-abc").contains(r#"return "not_found""#));
+        assert!(
+            GhosttyBackend::build_run_in_pane_script("tab-abc", 0, "ls")
+                .contains(r#"return "not_found""#)
+        );
     }
 }
