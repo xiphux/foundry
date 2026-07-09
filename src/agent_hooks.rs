@@ -617,7 +617,7 @@ mod tests {
         assert!(settings["hooks"].get("Stop").is_some());
 
         // Cleanup
-        let _ = remove_status("test_copy", "ws");
+        remove_status("test_copy", "ws");
     }
 
     #[test]
@@ -662,7 +662,7 @@ mod tests {
         // pnpm should remain
         assert!(allow.iter().any(|v| v.as_str() == Some("Bash(pnpm *)")));
 
-        let _ = remove_status("test_strip", "ws");
+        remove_status("test_strip", "ws");
     }
 
     #[test]
@@ -691,7 +691,7 @@ mod tests {
         assert!(settings.get("permissions").is_some());
         assert!(settings.get("hooks").is_some());
 
-        let _ = remove_status("test_no_sandbox", "ws");
+        remove_status("test_no_sandbox", "ws");
     }
 
     #[test]
