@@ -461,3 +461,142 @@ impl TerminalBackend for WindowsTerminalBackend {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pane(command: Option<&str>, env: &[(&str, &str)]) -> PaneSpec {
+        PaneSpec {
+            name: "agent".into(),
+            split_from: None,
+            direction: None,
+            command: command.map(Into::into),
+            env: env
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            shell: None,
+        }
+    }
+
+    /// `wt.exe` reads a bare `;` as its own subcommand separator, so a pane
+    /// command containing one would be split into two wt subcommands and the
+    /// tail would be interpreted as wt arguments.
+    #[test]
+    fn escape_wt_escapes_the_subcommand_separator() {
+        assert_eq!(
+            WindowsTerminalBackend::escape_wt("cd /d C:\\x; pnpm dev"),
+            "cd /d C:\\x\\; pnpm dev"
+        );
+    }
+
+    #[test]
+    fn escape_wt_leaves_a_plain_command_alone() {
+        assert_eq!(
+            WindowsTerminalBackend::escape_wt("pnpm install"),
+            "pnpm install"
+        );
+    }
+
+    #[test]
+    fn parse_tab_id_splits_window_from_pid_dir() {
+        let (window, dir) = WindowsTerminalBackend::parse_tab_id("3|C:\\run\\wt-1").unwrap();
+        assert_eq!(window, "3");
+        assert_eq!(dir, "C:\\run\\wt-1");
+    }
+
+    #[test]
+    fn parse_tab_id_rejects_a_malformed_id() {
+        assert!(WindowsTerminalBackend::parse_tab_id("no-separator").is_err());
+    }
+
+    #[test]
+    fn shell_kind_defaults_to_powershell() {
+        assert!(matches!(
+            WindowsTerminalBackend::shell_kind(None),
+            ShellKind::PowerShell(_)
+        ));
+        assert!(matches!(
+            WindowsTerminalBackend::shell_kind(Some("pwsh")),
+            ShellKind::PowerShell(_)
+        ));
+    }
+
+    #[test]
+    fn shell_kind_detects_powershell_by_path() {
+        assert!(matches!(
+            WindowsTerminalBackend::shell_kind(Some("C:/Program Files/PowerShell/7/pwsh.exe")),
+            ShellKind::PowerShell(_)
+        ));
+    }
+
+    #[test]
+    fn shell_kind_treats_anything_else_as_bash() {
+        assert!(matches!(
+            WindowsTerminalBackend::shell_kind(Some("C:/Program Files/Git/bin/bash.exe")),
+            ShellKind::Bash(_)
+        ));
+    }
+
+    /// `git-bash.exe` is a MinTTY GUI launcher and cannot be embedded in a
+    /// pane. Where the real shell cannot be located beside it, the path is
+    /// returned unchanged so the user sees wt's own error rather than a
+    /// silently rewritten one.
+    #[test]
+    fn resolve_bash_path_leaves_an_unresolvable_git_bash_alone() {
+        let path = "C:/nonexistent-git-install/git-bash.exe";
+        assert_eq!(WindowsTerminalBackend::resolve_bash_path(path), path);
+    }
+
+    #[test]
+    fn resolve_bash_path_leaves_a_real_bash_alone() {
+        let path = "C:/Program Files/Git/bin/bash.exe";
+        assert_eq!(WindowsTerminalBackend::resolve_bash_path(path), path);
+    }
+
+    /// Every pane records its PID so `close_tab` can kill it; without that the
+    /// panes outlive the workspace.
+    #[test]
+    fn powershell_args_record_the_pane_pid() {
+        let args = WindowsTerminalBackend::build_powershell_args(
+            &pane(Some("pnpm dev"), &[]),
+            Path::new("C:\\run"),
+            2,
+            "powershell",
+        );
+        let joined = args.join(" ");
+        assert!(joined.contains("pane_2.pid"), "{joined}");
+        assert!(joined.contains("$PID"), "{joined}");
+        assert!(joined.contains("pnpm dev"), "{joined}");
+    }
+
+    /// PowerShell escapes a quote by doubling it, so a value carrying one must
+    /// not be able to close the string and start new statements.
+    #[test]
+    fn powershell_args_neutralise_a_quote_in_an_env_value() {
+        let args = WindowsTerminalBackend::build_powershell_args(
+            &pane(None, &[("MSG", "it's; rm -rf /")]),
+            Path::new("C:\\run"),
+            0,
+            "powershell",
+        );
+        let joined = args.join(" ");
+        assert!(joined.contains("$env:MSG = 'it''s"), "{joined}");
+        assert!(!joined.contains("'it's;"), "unescaped quote: {joined}");
+    }
+
+    #[test]
+    fn bash_args_record_the_windows_pid_not_the_msys_one() {
+        let args = WindowsTerminalBackend::build_bash_args(
+            &pane(Some("pnpm dev"), &[]),
+            Path::new("C:\\run"),
+            1,
+            "bash.exe",
+        );
+        let joined = args.join(" ");
+        // MSYS2 has its own PID namespace; taskkill needs the Windows PID.
+        assert!(joined.contains("winpid"), "{joined}");
+        assert!(joined.contains("pane_1.pid"), "{joined}");
+    }
+}

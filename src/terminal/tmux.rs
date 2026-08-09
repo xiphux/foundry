@@ -267,3 +267,43 @@ impl TerminalBackend for TmuxBackend {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// tmux rejects `.` and `:` in session names — `:` is its window/pane
+    /// separator, so a name carrying one makes every later `-t <session>`
+    /// address something else entirely.
+    #[test]
+    fn session_name_strips_characters_tmux_treats_as_separators() {
+        let name = TmuxBackend::session_name(Path::new("/wt/my.proj/feat:1"));
+        assert!(!name.contains('.'), "{name}");
+        assert!(!name.contains(':'), "{name}");
+        assert_eq!(name, "foundry-my-proj-feat-1");
+    }
+
+    #[test]
+    fn session_name_includes_project_and_workspace() {
+        assert_eq!(
+            TmuxBackend::session_name(Path::new("/wt/myproject/feature")),
+            "foundry-myproject-feature"
+        );
+    }
+
+    /// Two workspaces of different projects that share a workspace name must
+    /// not collide onto one session — the second would attach to the first.
+    #[test]
+    fn session_name_distinguishes_same_workspace_in_different_projects() {
+        assert_ne!(
+            TmuxBackend::session_name(Path::new("/wt/alpha/feature")),
+            TmuxBackend::session_name(Path::new("/wt/beta/feature"))
+        );
+    }
+
+    #[test]
+    fn session_name_falls_back_when_the_path_has_no_components() {
+        let name = TmuxBackend::session_name(Path::new("/"));
+        assert!(name.starts_with("foundry-"), "{name}");
+    }
+}

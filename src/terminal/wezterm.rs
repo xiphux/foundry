@@ -260,3 +260,31 @@ impl TerminalBackend for WeztermBackend {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The tab id foundry persists in `state.toml` comes out of this parse, so
+    /// a change in `wezterm cli list --format json` would strand every open
+    /// workspace — `close_tab` and `focus_tab` would stop finding their tabs.
+    /// The struct ignores the many other fields wezterm reports, which is what
+    /// makes it tolerant of additions but not of a rename.
+    #[test]
+    fn pane_info_parses_the_fields_close_and_focus_depend_on() {
+        let json = r#"[
+            {"window_id":0,"tab_id":3,"pane_id":7,"workspace":"default","cwd":"file:///wt"},
+            {"window_id":0,"tab_id":3,"pane_id":8,"workspace":"default","cwd":"file:///wt"}
+        ]"#;
+        let panes: Vec<PaneInfo> = serde_json::from_str(json).unwrap();
+        assert_eq!(panes.len(), 2);
+        assert_eq!(panes[0].pane_id, 7);
+        assert_eq!(panes[0].tab_id, 3);
+    }
+
+    #[test]
+    fn pane_info_rejects_output_missing_the_ids() {
+        let json = r#"[{"window_id":0,"workspace":"default"}]"#;
+        assert!(serde_json::from_str::<Vec<PaneInfo>>(json).is_err());
+    }
+}

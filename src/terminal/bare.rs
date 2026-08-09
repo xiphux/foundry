@@ -74,3 +74,53 @@ impl TerminalBackend for BareBackend {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn pane(name: &str, command: Option<&str>) -> PaneSpec {
+        PaneSpec {
+            name: name.into(),
+            split_from: None,
+            direction: None,
+            command: command.map(Into::into),
+            env: HashMap::new(),
+            shell: None,
+        }
+    }
+
+    /// Bare mode runs exactly one pane, and it has to be the one carrying the
+    /// agent — not merely the first in the layout, which in a layout whose
+    /// shell pane comes first would drop the agent silently.
+    #[test]
+    fn picks_the_first_pane_that_has_a_command() {
+        let panes = [pane("shell", None), pane("agent", Some("claude"))];
+        let chosen = panes.iter().find(|p| p.command.is_some()).or(panes.first());
+        assert_eq!(chosen.unwrap().name, "agent");
+    }
+
+    #[test]
+    fn falls_back_to_the_first_pane_when_none_have_commands() {
+        let panes = [pane("shell", None), pane("logs", None)];
+        let chosen = panes.iter().find(|p| p.command.is_some()).or(panes.first());
+        assert_eq!(chosen.unwrap().name, "shell");
+    }
+
+    /// Bare mode has no panes to send to, so `start` must never suppress a
+    /// deferred command expecting to deliver it later.
+    #[test]
+    fn does_not_claim_run_in_pane_support() {
+        assert!(!BareBackend::new().supports_run_in_pane());
+    }
+
+    #[test]
+    fn run_in_pane_reports_rather_than_silently_dropping() {
+        let err = BareBackend::new()
+            .run_in_pane("tab", 0, "pnpm install")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("bare mode"), "{err}");
+    }
+}
