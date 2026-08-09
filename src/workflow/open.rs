@@ -25,6 +25,10 @@ pub fn open_workspace(
     deferred_commands: &std::collections::HashMap<String, String>,
     plan: bool,
 ) -> Result<()> {
+    // The single funnel for turning configured panes into a terminal layout, so
+    // the one place worth rejecting a layout that cannot be built.
+    config::validate_panes(&config.panes)?;
+
     let backend = terminal::detect_terminal()?;
 
     // If the workspace already has an open tab, just focus it instead of opening a duplicate

@@ -13,6 +13,7 @@ pub use global::GlobalConfig;
 pub use project::ProjectConfig;
 pub use template::{TemplateVars, resolve_template, validate_template};
 pub use types::{MergeStrategy, PaneConfig, PaneOverride, ScriptConfig, SplitDirection};
+pub use validation::validate_panes;
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};

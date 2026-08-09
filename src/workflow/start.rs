@@ -57,6 +57,10 @@ pub fn run(
         }
     }
 
+    // Same reason: `open_workspace` checks this too, but that runs after the
+    // branch and worktree exist, so a broken layout would leave them behind.
+    config::validate_panes(&config.panes)?;
+
     // Clear stale conversation history if this worktree name was used before.
     // This prevents --continue from resuming a conversation from a previous
     // workspace that happened to have the same name.

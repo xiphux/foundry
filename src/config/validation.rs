@@ -67,6 +67,104 @@ pub fn validate_project_path(value: &str, context: &str) -> Result<()> {
     Ok(())
 }
 
+/// Reject a pane layout that cannot produce a working split tree.
+///
+/// The layout is a tree expressed as a flat list: the first pane becomes the
+/// tab and every other pane names the pane it splits from. Nothing checked
+/// that, so each backend discovered a broken graph its own way and none of them
+/// said anything useful:
+///
+/// - **WezTerm** reported an unknown `split_from` cleanly.
+/// - **Ghostty** emitted an AppleScript variable that was never assigned, so
+///   the user got an `osascript` error naming a variable they never wrote.
+/// - **Zellij** builds the tree by searching for children, so a cycle
+///   (`a` splits from `b`, `b` splits from `a`) recursed until the stack ran
+///   out.
+///
+/// Requiring each `split_from` to name an *earlier* pane rules out cycles and
+/// forward references together, and matches what the ordered backends already
+/// assume. This runs on the merged pane list rather than the global config,
+/// because dropping an `optional` pane can orphan a later one that split from
+/// it.
+pub fn validate_panes(panes: &[super::PaneConfig]) -> Result<()> {
+    if panes.is_empty() {
+        return Ok(());
+    }
+
+    let mut seen: Vec<&str> = Vec::new();
+    let mut seen_vars: Vec<(String, &str)> = Vec::new();
+
+    for (i, pane) in panes.iter().enumerate() {
+        if pane.name.is_empty() {
+            bail!("pane at index {i} has an empty name");
+        }
+        if seen.contains(&pane.name.as_str()) {
+            bail!(
+                "duplicate pane name '{}'. Pane names identify split targets, so they must be unique.",
+                pane.name
+            );
+        }
+
+        // Two names that differ only in characters the AppleScript backends
+        // sanitize away would silently become the same variable, and one pane's
+        // splits would land in the other.
+        let var = crate::terminal::applescript::pane_var(&pane.name);
+        if let Some((_, other)) = seen_vars.iter().find(|(v, _)| *v == var) {
+            bail!(
+                "pane names '{other}' and '{}' are indistinguishable to the terminal backends \
+                 (both become '{var}'). Rename one so they differ by more than punctuation.",
+                pane.name
+            );
+        }
+        seen_vars.push((var, &pane.name));
+
+        match (i, &pane.split_from) {
+            // The first pane becomes the tab itself, so it has nothing to split from.
+            (0, Some(parent)) => bail!(
+                "the first pane ('{}') cannot have split_from = '{parent}' — it becomes the \
+                 tab that the other panes split from. Reorder the panes so '{parent}' comes first.",
+                pane.name
+            ),
+            (0, None) => {}
+            (_, None) => bail!(
+                "pane '{}' has no split_from. Every pane after the first must name the pane \
+                 it splits from.",
+                pane.name
+            ),
+            (_, Some(parent)) => {
+                if !seen.contains(&parent.as_str()) {
+                    // Naming a *later* pane is reported separately: it is a
+                    // solvable ordering mistake, not a typo.
+                    if panes.iter().any(|p| &p.name == parent) {
+                        bail!(
+                            "pane '{}' splits from '{parent}', which is defined after it. \
+                             A pane can only split from one that already exists, so move \
+                             '{parent}' earlier.",
+                            pane.name
+                        );
+                    }
+                    bail!(
+                        "pane '{}' splits from '{parent}', which is not a pane. Known panes: {}.",
+                        pane.name,
+                        seen.join(", ")
+                    );
+                }
+                if pane.direction.is_none() {
+                    bail!(
+                        "pane '{}' splits from '{parent}' but has no direction. \
+                         Set direction = \"right\" or \"down\".",
+                        pane.name
+                    );
+                }
+            }
+        }
+
+        seen.push(&pane.name);
+    }
+
+    Ok(())
+}
+
 /// Known top-level keys for the global config file.
 const GLOBAL_CONFIG_KEYS: &[&str] = &[
     "branch_prefix",
@@ -221,6 +319,108 @@ pub fn check_project_config_keys(value: &toml::Value, file_path: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::types::{PaneConfig, SplitDirection};
+
+    fn pane(name: &str, split_from: Option<&str>) -> PaneConfig {
+        PaneConfig {
+            name: name.into(),
+            agent: None,
+            command: None,
+            split_from: split_from.map(Into::into),
+            direction: split_from.map(|_| SplitDirection::Right),
+            optional: false,
+            env: Default::default(),
+            deferred: false,
+        }
+    }
+
+    #[test]
+    fn validate_panes_accepts_the_default_layout() {
+        let panes = vec![pane("agent", None), pane("shell", Some("agent"))];
+        assert!(validate_panes(&panes).is_ok());
+    }
+
+    #[test]
+    fn validate_panes_accepts_an_empty_layout() {
+        assert!(validate_panes(&[]).is_ok());
+    }
+
+    #[test]
+    fn validate_panes_accepts_a_deeper_tree() {
+        let panes = vec![
+            pane("agent", None),
+            pane("shell", Some("agent")),
+            pane("logs", Some("shell")),
+        ];
+        assert!(validate_panes(&panes).is_ok());
+    }
+
+    #[test]
+    fn validate_panes_rejects_an_unknown_split_target() {
+        let panes = vec![pane("agent", None), pane("shell", Some("nope"))];
+        let err = validate_panes(&panes).unwrap_err().to_string();
+        assert!(err.contains("not a pane"), "{err}");
+    }
+
+    /// The ordered backends assign panes in list order, so a pane cannot split
+    /// from one that does not exist yet.
+    #[test]
+    fn validate_panes_rejects_a_forward_reference() {
+        let panes = vec![
+            pane("agent", None),
+            pane("shell", Some("logs")),
+            pane("logs", Some("agent")),
+        ];
+        let err = validate_panes(&panes).unwrap_err().to_string();
+        assert!(err.contains("defined after it"), "{err}");
+    }
+
+    /// Zellij builds the tree by searching for children, so a cycle recursed
+    /// until the stack ran out. The ordering rule rules it out.
+    #[test]
+    fn validate_panes_rejects_a_cycle() {
+        let panes = vec![pane("a", Some("b")), pane("b", Some("a"))];
+        assert!(validate_panes(&panes).is_err());
+    }
+
+    #[test]
+    fn validate_panes_rejects_a_first_pane_that_splits() {
+        let panes = vec![pane("shell", Some("agent")), pane("agent", None)];
+        let err = validate_panes(&panes).unwrap_err().to_string();
+        assert!(err.contains("first pane"), "{err}");
+    }
+
+    #[test]
+    fn validate_panes_rejects_a_later_pane_with_no_split_from() {
+        let panes = vec![pane("agent", None), pane("shell", None)];
+        let err = validate_panes(&panes).unwrap_err().to_string();
+        assert!(err.contains("no split_from"), "{err}");
+    }
+
+    #[test]
+    fn validate_panes_rejects_a_missing_direction() {
+        let mut panes = vec![pane("agent", None), pane("shell", Some("agent"))];
+        panes[1].direction = None;
+        let err = validate_panes(&panes).unwrap_err().to_string();
+        assert!(err.contains("no direction"), "{err}");
+    }
+
+    #[test]
+    fn validate_panes_rejects_duplicate_names() {
+        let panes = vec![pane("agent", None), pane("agent", Some("agent"))];
+        let err = validate_panes(&panes).unwrap_err().to_string();
+        assert!(err.contains("duplicate"), "{err}");
+    }
+
+    /// The AppleScript backends sanitize a pane name into a variable, so names
+    /// differing only in punctuation collided silently and one pane's splits
+    /// landed in the other.
+    #[test]
+    fn validate_panes_rejects_names_that_sanitize_alike() {
+        let panes = vec![pane("my-pane", None), pane("my.pane", Some("my-pane"))];
+        let err = validate_panes(&panes).unwrap_err().to_string();
+        assert!(err.contains("indistinguishable"), "{err}");
+    }
 
     #[test]
     fn check_global_config_keys_no_warnings_for_valid() {

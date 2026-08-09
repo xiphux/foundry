@@ -1,4 +1,7 @@
-mod applescript;
+// Reachable crate-wide so `config::validation` can reject two pane names that
+// `pane_var` would sanitize to the same AppleScript variable, without keeping a
+// second copy of that sanitizer.
+pub(crate) mod applescript;
 pub mod bare;
 pub mod ghostty;
 pub mod iterm2;
