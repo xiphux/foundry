@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::agent_hooks;
@@ -35,6 +36,10 @@ fn render_dashboard(state: &WorkspaceState) -> Result<()> {
     );
     println!("  {}", "\u{2500}".repeat(80));
 
+    // Every workspace in a project shares one source repo, so detect the main
+    // branch once per repo rather than once per workspace.
+    let mut main_branches: HashMap<&str, Option<String>> = HashMap::new();
+
     for ws in workspaces {
         let worktree = Path::new(&ws.worktree_path);
         let source = Path::new(&ws.source_path);
@@ -54,22 +59,20 @@ fn render_dashboard(state: &WorkspaceState) -> Result<()> {
             ("✓ clean", "\x1b[32m")
         };
 
-        // Commit count vs main
-        let commit_info = if let Ok(main_branch) = git::detect_main_branch(source) {
-            match git::branch_has_commits(source, &ws.branch, &main_branch) {
-                Ok(true) => {
-                    let count = commit_count(source, &ws.branch, &main_branch);
-                    if count == 1 {
-                        "1 commit".to_string()
-                    } else {
-                        format!("{count} commits")
-                    }
-                }
-                Ok(false) => "no commits".to_string(),
+        // Commit count vs main. One `rev-list --count` answers both "are there
+        // commits?" and "how many?" — asking twice ran the identical command.
+        let main_branch = main_branches
+            .entry(ws.source_path.as_str())
+            .or_insert_with(|| git::detect_main_branch(source).ok());
+
+        let commit_info = match main_branch {
+            Some(main_branch) => match git::commit_count(source, &ws.branch, main_branch) {
+                Ok(0) => "no commits".to_string(),
+                Ok(1) => "1 commit".to_string(),
+                Ok(count) => format!("{count} commits"),
                 Err(_) => "unknown".to_string(),
-            }
-        } else {
-            "unknown".to_string()
+            },
+            None => "unknown".to_string(),
         };
 
         // Agent status (may have multiple agents per workspace)
@@ -188,19 +191,6 @@ fn activity_text(info: &agent_hooks::AgentStatusInfo) -> String {
     }
 }
 
-/// Get the number of commits a branch has beyond base.
-fn commit_count(repo_path: &Path, branch: &str, base: &str) -> u64 {
-    let range = format!("{base}..{branch}");
-    std::process::Command::new("git")
-        .arg("-C")
-        .arg(repo_path)
-        .args(["rev-list", "--count", &range])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,68 +230,6 @@ mod tests {
         } else {
             "just now".to_string()
         }
-    }
-
-    #[test]
-    fn test_commit_count_no_commits() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["commit", "--allow-empty", "-m", "initial"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["branch", "-M", "main"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["branch", "feature"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
-        assert_eq!(commit_count(dir.path(), "feature", "main"), 0);
-    }
-
-    #[test]
-    fn test_commit_count_with_commits() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["commit", "--allow-empty", "-m", "initial"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["branch", "-M", "main"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["checkout", "-b", "feature"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["commit", "--allow-empty", "-m", "feat 1"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["commit", "--allow-empty", "-m", "feat 2"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
-        assert_eq!(commit_count(dir.path(), "feature", "main"), 2);
     }
 
     #[test]

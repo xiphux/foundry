@@ -371,3 +371,38 @@ fn test_status_porcelain() {
     let status = foundry::git::status_porcelain(repo.path()).unwrap();
     assert!(status.contains("untracked.txt"));
 }
+
+#[test]
+fn test_commit_count_no_commits() {
+    let repo = init_test_repo();
+    Command::new("git")
+        .args(["branch", "feature"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        foundry::git::commit_count(repo.path(), "feature", "main").unwrap(),
+        0
+    );
+}
+
+#[test]
+fn test_commit_count_with_commits() {
+    let repo = init_test_repo();
+    Command::new("git")
+        .args(["checkout", "-b", "feature"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    for msg in ["feat 1", "feat 2"] {
+        Command::new("git")
+            .args(["commit", "--allow-empty", "-m", msg])
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+    }
+    assert_eq!(
+        foundry::git::commit_count(repo.path(), "feature", "main").unwrap(),
+        2
+    );
+}

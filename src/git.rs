@@ -105,15 +105,19 @@ pub fn merge(repo_path: &Path, branch: &str) -> Result<()> {
     Ok(())
 }
 
-/// Check if a branch has any commits that aren't on the base branch.
-/// Returns true if the branch has unique commits worth preserving.
-pub fn branch_has_commits(repo_path: &Path, branch: &str, base: &str) -> Result<bool> {
+/// Count the commits a branch has beyond base.
+pub fn commit_count(repo_path: &Path, branch: &str, base: &str) -> Result<u64> {
     let output = run_git(
         repo_path,
         &["rev-list", "--count", &format!("{base}..{branch}")],
     )?;
-    let count: u64 = output.parse().unwrap_or(0);
-    Ok(count > 0)
+    Ok(output.parse().unwrap_or(0))
+}
+
+/// Check if a branch has any commits that aren't on the base branch.
+/// Returns true if the branch has unique commits worth preserving.
+pub fn branch_has_commits(repo_path: &Path, branch: &str, base: &str) -> Result<bool> {
+    Ok(commit_count(repo_path, branch, base)? > 0)
 }
 
 /// Delete a branch.
