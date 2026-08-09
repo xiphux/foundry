@@ -107,9 +107,17 @@ fn slugify(s: &str, max_len: usize) -> String {
         }
     }
 
-    // Trim to max length and strip leading/trailing hyphens
+    // Trim to max length and strip leading/trailing hyphens.
+    //
+    // `max_len` counts bytes, but `is_alphanumeric` keeps any Unicode letter,
+    // so a title in a non-Latin script reaches here as multi-byte characters.
+    // Slicing at a fixed byte offset then panics whenever a character straddles
+    // it — and issue titles come from GitHub, so that was a remote input able
+    // to abort `foundry start --issue`. Cut at the last character boundary at
+    // or before the limit instead.
     let trimmed = if result.len() > max_len {
-        &result[..max_len]
+        let end = (0..=max_len).rev().find(|&i| result.is_char_boundary(i));
+        &result[..end.unwrap_or(0)]
     } else {
         &result
     };
@@ -141,6 +149,35 @@ mod tests {
         let result = slugify(long, 30);
         assert!(result.len() <= 30);
         assert!(!result.ends_with('-'));
+    }
+
+    /// Issue titles come from GitHub, so a multi-byte character landing on the
+    /// truncation boundary must not abort the command.
+    #[test]
+    fn test_slugify_truncates_multibyte_without_panicking() {
+        let result = slugify(&"日".repeat(30), 50);
+        assert!(result.len() <= 50);
+        assert!(!result.is_empty());
+        // Cut on a character boundary: 16 chars * 3 bytes = 48 <= 50.
+        assert_eq!(result.chars().count(), 16);
+    }
+
+    /// Mixed-width text must also cut cleanly, wherever the boundary lands.
+    #[test]
+    fn test_slugify_truncates_mixed_width_title() {
+        for len in 1..40 {
+            let result = slugify("café-日本語-naïve-ünïcödé-tëst", len);
+            assert!(result.len() <= len, "len {len} produced {result:?}");
+        }
+    }
+
+    /// A title with no ASCII-representable prefix must degrade to empty rather
+    /// than panic or produce a broken slice.
+    #[test]
+    fn test_slugify_all_multibyte_tiny_limit() {
+        assert_eq!(slugify("日本語", 1), "");
+        assert_eq!(slugify("日本語", 2), "");
+        assert_eq!(slugify("日本語", 3), "日");
     }
 
     #[test]
