@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::path::Path;
-use std::process::Command;
 
-use crate::config::{self, ResolvedConfig, TemplateVars};
+use crate::config::{ResolvedConfig, TemplateVars};
 use crate::git;
 use crate::history;
 use crate::state::{Workspace, WorkspaceState};
@@ -193,38 +192,13 @@ pub fn run(
         project: project_name.into(),
     };
 
-    for script in &config.setup_scripts {
-        let resolved_command = config::resolve_template(&script.command, &template_vars)
-            .with_context(|| format!("failed to resolve template in script '{}'", script.name))?;
-
-        let working_dir = if let Some(ref wd) = script.working_dir {
-            config::resolve_template(wd, &template_vars)?
-        } else {
-            worktree_path.to_string_lossy().into()
-        };
-
-        if verbose {
-            eprintln!("Running setup script: {}...", script.name);
-        }
-
-        let status = Command::new("sh")
-            .arg("-c")
-            .arg(&resolved_command)
-            .current_dir(&working_dir)
-            .status()
-            .with_context(|| format!("failed to run setup script '{}'", script.name))?;
-
-        if !status.success() {
-            anyhow::bail!(
-                "setup script '{}' failed with exit code {}. \
-                 Worktree left in place at {}. \
-                 Fix the issue and re-run, or clean up with `foundry discard {name}`.",
-                script.name,
-                status.code().unwrap_or(-1),
-                worktree_path.display()
-            );
-        }
-    }
+    super::run_scripts(
+        &config.setup_scripts,
+        super::ScriptKind::Setup,
+        &template_vars,
+        &std::collections::HashMap::new(),
+        verbose,
+    )?;
 
     eprintln!("Restored workspace '{name}' from branch '{branch}'.");
 

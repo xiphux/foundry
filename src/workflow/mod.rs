@@ -7,10 +7,12 @@ pub mod finish;
 pub mod open;
 pub mod pr;
 pub mod restore;
+pub mod scripts;
 pub mod start;
 pub mod status;
 
 pub use cleanup::{BranchCleanup, cleanup_workspace};
+pub use scripts::{ScriptKind, run_scripts};
 
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};

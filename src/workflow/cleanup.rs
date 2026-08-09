@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::agent_hooks;
-use crate::config::{self, ResolvedConfig, TemplateVars};
+use crate::config::{ResolvedConfig, TemplateVars};
 use crate::git;
 use crate::state::WorkspaceState;
 use crate::terminal;
@@ -59,33 +59,13 @@ pub fn cleanup_workspace(
     };
 
     // Run teardown scripts
-    for script in &config.teardown_scripts {
-        let resolved_command = config::resolve_template(&script.command, &template_vars)?;
-        let working_dir = if let Some(ref wd) = script.working_dir {
-            config::resolve_template(wd, &template_vars)?
-        } else {
-            worktree_path.to_string_lossy().into()
-        };
-
-        if verbose {
-            eprintln!("Running teardown script: {}...", script.name);
-        }
-
-        let status = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&resolved_command)
-            .current_dir(&working_dir)
-            .status()
-            .with_context(|| format!("failed to run teardown script '{}'", script.name))?;
-
-        if !status.success() {
-            eprintln!(
-                "Warning: teardown script '{}' failed (exit code {}), continuing...",
-                script.name,
-                status.code().unwrap_or(-1)
-            );
-        }
-    }
+    super::run_scripts(
+        &config.teardown_scripts,
+        super::ScriptKind::Teardown,
+        &template_vars,
+        &std::collections::HashMap::new(),
+        verbose,
+    )?;
 
     // On Windows, directories can't be deleted while a process has them as cwd
     if cfg!(windows) {

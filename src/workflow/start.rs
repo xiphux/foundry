@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use std::collections::HashSet;
 use std::path::Path;
-use std::process::Command;
 
 use crate::agent_hooks;
 use crate::config::{self, ResolvedConfig, TemplateVars};
@@ -189,48 +188,19 @@ pub fn run(
     let (immediate, deferred_scripts): (Vec<_>, Vec<_>) =
         config.setup_scripts.iter().partition(|s| !s.deferred);
 
-    // Run immediate scripts before opening the workspace
-    for script in &immediate {
-        let resolved_command = config::resolve_template(&script.command, &template_vars)
-            .with_context(|| format!("failed to resolve template in script '{}'", script.name))?;
-
-        let working_dir = if let Some(ref wd) = script.working_dir {
-            config::resolve_template(wd, &template_vars)?
-        } else {
-            worktree_path.to_string_lossy().into()
-        };
-
-        if verbose {
-            eprintln!("Running setup script: {}...", script.name);
-        }
-
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c")
-            .arg(&resolved_command)
-            .current_dir(&working_dir);
-
-        // Inject allocated ports as environment variables for setup scripts
-        if let Some(ws) = state.find_by_worktree_path(&worktree_path.to_string_lossy()) {
-            for (port_name, port_value) in &ws.allocated_ports {
-                cmd.env(port_name, port_value.to_string());
-            }
-        }
-
-        let status = cmd
-            .status()
-            .with_context(|| format!("failed to run setup script '{}'", script.name))?;
-
-        if !status.success() {
-            anyhow::bail!(
-                "setup script '{}' failed with exit code {}. \
-                 Worktree left in place at {}. \
-                 Fix the issue and re-run `foundry start {name}`, or clean up with `foundry discard {name}`.",
-                script.name,
-                status.code().unwrap_or(-1),
-                worktree_path.display()
-            );
-        }
-    }
+    // Run immediate scripts before opening the workspace, with the workspace's
+    // allocated ports exported so a setup script binds what the panes will use.
+    let script_env = state
+        .find_by_worktree_path(&worktree_path.to_string_lossy())
+        .map(|ws| ws.allocated_ports.clone())
+        .unwrap_or_default();
+    super::run_scripts(
+        immediate.iter().copied(),
+        super::ScriptKind::Setup,
+        &template_vars,
+        &script_env,
+        verbose,
+    )?;
 
     // Resolve deferred setup script commands
     let mut deferred_setup_commands = Vec::new();
