@@ -430,7 +430,23 @@ By default, foundry uses the safest available permission level for each agent:
 - **Ask for permission** (Aider, Copilot, Kiro, OpenCode, Crush, Nanocoder): The agent launches with standard permissions and prompts the user before taking actions.
 - **No permission prompts** (Pi): Pi executes tools without approval prompts by design and offers no flag to change this. Foundry runs Pi inside the isolated worktree; for stronger isolation, Pi's docs recommend running it in a container.
 
-Setting `unrestricted_permissions = true` in your config bumps agents to their most permissive mode — auto-approving all actions without sandbox constraints. Use with caution.
+Setting `unrestricted_permissions = true` in your config bumps agents to their most permissive mode — auto-approving all actions without sandbox constraints. Use with caution. This key is read from the global config only: a project's `.foundry.toml` can turn it *off*, but cannot turn it on.
+
+#### What worktree scoping is and isn't
+
+For Claude, foundry writes worktree-scoped rules into the workspace's
+`.claude/settings.local.json` — allowing reads and writes under the worktree,
+and denying `git push` and `git checkout main`.
+
+**Treat these as guardrails against accident, not as a security boundary.**
+They stop an agent from wandering out of its workspace by mistake. They are not
+a sandbox, and they do not contain an agent that is actively trying to get out:
+a deny rule like `Bash(git push*)` is pattern matching on the command string, so
+`git -C <path> push`, extra whitespace, a shell alias, or writing to `.git`
+directly all sidestep it.
+
+For actual isolation, use an agent with OS-level sandboxing (Codex, Every Code,
+Gemini) or run the agent in a container.
 
 ### Agent Details
 

@@ -48,3 +48,26 @@ jobs:
 
       - name: Build release
         run: cargo build --release
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo-audit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: ${{ runner.os }}-cargo-audit
+
+      - name: Install cargo-audit
+        run: which cargo-audit || cargo install cargo-audit --locked
+
+      # Checks Cargo.lock against the RustSec advisory database. Runs as its
+      # own job so a new advisory against a dependency does not read as a test
+      # failure, and so it reports even when the build matrix is red.
+      - name: Audit dependencies
+        run: cargo audit --deny warnings
