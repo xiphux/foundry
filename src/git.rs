@@ -39,6 +39,21 @@ fn run_git_inner(repo_path: &Path, args: &[&str], no_optional_locks: bool) -> Re
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Reject a revision operand that git would read as an option.
+///
+/// Most user-supplied operands get an explicit `--` before them, but revision
+/// arguments cannot: for `merge`, `rev-list`, `log` and `diff`, `--` separates
+/// revisions from *paths*, so putting it first makes git treat the revision as
+/// a pathspec. `git log --oneline -- main..feature` does not error — it
+/// silently reports nothing, having looked for a file called `main..feature`.
+/// So those operands are checked instead of delimited.
+fn reject_option_like(value: &str, what: &str) -> Result<()> {
+    if value.starts_with('-') {
+        bail!("{what} cannot start with '-': {value:?}");
+    }
+    Ok(())
+}
+
 pub fn detect_main_branch(repo_path: &Path) -> Result<String> {
     if let Ok(output) = run_git(repo_path, &["symbolic-ref", "refs/remotes/origin/HEAD"])
         && let Some(branch) = output.strip_prefix("refs/remotes/origin/")
@@ -58,29 +73,30 @@ pub fn detect_main_branch(repo_path: &Path) -> Result<String> {
 }
 
 pub fn create_branch(repo_path: &Path, name: &str) -> Result<()> {
-    run_git(repo_path, &["branch", name])?;
+    run_git(repo_path, &["branch", "--", name])?;
     Ok(())
 }
 
 pub fn create_worktree(repo_path: &Path, worktree_path: &Path, branch: &str) -> Result<()> {
     let path_str = worktree_path.to_str().context("invalid worktree path")?;
-    run_git(repo_path, &["worktree", "add", path_str, branch])?;
+    run_git(repo_path, &["worktree", "add", "--", path_str, branch])?;
     Ok(())
 }
 
 pub fn remove_worktree(repo_path: &Path, worktree_path: &Path, force: bool) -> Result<()> {
     let path_str = worktree_path.to_str().context("invalid worktree path")?;
-    let mut args = vec!["worktree", "remove", path_str];
+    let mut args = vec!["worktree", "remove"];
     if force {
         args.push("--force");
     }
+    args.extend(["--", path_str]);
     run_git(repo_path, &args)?;
     Ok(())
 }
 
 /// Fetch from a remote.
 pub fn fetch(repo_path: &Path, remote: &str) -> Result<()> {
-    run_git(repo_path, &["fetch", remote])?;
+    run_git(repo_path, &["fetch", "--", remote])?;
     Ok(())
 }
 
@@ -88,16 +104,19 @@ pub fn fetch(repo_path: &Path, remote: &str) -> Result<()> {
 /// Fails if the merge is not a fast-forward (e.g., local and remote have diverged).
 pub fn ff_to_remote(repo_path: &Path, remote: &str, branch: &str) -> Result<()> {
     let remote_ref = format!("{remote}/{branch}");
+    reject_option_like(&remote_ref, "merge target")?;
     run_git(repo_path, &["merge", "--ff-only", &remote_ref])?;
     Ok(())
 }
 
 pub fn merge_ff_only(repo_path: &Path, branch: &str) -> Result<()> {
+    reject_option_like(branch, "merge target")?;
     run_git(repo_path, &["merge", "--ff-only", branch])?;
     Ok(())
 }
 
 pub fn merge(repo_path: &Path, branch: &str) -> Result<()> {
+    reject_option_like(branch, "merge target")?;
     let result = run_git(repo_path, &["merge", branch]);
     if let Err(e) = result {
         let _ = run_git(repo_path, &["merge", "--abort"]);
@@ -108,6 +127,8 @@ pub fn merge(repo_path: &Path, branch: &str) -> Result<()> {
 
 /// Count the commits a branch has beyond base.
 pub fn commit_count(repo_path: &Path, branch: &str, base: &str) -> Result<u64> {
+    reject_option_like(branch, "revision")?;
+    reject_option_like(base, "revision")?;
     let output = run_git(
         repo_path,
         &["rev-list", "--count", &format!("{base}..{branch}")],
@@ -123,7 +144,7 @@ pub fn branch_has_commits(repo_path: &Path, branch: &str, base: &str) -> Result<
 
 /// Delete a branch.
 pub fn delete_branch(repo_path: &Path, branch: &str) -> Result<()> {
-    run_git(repo_path, &["branch", "-D", branch])?;
+    run_git(repo_path, &["branch", "-D", "--", branch])?;
     Ok(())
 }
 
@@ -131,7 +152,7 @@ pub fn archive_branch(repo_path: &Path, branch: &str, prefix: &str) -> Result<()
     let date = chrono::Utc::now().format("%Y%m%d").to_string();
     let archived = format!("{prefix}/{branch}-{date}");
 
-    let exists = run_git(repo_path, &["branch", "--list", &archived])
+    let exists = run_git(repo_path, &["branch", "--list", "--", &archived])
         .map(|out| !out.is_empty())
         .unwrap_or(false);
 
@@ -142,7 +163,7 @@ pub fn archive_branch(repo_path: &Path, branch: &str, prefix: &str) -> Result<()
         archived
     };
 
-    run_git(repo_path, &["branch", "-m", branch, &final_name])?;
+    run_git(repo_path, &["branch", "-m", "--", branch, &final_name])?;
     Ok(())
 }
 
@@ -151,7 +172,13 @@ pub fn list_branches_with_prefix(repo_path: &Path, prefix: &str) -> Result<Vec<S
     let pattern = format!("{prefix}*");
     let output = run_git(
         repo_path,
-        &["branch", "--list", "--format=%(refname:short)", &pattern],
+        &[
+            "branch",
+            "--list",
+            "--format=%(refname:short)",
+            "--",
+            &pattern,
+        ],
     )?;
     Ok(output
         .lines()
@@ -164,7 +191,7 @@ pub fn list_branches_with_prefix(repo_path: &Path, prefix: &str) -> Result<Vec<S
 pub fn branch_exists(repo_path: &Path, name: &str) -> Result<bool> {
     let output = run_git(
         repo_path,
-        &["branch", "--list", "--format=%(refname:short)", name],
+        &["branch", "--list", "--format=%(refname:short)", "--", name],
     )?;
     Ok(!output.is_empty())
 }
@@ -216,6 +243,8 @@ pub fn repo_root(path: &Path) -> Result<std::path::PathBuf> {
 
 /// Get the commit log between base and branch as one-line summaries.
 pub fn log_commits(repo_path: &Path, base: &str, branch: &str) -> Result<String> {
+    reject_option_like(base, "revision")?;
+    reject_option_like(branch, "revision")?;
     run_git(
         repo_path,
         &["log", "--oneline", &format!("{base}..{branch}")],
@@ -265,6 +294,8 @@ fn stream_git(repo_path: &Path, args: &[&str]) -> Result<()> {
 
 /// Stream the diff of committed changes between base and branch to stdout.
 pub fn stream_diff_committed(repo_path: &Path, base: &str, branch: &str, stat: bool) -> Result<()> {
+    reject_option_like(base, "revision")?;
+    reject_option_like(branch, "revision")?;
     let range = format!("{base}...{branch}");
     if stat {
         stream_git(repo_path, &["diff", "--stat", &range])
@@ -301,11 +332,13 @@ pub fn list_remotes(repo_path: &Path) -> Result<Vec<String>> {
 
 /// Get the URL of a remote.
 pub fn remote_url(repo_path: &Path, remote: &str) -> Result<String> {
-    run_git(repo_path, &["remote", "get-url", remote])
+    run_git(repo_path, &["remote", "get-url", "--", remote])
 }
 
 /// Push a branch to a remote. Uses --set-upstream on first push.
 pub fn push_branch(repo_path: &Path, remote: &str, branch: &str) -> Result<()> {
+    reject_option_like(remote, "remote name")?;
+    reject_option_like(branch, "branch name")?;
     run_git(repo_path, &["push", "-u", remote, branch])?;
     Ok(())
 }

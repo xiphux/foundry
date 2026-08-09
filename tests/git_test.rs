@@ -344,3 +344,55 @@ fn test_commit_count_with_commits() {
         2
     );
 }
+
+/// Revision operands cannot be delimited with `--` (git would read them as
+/// pathspecs), so they are rejected up front instead. A silent wrong answer is
+/// the failure mode being avoided: `git log --oneline -- main..feature`
+/// succeeds and reports nothing.
+#[test]
+fn test_revision_operands_reject_leading_hyphen() {
+    let repo = init_test_repo();
+
+    assert!(foundry::git::merge(repo.path(), "--exec=touch /tmp/x").is_err());
+    assert!(foundry::git::merge_ff_only(repo.path(), "-x").is_err());
+    assert!(foundry::git::commit_count(repo.path(), "-x", "main").is_err());
+    assert!(foundry::git::commit_count(repo.path(), "main", "-x").is_err());
+    assert!(foundry::git::log_commits(repo.path(), "-x", "main").is_err());
+    assert!(foundry::git::stream_diff_committed(repo.path(), "-x", "main", true).is_err());
+    assert!(foundry::git::push_branch(repo.path(), "-x", "main").is_err());
+}
+
+/// The guard must not reject ordinary refs.
+#[test]
+fn test_revision_operands_allow_normal_refs() {
+    let repo = init_test_repo();
+    // Same ref both sides: zero commits, but importantly not an error.
+    assert_eq!(
+        foundry::git::commit_count(repo.path(), "main", "main").unwrap(),
+        0
+    );
+    assert!(foundry::git::log_commits(repo.path(), "main", "main").is_ok());
+}
+
+/// Operands that do take `--` must still work for names containing characters
+/// git would otherwise have to guess about.
+#[test]
+fn test_branch_operations_survive_the_end_of_options_delimiter() {
+    let repo = init_test_repo();
+
+    foundry::git::create_branch(repo.path(), "feature/x").unwrap();
+    assert!(foundry::git::branch_exists(repo.path(), "feature/x").unwrap());
+
+    foundry::git::archive_branch(repo.path(), "feature/x", "archive").unwrap();
+    assert!(!foundry::git::branch_exists(repo.path(), "feature/x").unwrap());
+
+    let archived = foundry::git::list_branches_with_prefix(repo.path(), "archive/").unwrap();
+    assert_eq!(archived.len(), 1, "got {archived:?}");
+
+    foundry::git::delete_branch(repo.path(), &archived[0]).unwrap();
+    assert!(
+        foundry::git::list_branches_with_prefix(repo.path(), "archive/")
+            .unwrap()
+            .is_empty()
+    );
+}
