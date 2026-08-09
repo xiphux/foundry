@@ -29,10 +29,12 @@ pub fn run(
 
     let main_branch = git::detect_main_branch(source_path)?;
 
-    // Gather data
+    // Gather data. One porcelain call answers both "is anything uncommitted?"
+    // and "what changed?" — asking separately ran the identical command twice.
     let commit_log = git::log_commits(source_path, &main_branch, branch).unwrap_or_default();
     let commit_count = commit_log.lines().filter(|l| !l.is_empty()).count();
-    let uncommitted_status = git::has_uncommitted_changes(&worktree_path).unwrap_or(false);
+    let porcelain = git::status_porcelain(&worktree_path).unwrap_or_default();
+    let uncommitted_status = !porcelain.is_empty();
 
     // Header
     if commit_count == 0 && !uncommitted_status {
@@ -63,7 +65,6 @@ pub fn run(
 
     // Uncommitted section
     if uncommitted_status {
-        let porcelain = git::status_porcelain(&worktree_path).unwrap_or_default();
         println!("Uncommitted:");
         for line in porcelain.lines() {
             if !line.is_empty() {
@@ -73,21 +74,16 @@ pub fn run(
         println!();
     }
 
-    // Diff output
-    let committed_diff =
-        git::diff_committed(source_path, &main_branch, branch, stat).unwrap_or_default();
-    let uncommitted_diff = git::diff_uncommitted(&worktree_path, stat).unwrap_or_default();
-
-    if !committed_diff.is_empty() || !uncommitted_diff.is_empty() {
-        if !committed_diff.is_empty() {
-            println!("{committed_diff}");
+    // Diff output, streamed rather than buffered — a large branch diff would
+    // otherwise be held in memory several times over before anything printed.
+    if commit_count > 0 {
+        let _ = git::stream_diff_committed(source_path, &main_branch, branch, stat);
+    }
+    if uncommitted_status {
+        if commit_count > 0 {
+            println!();
         }
-        if !uncommitted_diff.is_empty() {
-            if !committed_diff.is_empty() {
-                println!();
-            }
-            println!("{uncommitted_diff}");
-        }
+        let _ = git::stream_diff_uncommitted(&worktree_path, stat);
     }
 
     Ok(())

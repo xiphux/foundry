@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use std::io::Write as _;
 use std::path::Path;
 use std::process::Command;
 
@@ -212,14 +213,48 @@ pub fn log_commits(repo_path: &Path, base: &str, branch: &str) -> Result<String>
     )
 }
 
-/// Get the diff of committed changes between base and branch (three-dot merge-base diff).
-/// If `stat` is true, returns `--stat` summary instead of full patch.
-pub fn diff_committed(repo_path: &Path, base: &str, branch: &str, stat: bool) -> Result<String> {
+/// Stream a git command's stdout straight through to ours.
+///
+/// Capturing output would materialize the whole patch in memory — once in the
+/// child's pipe buffer, again as a String, and again for the lossy UTF-8
+/// conversion — before a single byte reached the terminal. Diffs are unbounded
+/// in size, so they are streamed instead.
+fn stream_git(repo_path: &Path, args: &[&str]) -> Result<()> {
+    // The child writes to fd 1 directly while our own stdout is buffered, so
+    // anything already queued must be flushed or it lands after the diff.
+    std::io::stdout().flush().ok();
+
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(args)
+        .status()
+        .context("failed to execute git")?;
+
+    if !status.success() {
+        bail!("git {} failed", args.join(" "));
+    }
+    Ok(())
+}
+
+/// Stream the diff of committed changes between base and branch to stdout.
+pub fn stream_diff_committed(repo_path: &Path, base: &str, branch: &str, stat: bool) -> Result<()> {
     let range = format!("{base}...{branch}");
     if stat {
-        run_git(repo_path, &["diff", "--stat", &range])
+        stream_git(repo_path, &["diff", "--stat", &range])
     } else {
-        run_git(repo_path, &["diff", &range])
+        stream_git(repo_path, &["diff", &range])
+    }
+}
+
+/// Stream the uncommitted changes (staged, then unstaged) in a worktree to stdout.
+pub fn stream_diff_uncommitted(worktree_path: &Path, stat: bool) -> Result<()> {
+    if stat {
+        stream_git(worktree_path, &["diff", "--cached", "--stat"])?;
+        stream_git(worktree_path, &["diff", "--stat"])
+    } else {
+        stream_git(worktree_path, &["diff", "--cached"])?;
+        stream_git(worktree_path, &["diff"])
     }
 }
 
@@ -242,31 +277,4 @@ pub fn remote_url(repo_path: &Path, remote: &str) -> Result<String> {
 pub fn push_branch(repo_path: &Path, remote: &str, branch: &str) -> Result<()> {
     run_git(repo_path, &["push", "-u", remote, branch])?;
     Ok(())
-}
-
-/// Get the uncommitted changes (both staged and unstaged) in a worktree.
-/// If `stat` is true, returns `--stat` summary instead of full patch.
-pub fn diff_uncommitted(worktree_path: &Path, stat: bool) -> Result<String> {
-    // Unstaged changes
-    let unstaged = if stat {
-        run_git(worktree_path, &["diff", "--stat"])?
-    } else {
-        run_git(worktree_path, &["diff"])?
-    };
-
-    // Staged changes
-    let staged = if stat {
-        run_git(worktree_path, &["diff", "--cached", "--stat"])?
-    } else {
-        run_git(worktree_path, &["diff", "--cached"])?
-    };
-
-    let mut parts = Vec::new();
-    if !staged.is_empty() {
-        parts.push(staged);
-    }
-    if !unstaged.is_empty() {
-        parts.push(unstaged);
-    }
-    Ok(parts.join("\n"))
 }

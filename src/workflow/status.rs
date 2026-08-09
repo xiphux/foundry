@@ -283,8 +283,6 @@ fn activity_text(info: &agent_hooks::AgentStatusInfo) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     /// Format a Unix timestamp as a human-readable "X ago" string.
     fn format_time_ago(timestamp: i64) -> String {
         let now = chrono::Utc::now().timestamp();
