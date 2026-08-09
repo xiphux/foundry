@@ -102,39 +102,9 @@ impl TrustStore {
 fn key_for(repo_root: &Path) -> String {
     let project_root =
         crate::git::main_repo_root(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
-    canonicalize_existing_prefix(&project_root)
+    crate::fs_util::canonicalize_existing_prefix(&project_root)
         .to_string_lossy()
         .into_owned()
-}
-
-/// Canonicalize as much of `path` as still exists, keeping the rest verbatim.
-///
-/// A plain `canonicalize` fails outright on a path that no longer exists, which
-/// would leave an entry unrevocable once its repository is deleted — the case
-/// that most needs revoking. On macOS that bites even for a path the user
-/// typed correctly, because the key was stored through the `/var` ->
-/// `/private/var` symlink and resolving it again requires the directory to
-/// still be there.
-fn canonicalize_existing_prefix(path: &Path) -> PathBuf {
-    if let Ok(resolved) = std::fs::canonicalize(path) {
-        return resolved;
-    }
-
-    // Walk up until something resolves, then re-append what was trimmed.
-    let mut trimmed: Vec<std::ffi::OsString> = Vec::new();
-    let mut cursor = path;
-    while let (Some(parent), Some(name)) = (cursor.parent(), cursor.file_name()) {
-        trimmed.push(name.to_os_string());
-        if let Ok(base) = std::fs::canonicalize(parent) {
-            return trimmed.iter().rev().fold(base, |mut acc, part| {
-                acc.push(part);
-                acc
-            });
-        }
-        cursor = parent;
-    }
-
-    path.to_path_buf()
 }
 
 pub fn trust_store_path() -> Result<PathBuf> {

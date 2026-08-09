@@ -73,11 +73,27 @@ impl Registry {
             .collect()
     }
 
+    /// Find the project registered at `path`.
+    ///
+    /// Both sides are canonicalized before comparing. `projects add` stores a
+    /// canonicalized path while `resolve_project` supplies whatever git reports
+    /// for the current repo, so a raw `==` made the two disagree wherever a
+    /// symlink or a non-normalized spelling sat in between — on macOS, `/var`
+    /// against `/private/var` is enough. The failure was not a clean miss
+    /// either: an unmatched path falls through to auto-registration, which then
+    /// bails with "already registered to a different path" and leaves the user
+    /// with no way to proceed but to rename their project.
+    ///
+    /// This is the same normalization the trust store keys on, for the same
+    /// reason — both are answering "which project is this?".
     pub fn find_by_path(&self, path: &Path) -> Option<String> {
+        let target = crate::fs_util::canonicalize_existing_prefix(path);
         self.inner
             .projects
             .iter()
-            .find(|(_, v)| v.path == path)
+            .find(|(_, v)| {
+                v.path == path || crate::fs_util::canonicalize_existing_prefix(&v.path) == target
+            })
             .map(|(k, _)| k.clone())
     }
 }
