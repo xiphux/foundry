@@ -50,3 +50,43 @@ fn test_detect_terminal_is_stable() {
     let second = foundry::terminal::detect_terminal().unwrap();
     assert_eq!(first.supports_run_in_pane(), second.supports_run_in_pane());
 }
+
+/// `open --all` pauses between workspaces only for backends that need the
+/// window manager to settle. Socket/CLI-driven backends are synchronous, so a
+/// hardcoded pause there was pure dead time.
+#[test]
+fn test_settle_delay_only_for_applescript_backends() {
+    use foundry::terminal::TerminalBackend as _;
+
+    assert!(
+        !foundry::terminal::ghostty::GhosttyBackend
+            .settle_delay()
+            .is_zero()
+    );
+    assert!(
+        !foundry::terminal::iterm2::Iterm2Backend
+            .settle_delay()
+            .is_zero()
+    );
+
+    assert!(
+        foundry::terminal::tmux::TmuxBackend
+            .settle_delay()
+            .is_zero()
+    );
+    assert!(
+        foundry::terminal::zellij::ZellijBackend
+            .settle_delay()
+            .is_zero()
+    );
+    assert!(
+        foundry::terminal::wezterm::WeztermBackend
+            .settle_delay()
+            .is_zero()
+    );
+    assert!(
+        foundry::terminal::bare::BareBackend::new()
+            .settle_delay()
+            .is_zero()
+    );
+}

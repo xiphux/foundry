@@ -160,6 +160,11 @@ fn main() -> Result<()> {
                 if workspaces.is_empty() {
                     println!("No active workspaces for project '{project_name}'.");
                 } else {
+                    // Only the AppleScript-driven backends need a pause between
+                    // opens; the rest are synchronous and were sleeping for
+                    // nothing. Detection is memoized, so this is cheap.
+                    let settle = foundry::terminal::detect_terminal()?.settle_delay();
+
                     for (i, ws_name) in workspaces.iter().enumerate() {
                         let worktree_path = resolved.worktree_dir.join(&project_name).join(ws_name);
                         if !worktree_path.exists() {
@@ -186,8 +191,8 @@ fn main() -> Result<()> {
                         )?;
 
                         // Brief pause between opens to let the terminal settle
-                        if i < workspaces.len() - 1 {
-                            std::thread::sleep(std::time::Duration::from_millis(500));
+                        if i < workspaces.len() - 1 && !settle.is_zero() {
+                            std::thread::sleep(settle);
                         }
                     }
                     eprintln!("Opened {} workspace(s).", workspaces.len());

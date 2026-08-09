@@ -211,6 +211,10 @@ end tell"#
 }
 
 impl TerminalBackend for GhosttyBackend {
+    fn settle_delay(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(500)
+    }
+
     fn open_workspace(&self, path: &Path, panes: &[PaneSpec], verbose: bool) -> Result<String> {
         // Step 1: Create a new tab.
         // Ghostty 1.x has a bug where `new tab` succeeds but throws a spurious error,

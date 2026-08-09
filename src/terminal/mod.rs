@@ -108,6 +108,17 @@ pub trait TerminalBackend {
         true
     }
 
+    /// How long to pause after opening a workspace before opening the next one
+    /// in a batch (`open --all`).
+    ///
+    /// AppleScript-driven backends drive the terminal through the window
+    /// manager and need it to settle before the next tab is created. Backends
+    /// that talk to their terminal over a socket or CLI are synchronous and
+    /// need no pause at all.
+    fn settle_delay(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
     /// Open a complete workspace layout with multiple panes.
     /// Returns an identifier for the tab that can be used with `close_tab`.
     fn open_workspace(&self, path: &Path, panes: &[PaneSpec], verbose: bool) -> Result<String>;

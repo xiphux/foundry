@@ -125,6 +125,10 @@ impl Iterm2Backend {
 }
 
 impl TerminalBackend for Iterm2Backend {
+    fn settle_delay(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(500)
+    }
+
     fn open_workspace(&self, path: &Path, panes: &[PaneSpec], verbose: bool) -> Result<String> {
         if verbose {
             eprintln!("Opening new iTerm2 tab...");
