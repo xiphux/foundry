@@ -125,7 +125,8 @@ impl ZellijBackend {
         {
             let mut full_cmd = String::new();
             for (k, v) in &pane.env {
-                full_cmd.push_str(&format!("export {k}='{}'; ", v.replace('\'', "'\\''")));
+                full_cmd.push_str(&super::shell_export(k, v));
+                full_cmd.push_str("; ");
             }
             full_cmd.push_str(cmd);
             let escaped = escape_kdl(&full_cmd);

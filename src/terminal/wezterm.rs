@@ -158,7 +158,7 @@ impl TerminalBackend for WeztermBackend {
             if let Some(&pane_id) = pane_ids.get(&pane.name) {
                 // Export environment variables
                 for (k, v) in &pane.env {
-                    Self::send_text(pane_id, &format!("export {k}='{v}'"))?;
+                    Self::send_text(pane_id, &super::shell_export(k, v))?;
                 }
 
                 // Run the pane command

@@ -14,6 +14,25 @@ use std::sync::OnceLock;
 
 use crate::config::types::SplitDirection;
 
+/// Escape a value for inclusion in a POSIX single-quoted string.
+///
+/// Closes the quote, emits an escaped literal quote, and reopens — the only
+/// way to represent `'` inside `'...'`, since a single-quoted shell string has
+/// no escape character of its own.
+pub(crate) fn escape_single_quoted(value: &str) -> String {
+    value.replace('\'', "'\\''")
+}
+
+/// Render `export KEY='value'` for a POSIX shell.
+///
+/// Backends assemble env exports by hand into a shell string, and every one of
+/// them needs the same quoting. Sharing it keeps them from drifting apart: the
+/// WezTerm backend interpolated the value raw for a while, which the others
+/// never did.
+pub(crate) fn shell_export(key: &str, value: &str) -> String {
+    format!("export {key}='{}'", escape_single_quoted(value))
+}
+
 /// A pane to be opened in the terminal workspace.
 #[derive(Debug, Clone)]
 pub struct PaneSpec {
@@ -124,4 +143,52 @@ pub trait TerminalBackend {
     /// The pane is identified by name — the backend finds the terminal
     /// whose working directory matches the tab_id and selects the right pane.
     fn run_in_pane(&self, tab_id: &str, pane_index: usize, command: &str) -> Result<()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_export_quotes_a_plain_value() {
+        assert_eq!(shell_export("PORT", "3000"), "export PORT='3000'");
+    }
+
+    /// A quote in the value must not end the quoted string. Every backend that
+    /// builds env exports by hand depends on this.
+    #[test]
+    fn shell_export_escapes_single_quotes() {
+        assert_eq!(
+            shell_export("MSG", "it's here"),
+            r"export MSG='it'\''s here'"
+        );
+    }
+
+    /// The classic break-out attempt has to stay inside the quotes.
+    #[test]
+    fn shell_export_neutralises_a_command_injection_attempt() {
+        let exported = shell_export("X", "'; touch /tmp/pwned; echo '");
+        assert_eq!(exported, r"export X=''\''; touch /tmp/pwned; echo '\'''");
+
+        // Round-trip through a real shell: the value must arrive intact and
+        // the injected command must not have run.
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("{exported}; printf %s \"$X\""))
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "'; touch /tmp/pwned; echo '"
+        );
+    }
+
+    #[test]
+    fn escape_single_quoted_leaves_other_metacharacters_alone() {
+        // Safe inside single quotes, so they must pass through unchanged.
+        assert_eq!(
+            escape_single_quoted("$(id) `id` \\ \"x\""),
+            "$(id) `id` \\ \"x\""
+        );
+    }
 }

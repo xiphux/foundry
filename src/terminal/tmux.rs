@@ -91,7 +91,7 @@ impl TerminalBackend for TmuxBackend {
             .map(|p| {
                 p.env
                     .iter()
-                    .map(|(k, v)| format!("export {k}='{}'", v.replace('\'', "'\\''")))
+                    .map(|(k, v)| super::shell_export(k, v))
                     .collect::<Vec<_>>()
                     .join("; ")
             })
@@ -162,7 +162,7 @@ impl TerminalBackend for TmuxBackend {
             let env_exports: String = pane
                 .env
                 .iter()
-                .map(|(k, v)| format!("export {k}='{}'", v.replace('\'', "'\\''")))
+                .map(|(k, v)| super::shell_export(k, v))
                 .collect::<Vec<_>>()
                 .join("; ");
 

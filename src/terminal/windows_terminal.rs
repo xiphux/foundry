@@ -181,8 +181,7 @@ impl WindowsTerminalBackend {
 
         // Set environment variables.
         for (k, v) in &pane.env {
-            let escaped = v.replace('\'', "'\\''");
-            parts.push(format!("export {k}='{escaped}'"));
+            parts.push(super::shell_export(k, v));
         }
 
         if let Some(ref cmd) = pane.command {
