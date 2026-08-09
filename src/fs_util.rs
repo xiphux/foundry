@@ -1,5 +1,53 @@
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Create (if needed) and return `~/.foundry/run/<name>`, owner-only.
+///
+/// Runtime scratch files — the Zellij layout, the Windows Terminal pid files —
+/// used to live at a predictable path under `std::env::temp_dir()`. On Linux
+/// that is `/tmp`, mode 1777, and the names were fully predictable: the
+/// workspace path hashed with `DefaultHasher`, which is seeded with fixed keys
+/// and so is stable across processes and runs. Any local user could therefore
+/// pre-create the file as a symlink and have foundry write through it, or win
+/// the race between foundry writing the file and the terminal reading it and
+/// substitute their own contents. Both files are then acted on: the layout
+/// names commands for Zellij to run, and the pid files name processes to kill.
+///
+/// `~/.foundry` is already the private per-user directory for foundry's state,
+/// so putting runtime files there removes the shared-directory problem
+/// entirely rather than trying to write into `/tmp` safely.
+pub fn runtime_subdir(name: &str) -> Result<PathBuf> {
+    let run_dir = crate::config::foundry_dir()?.join("run");
+    create_private_dir(&run_dir)?;
+    let dir = run_dir.join(name);
+    create_private_dir(&dir)?;
+    Ok(dir)
+}
+
+/// Create a directory that only its owner may access.
+///
+/// The mode is applied after creation rather than relying on the process
+/// umask, and re-applied to an existing directory whose permissions are too
+/// broad — otherwise a directory created by an older version, or by a user
+/// with a permissive umask, would silently stay group- or world-accessible.
+fn create_private_dir(dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("failed to create {}", dir.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(dir)
+            .with_context(|| format!("failed to stat {}", dir.display()))?
+            .permissions();
+        if perms.mode() & 0o077 != 0 {
+            perms.set_mode(0o700);
+            std::fs::set_permissions(dir, perms)
+                .with_context(|| format!("failed to restrict permissions on {}", dir.display()))?;
+        }
+    }
+
+    Ok(())
+}
 
 /// Write `contents` to `path` atomically.
 ///
@@ -83,6 +131,38 @@ mod tests {
             .filter(|n| n != "state.toml")
             .collect();
         assert!(leftovers.is_empty(), "stray files: {leftovers:?}");
+    }
+
+    /// Runtime scratch must never be readable by other users on the box.
+    #[cfg(unix)]
+    #[test]
+    fn runtime_subdir_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let nested = dir.path().join("run").join("zellij-layouts");
+        create_private_dir(&nested).unwrap();
+
+        let mode = std::fs::metadata(&nested).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700, "got mode {:o}", mode & 0o777);
+    }
+
+    /// A directory left group- or world-accessible by an earlier version must
+    /// be tightened, not accepted as-is.
+    #[cfg(unix)]
+    #[test]
+    fn create_private_dir_tightens_an_existing_loose_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let loose = dir.path().join("loose");
+        std::fs::create_dir_all(&loose).unwrap();
+        std::fs::set_permissions(&loose, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+        create_private_dir(&loose).unwrap();
+
+        let mode = std::fs::metadata(&loose).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700, "got mode {:o}", mode & 0o777);
     }
 
     /// Two processes must not share a scratch path.

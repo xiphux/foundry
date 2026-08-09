@@ -218,16 +218,14 @@ impl WindowsTerminalBackend {
         }
     }
 
-    /// Create the temp directory used for PID files and command files.
+    /// Create the private directory used for PID files and command files.
     fn workspace_dir(path: &Path) -> Result<std::path::PathBuf> {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         path.hash(&mut hasher);
-        let dir_name = format!("foundry-{:x}", hasher.finish());
-        let dir = std::env::temp_dir().join(dir_name);
-        std::fs::create_dir_all(&dir)
-            .context("failed to create temp directory for workspace state")?;
-        Ok(dir)
+        let dir_name = format!("wt-{:x}", hasher.finish());
+        crate::fs_util::runtime_subdir(&dir_name)
+            .context("failed to create runtime directory for workspace state")
     }
 
     /// Convert a SplitDirection to the corresponding `move-focus` direction string.

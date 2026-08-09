@@ -155,8 +155,7 @@ impl TerminalBackend for ZellijBackend {
 
         // Write a temp layout file
         let layout = Self::build_layout(path, panes)?;
-        let layout_dir = std::env::temp_dir().join("foundry-zellij-layouts");
-        std::fs::create_dir_all(&layout_dir)?;
+        let layout_dir = crate::fs_util::runtime_subdir("zellij-layouts")?;
         let layout_path = layout_dir.join(format!("{session}.kdl"));
         std::fs::write(&layout_path, &layout)?;
 
