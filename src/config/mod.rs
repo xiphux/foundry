@@ -226,9 +226,10 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
             .map(|p| p.scripts.teardown.clone())
             .unwrap_or_default(),
         issue_prompt: global.issue_prompt.clone(),
-        unrestricted_permissions: project
-            .and_then(|p| p.unrestricted_permissions)
-            .unwrap_or(global.unrestricted_permissions),
+        unrestricted_permissions: resolve_unrestricted_permissions(
+            global.unrestricted_permissions,
+            project.and_then(|p| p.unrestricted_permissions),
+        ),
         editor: global.editor.clone(),
         shell: project
             .and_then(|p| p.shell.clone())
@@ -241,6 +242,26 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
     warn_agent_in_command(&resolved.panes);
 
     resolved
+}
+
+/// Resolve `unrestricted_permissions` from the global and project settings.
+///
+/// Unlike every other scalar, the project value may only *narrow* this one.
+/// `.foundry.toml` is checked into the repository, so letting it set the flag
+/// to `true` would let repo content switch the agent into its most permissive
+/// mode — `--dangerously-skip-permissions`, `--yolo`, `--trust-all-tools` —
+/// behind the back of a user whose own config asked for restricted operation.
+/// A project turning the flag *off* is a safe direction and still honoured.
+fn resolve_unrestricted_permissions(global: bool, project: Option<bool>) -> bool {
+    if !global && project == Some(true) {
+        eprintln!(
+            "Warning: .foundry.toml sets `unrestricted_permissions = true`, but your global \
+             config does not. Ignoring — a project config cannot grant the agent more \
+             permission than you configured. Set it in ~/.foundry/config.toml if you want it."
+        );
+        return false;
+    }
+    global && project.unwrap_or(true)
 }
 
 /// Expand ~ to home directory.
@@ -280,6 +301,36 @@ mod tests {
     fn expand_tilde_in_middle_of_path() {
         let result = expand_tilde("/some/~/path");
         assert_eq!(result, PathBuf::from("/some/~/path"));
+    }
+
+    /// A repo-supplied config must never be able to widen agent permissions.
+    #[test]
+    fn project_cannot_widen_unrestricted_permissions() {
+        assert!(!resolve_unrestricted_permissions(false, Some(true)));
+        assert!(!resolve_unrestricted_permissions(false, None));
+        assert!(!resolve_unrestricted_permissions(false, Some(false)));
+    }
+
+    /// Narrowing is a safe direction, so a project may still opt out.
+    #[test]
+    fn project_can_narrow_unrestricted_permissions() {
+        assert!(!resolve_unrestricted_permissions(true, Some(false)));
+        assert!(resolve_unrestricted_permissions(true, Some(true)));
+        assert!(resolve_unrestricted_permissions(true, None));
+    }
+
+    #[test]
+    fn merge_ignores_project_attempt_to_widen_permissions() {
+        let global = GlobalConfig {
+            unrestricted_permissions: false,
+            ..Default::default()
+        };
+        let project = ProjectConfig {
+            unrestricted_permissions: Some(true),
+            ..Default::default()
+        };
+        let resolved = merge_configs(&global, Some(&project));
+        assert!(!resolved.unrestricted_permissions);
     }
 
     #[test]
