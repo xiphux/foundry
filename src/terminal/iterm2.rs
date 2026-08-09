@@ -21,7 +21,11 @@ impl Iterm2Backend {
     /// Build the AppleScript that creates a tab, splits panes, and runs commands.
     fn build_layout_script(path: &Path, panes: &[PaneSpec]) -> Result<String> {
         let path_str = path.to_str().context("invalid worktree path")?;
-        let escaped_path = escape_applescript(path_str);
+        // This is typed into a live shell, so the path is shell-quoted first and
+        // the whole resulting line is then escaped for the AppleScript string.
+        // The order matters: escaping the other way round would leave the shell
+        // quoting mangled by AppleScript's own unescaping.
+        let cd_line = escape_applescript(&super::shell_cd(path_str));
         let mut lines = vec![
             r#"tell application "iTerm2""#.to_string(),
             "    tell current window".to_string(),
@@ -36,7 +40,7 @@ impl Iterm2Backend {
             // No panes — just cd to the directory and return the session's unique ID
             lines.push("    set firstSession to current session of newTab".to_string());
             lines.push("    tell firstSession".to_string());
-            lines.push(format!("        write text \"cd {escaped_path}\""));
+            lines.push(format!("        write text \"{cd_line}\""));
             lines.push("    end tell".to_string());
             lines.push("    return unique id of firstSession".to_string());
             lines.push("end tell".to_string());
@@ -50,7 +54,7 @@ impl Iterm2Backend {
 
         // cd the first pane to the worktree
         lines.push(format!("    tell {first_var}"));
-        lines.push(format!("        write text \"cd {escaped_path}\""));
+        lines.push(format!("        write text \"{cd_line}\""));
         lines.push("    end tell".to_string());
 
         // Create splits for remaining panes
@@ -81,7 +85,7 @@ impl Iterm2Backend {
 
             // cd the new pane to the worktree
             lines.push(format!("    tell {var}"));
-            lines.push(format!("        write text \"cd {escaped_path}\""));
+            lines.push(format!("        write text \"{cd_line}\""));
             lines.push("    end tell".to_string());
         }
 
@@ -93,11 +97,9 @@ impl Iterm2Backend {
             if !pane.env.is_empty() {
                 lines.push(format!("    tell {var}"));
                 for (k, v) in &pane.env {
-                    let escaped_k = escape_applescript(k);
-                    let escaped_v = escape_applescript(v);
-                    lines.push(format!(
-                        "        write text \"export {escaped_k}='{escaped_v}'\""
-                    ));
+                    // Shell-quote the export, then escape the line for AppleScript.
+                    let line = escape_applescript(&super::shell_export(k, v));
+                    lines.push(format!("        write text \"{line}\""));
                 }
                 lines.push("    end tell".to_string());
             }
@@ -230,5 +232,66 @@ end tell"#
 
         let result = run_applescript(&script)?;
         Ok(result.contains("found") && !result.contains("not_found"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn pane_with_env(k: &str, v: &str) -> PaneSpec {
+        let mut env = HashMap::new();
+        env.insert(k.to_string(), v.to_string());
+        PaneSpec {
+            name: "shell".into(),
+            split_from: None,
+            direction: None,
+            command: None,
+            env,
+            shell: None,
+        }
+    }
+
+    /// Env values are typed into a live shell, so a quote in one must not end
+    /// the quoting and start a command. AppleScript escaping alone does not
+    /// cover this — it leaves `'` untouched.
+    #[test]
+    fn env_value_with_a_quote_cannot_inject() {
+        let panes = vec![pane_with_env("FOO", "'; touch /tmp/pwned; echo '")];
+        let script = Iterm2Backend::build_layout_script(Path::new("/wt"), &panes).unwrap();
+        assert!(
+            !script.contains("export FOO=''; touch"),
+            "injection survived:\n{script}"
+        );
+        // shell_export emits `'\''`; escape_applescript then doubles the
+        // backslash, so the script carries `''\\''` and AppleScript hands the
+        // shell back the correctly-escaped single quote.
+        assert!(
+            script.contains(r#"export FOO=''\\''; touch"#),
+            "expected escaped quote in:\n{script}"
+        );
+    }
+
+    /// The worktree path is also typed in, as `cd <path>`. It must be quoted —
+    /// for `;` (injection) and for spaces (which simply broke the cd).
+    #[test]
+    fn worktree_path_is_shell_quoted_in_cd() {
+        let panes = vec![pane_with_env("A", "b")];
+        let script =
+            Iterm2Backend::build_layout_script(Path::new("/tmp/a; touch /tmp/pwned; b"), &panes)
+                .unwrap();
+        assert!(
+            !script.contains("cd /tmp/a; touch"),
+            "unquoted cd:\n{script}"
+        );
+        assert!(
+            script.contains(r"cd '/tmp/a; touch /tmp/pwned; b'"),
+            "{script}"
+        );
+
+        let spaced =
+            Iterm2Backend::build_layout_script(Path::new("/tmp/My Projects/wt"), &panes).unwrap();
+        assert!(spaced.contains(r"cd '/tmp/My Projects/wt'"), "{spaced}");
     }
 }

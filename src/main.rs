@@ -402,26 +402,40 @@ fn main() -> Result<()> {
             }
         }
         cli::Commands::Trust { path, revoke } => {
+            let store_path = foundry::trust::trust_store_path()?;
+            let mut store = foundry::trust::TrustStore::load_from(&store_path)?;
+
+            // Revoking only removes a map key, so it must not require a live
+            // repository — the case that most needs it is an entry left behind
+            // by a repo that has since been deleted or moved.
+            if revoke {
+                let target = match path {
+                    Some(p) => p,
+                    None => std::env::current_dir()?,
+                };
+                if store.revoke(&target) {
+                    store.save_to(&store_path)?;
+                    println!("Withdrew approval for {}.", target.display());
+                } else {
+                    println!("{} was not approved.", target.display());
+                }
+                return Ok(());
+            }
+
+            // Locate the config from the *local* toplevel, so that inside a
+            // linked worktree this reads and hashes the same `.foundry.toml`
+            // the gate will. Making the two agree on which project the
+            // approval belongs to is `trust::key_for`'s job, not this one —
+            // resolving the main repo here instead would show the user one
+            // file and approve the hash of another.
             let repo_root = match path {
-                Some(p) => foundry::git::repo_root(&p).unwrap_or(p),
+                Some(p) => foundry::git::repo_root(&p)
+                    .with_context(|| format!("{} is not inside a git repository", p.display()))?,
                 None => {
                     let cwd = std::env::current_dir()?;
                     foundry::git::repo_root(&cwd).context("not inside a git repository")?
                 }
             };
-
-            let store_path = foundry::trust::trust_store_path()?;
-            let mut store = foundry::trust::TrustStore::load_from(&store_path)?;
-
-            if revoke {
-                if store.revoke(&repo_root) {
-                    store.save_to(&store_path)?;
-                    println!("Withdrew approval for {}.", repo_root.display());
-                } else {
-                    println!("{} was not approved.", repo_root.display());
-                }
-                return Ok(());
-            }
 
             let config_path = repo_root.join(".foundry.toml");
             if !config_path.exists() {
@@ -441,8 +455,11 @@ fn main() -> Result<()> {
                 return Ok(());
             }
 
+            // Same sanitizing as the interactive prompt: this command prints
+            // the directives and then approves without asking, so its display
+            // is the last thing seen before the approval is persisted.
             println!("{} will run:", config_path.display());
-            for directive in &directives {
+            for directive in foundry::trust::render_directives(&directives) {
                 println!("  - {directive}");
             }
 

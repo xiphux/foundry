@@ -29,8 +29,23 @@ pub(crate) fn escape_single_quoted(value: &str) -> String {
 /// them needs the same quoting. Sharing it keeps them from drifting apart: the
 /// WezTerm backend interpolated the value raw for a while, which the others
 /// never did.
+///
+/// The key is interpolated bare because it is required to be a shell
+/// identifier — `config::validation::validate_env_name` rejects anything else
+/// at config load, which is what makes this safe with only the value quoted.
 pub(crate) fn shell_export(key: &str, value: &str) -> String {
     format!("export {key}='{}'", escape_single_quoted(value))
+}
+
+/// Render `cd 'path'` for a POSIX shell.
+///
+/// The AppleScript backends type this into a live shell rather than passing the
+/// directory as an argument, so the path needs shell quoting even though every
+/// other backend gets to hand it over as argv. Unquoted, a worktree path
+/// containing a space simply failed to `cd`, and one containing `;` ran the
+/// rest as a command.
+pub(crate) fn shell_cd(path: &str) -> String {
+    format!("cd '{}'", escape_single_quoted(path))
 }
 
 /// A pane to be opened in the terminal workspace.

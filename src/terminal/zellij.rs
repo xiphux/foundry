@@ -150,13 +150,10 @@ impl ZellijBackend {
         path.hash(&mut hasher);
         let hash = format!("{:x}", hasher.finish());
         let hash_short = &hash[..6];
-        // Truncate workspace name to fit: "f-" (2) + name + "-" (1) + hash (6) <= 25
-        let max_name_len = 16;
-        let truncated = if name.len() > max_name_len {
-            &name[..max_name_len]
-        } else {
-            name
-        };
+        // Truncate workspace name to fit: "f-" (2) + name + "-" (1) + hash (6) <= 25.
+        // Cut on a character boundary — workspace names may be non-ASCII, since
+        // `--issue` derives them from GitHub issue titles.
+        let truncated = crate::str_util::truncate_on_char_boundary(name, 16);
         format!("f-{truncated}-{hash_short}")
     }
 }
@@ -365,6 +362,26 @@ mod tests {
         let after_flag = line.find("\"-c\"").expect("no -c flag") + 4;
         let quote = line[after_flag..].find('"').unwrap() + after_flag;
         read_kdl_string(line, quote).0
+    }
+
+    /// Workspace names can be non-ASCII — `--issue` derives them from GitHub
+    /// issue titles — and this used to byte-slice at 16, aborting the command.
+    #[test]
+    fn session_name_handles_a_multibyte_workspace_name() {
+        let name =
+            ZellijBackend::session_name(Path::new("/wt/42-日本語のタイトルをつけるテストで"));
+        assert!(name.starts_with("f-42-"), "got {name}");
+        // Still bounded: "f-" + <=16 bytes + "-" + 6 hex.
+        assert!(name.len() <= 25, "session name too long: {name}");
+    }
+
+    /// A name whose first character alone exceeds the cap degrades to empty
+    /// rather than panicking, and the hash still disambiguates the session.
+    #[test]
+    fn session_name_survives_a_wholly_multibyte_name() {
+        let a = ZellijBackend::session_name(Path::new("/wt/日本語日本語日本語日本語日本語日本語"));
+        let b = ZellijBackend::session_name(Path::new("/wt/中文中文中文中文中文中文中文中文"));
+        assert_ne!(a, b, "hash must keep distinct worktrees distinct");
     }
 
     #[test]

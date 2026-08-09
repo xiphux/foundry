@@ -7,6 +7,7 @@ pub mod github;
 pub mod history;
 pub mod registry;
 pub mod state;
+pub mod str_util;
 pub mod terminal;
 pub mod trust;
 pub mod workflow;

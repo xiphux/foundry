@@ -41,12 +41,19 @@ fn run_git_inner(repo_path: &Path, args: &[&str], no_optional_locks: bool) -> Re
 
 /// Reject a revision operand that git would read as an option.
 ///
-/// Most user-supplied operands get an explicit `--` before them, but revision
-/// arguments cannot: for `merge`, `rev-list`, `log` and `diff`, `--` separates
-/// revisions from *paths*, so putting it first makes git treat the revision as
-/// a pathspec. `git log --oneline -- main..feature` does not error — it
-/// silently reports nothing, having looked for a file called `main..feature`.
-/// So those operands are checked instead of delimited.
+/// Most user-supplied operands get an explicit `--` before them, but the
+/// range-building callers cannot use one: for `rev-list`, `log` and `diff`,
+/// `--` separates revisions from *paths*, so putting it first makes git read
+/// the range as a pathspec. `git log --oneline -- main..feature` does not even
+/// error — it silently reports nothing, having looked for a file by that name.
+/// (`git rev-list --count -- main..feature` at least fails loudly, with a usage
+/// error.) Those operands are therefore checked rather than delimited.
+///
+/// `git merge` takes no pathspec, so `--` would in fact work there; its
+/// operands are checked the same way for consistency and for a clearer error.
+/// The check is not decorative either way — without it `git merge --quit`
+/// silently succeeds and discards an in-progress merge, and
+/// `git merge --strategy=ours` is read as a flag rather than a branch.
 fn reject_option_like(value: &str, what: &str) -> Result<()> {
     if value.starts_with('-') {
         bail!("{what} cannot start with '-': {value:?}");
@@ -239,6 +246,51 @@ pub fn last_commit_timestamp(repo_path: &Path) -> Result<Option<i64>> {
 pub fn repo_root(path: &Path) -> Result<std::path::PathBuf> {
     let root = run_git(path, &["rev-parse", "--show-toplevel"])?;
     Ok(std::path::PathBuf::from(root))
+}
+
+/// Resolve the *main* repository root, even from inside a linked worktree.
+///
+/// `repo_root` uses `--show-toplevel`, which inside a linked worktree reports
+/// the worktree itself. Foundry keys per-project data on the source repo, so a
+/// command run from a workspace tab has to resolve back to it or it will read
+/// and write the wrong entry. The common git dir is shared by every worktree
+/// and lives in the main repo, so its parent is the main working tree; run from
+/// the main repo it is already that directory, so this is correct in both.
+///
+/// Falls back to `repo_root` whenever the answer is not a plain `<root>/.git`,
+/// which covers three cases that would otherwise produce a confidently wrong
+/// path:
+///
+/// - **git older than 2.31**, which predates `--path-format`. `git rev-parse`
+///   does not reject an option it does not know — it echoes it back on stdout
+///   and exits 0 — so the naive check "did it succeed and return something"
+///   passes, and the result parses to a path whose parent is empty.
+/// - **submodules**, where the common dir is `<super>/.git/modules/<name>`, so
+///   the parent is a `modules` directory rather than any working tree.
+/// - **bare repositories**, where it is `<name>.git` and the parent is merely
+///   whatever directory contains it.
+///
+/// Getting this wrong is silent: `foundry trust` would record an approval under
+/// a key nothing looks up and still report success, so the prompt would keep
+/// reappearing with no indication why.
+pub fn main_repo_root(path: &Path) -> Result<std::path::PathBuf> {
+    let Ok(dir) = run_git(
+        path,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    ) else {
+        return repo_root(path);
+    };
+
+    let common = std::path::Path::new(&dir);
+    let usable = !dir.is_empty()
+        && !dir.contains('\n')
+        && common.is_absolute()
+        && common.file_name() == Some(std::ffi::OsStr::new(".git"));
+
+    match common.parent() {
+        Some(parent) if usable => Ok(parent.to_path_buf()),
+        _ => repo_root(path),
+    }
 }
 
 /// Get the commit log between base and branch as one-line summaries.

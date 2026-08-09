@@ -32,8 +32,10 @@ impl GhosttyBackend {
         if panes.is_empty() {
             // No panes to configure — just cd to the directory
             lines.push("    set t to focused terminal of selected tab of front window".to_string());
-            let escaped_path = escape_applescript(path_str);
-            lines.push(format!("    input text \"cd {escaped_path}\" to t"));
+            lines.push(format!(
+                "    input text \"{}\" to t",
+                escape_applescript(&super::shell_cd(path_str))
+            ));
             lines.push("    send key \"enter\" to t".to_string());
             lines.push("    return id of selected tab of front window".to_string());
             lines.push("end tell".to_string());
@@ -55,9 +57,11 @@ impl GhosttyBackend {
         ));
 
         // cd the first pane to the worktree (since new tab didn't get a configuration)
-        let escaped_path = escape_applescript(path_str);
+        // Typed into a live shell: shell-quote the path, then escape the whole
+        // line for AppleScript. Reversing the order would mangle the quoting.
         lines.push(format!(
-            "    input text \"cd {escaped_path}\" to {first_var}"
+            "    input text \"{}\" to {first_var}",
+            escape_applescript(&super::shell_cd(path_str))
         ));
         lines.push(format!("    send key \"enter\" to {first_var}"));
 
@@ -113,11 +117,9 @@ impl GhosttyBackend {
                 // a surface configuration), export them manually
                 if pane.split_from.is_none() && !pane.env.is_empty() {
                     for (k, v) in &pane.env {
-                        let escaped_k = escape_applescript(k);
-                        let escaped_v = escape_applescript(v);
-                        lines.push(format!(
-                            "    input text \"export {escaped_k}='{escaped_v}'\" to {cur_var}"
-                        ));
+                        // Shell-quote the export, then escape for AppleScript.
+                        let line = escape_applescript(&super::shell_export(k, v));
+                        lines.push(format!("    input text \"{line}\" to {cur_var}"));
                         lines.push(format!("    send key \"enter\" to {cur_var}"));
                     }
                 }
@@ -337,6 +339,57 @@ mod tests {
         let script = GhosttyBackend::build_run_in_pane_script("tab-abc", 2, "pnpm install");
         assert!(script.contains("item 3 of (terminals of t)"));
         assert!(script.contains(r#"input text "pnpm install" to targetTerm"#));
+    }
+
+    /// Env values are typed into a live shell; a quote must not break out.
+    #[test]
+    fn env_value_with_a_quote_cannot_inject() {
+        let mut env = HashMap::new();
+        env.insert("FOO".to_string(), "'; touch /tmp/pwned; echo '".to_string());
+        let panes = vec![PaneSpec {
+            name: "agent".into(),
+            split_from: None,
+            direction: None,
+            command: Some("claude".into()),
+            env,
+            shell: None,
+        }];
+        let script = GhosttyBackend::build_layout_script(Path::new("/wt"), &panes).unwrap();
+        assert!(
+            !script.contains("export FOO=''; touch"),
+            "injection survived:\n{script}"
+        );
+        // shell_export emits `'\''`; escape_applescript then doubles the
+        // backslash, so the script carries `''\\''` and AppleScript hands the
+        // shell back the correctly-escaped single quote.
+        assert!(
+            script.contains(r#"export FOO=''\\''; touch"#),
+            "expected escaped quote in:\n{script}"
+        );
+    }
+
+    /// The `cd` is typed into a shell too, so the path needs quoting.
+    #[test]
+    fn worktree_path_is_shell_quoted_in_cd() {
+        let script =
+            GhosttyBackend::build_layout_script(Path::new("/tmp/a; touch /tmp/pwned; b"), &panes())
+                .unwrap();
+        assert!(
+            !script.contains("cd /tmp/a; touch"),
+            "unquoted cd:\n{script}"
+        );
+        assert!(
+            script.contains(r"cd '/tmp/a; touch /tmp/pwned; b'"),
+            "{script}"
+        );
+    }
+
+    /// The no-panes branch types a cd as well.
+    #[test]
+    fn worktree_path_is_shell_quoted_in_cd_without_panes() {
+        let script =
+            GhosttyBackend::build_layout_script(Path::new("/tmp/My Projects/wt"), &[]).unwrap();
+        assert!(script.contains(r"cd '/tmp/My Projects/wt'"), "{script}");
     }
 
     #[test]

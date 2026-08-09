@@ -111,16 +111,10 @@ fn slugify(s: &str, max_len: usize) -> String {
     //
     // `max_len` counts bytes, but `is_alphanumeric` keeps any Unicode letter,
     // so a title in a non-Latin script reaches here as multi-byte characters.
-    // Slicing at a fixed byte offset then panics whenever a character straddles
-    // it — and issue titles come from GitHub, so that was a remote input able
-    // to abort `foundry start --issue`. Cut at the last character boundary at
-    // or before the limit instead.
-    let trimmed = if result.len() > max_len {
-        let end = (0..=max_len).rev().find(|&i| result.is_char_boundary(i));
-        &result[..end.unwrap_or(0)]
-    } else {
-        &result
-    };
+    // Slicing at a fixed byte offset would panic whenever a character straddles
+    // it — and issue titles come from GitHub, so that is a remote input able to
+    // abort `foundry start --issue`.
+    let trimmed = crate::str_util::truncate_on_char_boundary(&result, max_len);
 
     trimmed.trim_matches('-').to_string()
 }

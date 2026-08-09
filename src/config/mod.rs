@@ -92,6 +92,9 @@ pub fn load_global_config() -> Result<GlobalConfig> {
         if let Some(ref cmd) = pane.command {
             validate_template(cmd).with_context(|| format!("in pane '{}' command", pane.name))?;
         }
+        for key in pane.env.keys() {
+            validation::validate_env_name(key, &format!("pane '{}' env", pane.name))?;
+        }
     }
 
     Ok(config)
@@ -133,6 +136,25 @@ pub fn load_project_config(repo_root: &Path) -> Result<Option<ProjectConfig>> {
             validate_template(wd)
                 .with_context(|| format!("in teardown script '{}' working_dir", script.name))?;
         }
+    }
+
+    // Env names reach a shell as bare identifiers in `export NAME=...`, so they
+    // are validated rather than escaped. Both repo-settable sources are checked
+    // here: pane env keys, and `ports` entries, which become an env name in
+    // every pane.
+    for (pane_name, pane) in &config.panes {
+        for key in pane.env.keys() {
+            validation::validate_env_name(key, &format!("pane '{pane_name}' env"))?;
+        }
+    }
+    for port in &config.ports {
+        validation::validate_env_name(port, "ports")?;
+    }
+
+    // The worktree path this produces is typed into a shell by the AppleScript
+    // backends. That `cd` is quoted, so this is defence in depth.
+    if let Some(ref dir) = config.worktree_dir {
+        validation::validate_project_path(dir, "worktree_dir")?;
     }
 
     // This file is checked into the repository, so anything executable in it
