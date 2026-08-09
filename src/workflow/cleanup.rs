@@ -21,6 +21,15 @@ pub enum BranchCleanup {
 /// Shared cleanup for finish and discard: teardown scripts, worktree removal,
 /// branch cleanup, state persistence, and terminal tab close.
 ///
+/// `force_remove` is passed to `git worktree remove`. `finish` refuses to run
+/// on a dirty worktree, so it never needs it; `discard` exists to throw work
+/// away and always does.
+///
+/// `history_event` is a closure rather than a value because the event may need
+/// to name the archived branch, which is only decided part-way through this
+/// function — see `git::archive_branch`. It is called after branch cleanup and
+/// before the tab closes.
+///
 /// **Important:** The terminal tab close is always the last operation.
 /// If the caller is running from inside the worktree's tab, closing the
 /// tab will kill the process, so all state must be persisted first.
@@ -38,7 +47,8 @@ pub fn cleanup_workspace(
     state_path: &Path,
     verbose: bool,
     branch_cleanup: BranchCleanup,
-    history_event: &crate::history::HistoryEvent,
+    force_remove: bool,
+    history_event: impl FnOnce(Option<&str>) -> crate::history::HistoryEvent,
 ) -> Result<()> {
     let template_vars = TemplateVars {
         source: source_path.to_string_lossy().into(),
@@ -92,7 +102,7 @@ pub fn cleanup_workspace(
     if verbose {
         eprintln!("Removing worktree...");
     }
-    if let Err(first_err) = git::remove_worktree(source_path, worktree_path, false) {
+    if let Err(first_err) = git::remove_worktree(source_path, worktree_path, force_remove) {
         if cfg!(windows) && !tab_id.is_empty() {
             if verbose {
                 eprintln!("Worktree directory is locked, closing terminal panes and retrying...");
@@ -117,7 +127,7 @@ pub fn cleanup_workspace(
     }
 
     // Handle local branch cleanup
-    match branch_cleanup {
+    let archived_as = match branch_cleanup {
         BranchCleanup::Archive => {
             let has_commits = git::branch_has_commits(
                 source_path,
@@ -129,12 +139,17 @@ pub fn cleanup_workspace(
                 if verbose {
                     eprintln!("Archiving branch '{branch}'...");
                 }
-                git::archive_branch(source_path, branch, &config.archive_prefix)?;
+                Some(git::archive_branch(
+                    source_path,
+                    branch,
+                    &config.archive_prefix,
+                )?)
             } else {
                 if verbose {
                     eprintln!("Deleting branch '{branch}' (no commits)...");
                 }
                 git::delete_branch(source_path, branch)?;
+                None
             }
         }
         BranchCleanup::Delete => {
@@ -143,12 +158,13 @@ pub fn cleanup_workspace(
             }
             // Branch may already be gone (e.g., worktree removal cleaned it up).
             let _ = git::delete_branch(source_path, branch);
+            None
         }
-        BranchCleanup::None => {}
-    }
+        BranchCleanup::None => None,
+    };
 
     // Record history
-    let _ = crate::history::record(history_event);
+    let _ = crate::history::record(&history_event(archived_as.as_deref()));
 
     // Update state
     state.remove(project_name, name);

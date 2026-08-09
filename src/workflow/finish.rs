@@ -193,7 +193,10 @@ fn do_pr_merge(
         state_path,
         verbose,
         super::BranchCleanup::Delete,
-        &history_event,
+        // finish refuses to run on a dirty worktree, so a plain remove is
+        // always enough here.
+        false,
+        |_| history_event,
     )?;
 
     Ok(())
@@ -310,7 +313,8 @@ fn do_local_merge(
         state_path,
         verbose,
         super::BranchCleanup::Archive,
-        &history_event,
+        false,
+        |_| history_event,
     )?;
 
     Ok(())

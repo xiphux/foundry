@@ -124,10 +124,10 @@ fn test_archive_branch_collision() {
     let repo = init_test_repo();
 
     foundry::git::create_branch(repo.path(), "feat").unwrap();
-    foundry::git::archive_branch(repo.path(), "feat", "archive").unwrap();
+    let first = foundry::git::archive_branch(repo.path(), "feat", "archive").unwrap();
 
     foundry::git::create_branch(repo.path(), "feat").unwrap();
-    foundry::git::archive_branch(repo.path(), "feat", "archive").unwrap();
+    let second = foundry::git::archive_branch(repo.path(), "feat", "archive").unwrap();
 
     let output = Command::new("git")
         .args(["branch", "--list", "archive/feat-*"])
@@ -140,6 +140,17 @@ fn test_archive_branch_collision() {
         count >= 2,
         "expected at least 2 archived branches, got {count}: {branches}"
     );
+
+    // The reported name must be the branch that actually exists. `discard`
+    // used to re-derive it as `{prefix}/{branch}-{YYYYMMDD}` and recorded a
+    // nonexistent branch in the history log for the second archive of the day.
+    assert_ne!(first, second);
+    for name in [&first, &second] {
+        assert!(
+            foundry::git::branch_exists(repo.path(), name).unwrap(),
+            "archive_branch reported '{name}', which does not exist:\n{branches}"
+        );
+    }
 }
 
 #[test]

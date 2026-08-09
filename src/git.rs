@@ -155,7 +155,14 @@ pub fn delete_branch(repo_path: &Path, branch: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn archive_branch(repo_path: &Path, branch: &str, prefix: &str) -> Result<()> {
+/// Rename a branch out of the way under `prefix`, returning its new name.
+///
+/// The name is returned rather than recomputed by the caller: it is not a pure
+/// function of the inputs. A same-day collision falls back to a second-precision
+/// suffix, so a caller deriving `{prefix}/{branch}-{date}` for itself records a
+/// branch that does not exist — which is what `discard` was writing into the
+/// history log.
+pub fn archive_branch(repo_path: &Path, branch: &str, prefix: &str) -> Result<String> {
     let date = chrono::Utc::now().format("%Y%m%d").to_string();
     let archived = format!("{prefix}/{branch}-{date}");
 
@@ -171,7 +178,7 @@ pub fn archive_branch(repo_path: &Path, branch: &str, prefix: &str) -> Result<()
     };
 
     run_git(repo_path, &["branch", "-m", "--", branch, &final_name])?;
-    Ok(())
+    Ok(final_name)
 }
 
 /// List branches matching a prefix (e.g., "archive/").
