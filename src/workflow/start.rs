@@ -219,71 +219,29 @@ pub fn run(
         deferred_setup_commands.push(resolved_command);
     }
 
-    // Check if the backend supports run_in_pane (sending commands to existing panes).
-    // Multiplexer backends (tmux, zellij) block during open_workspace, so deferred
-    // scripts must be baked into pane commands upfront rather than sent after.
+    // Where the deferred work goes is a property of the config, not of the
+    // terminal — only its *delivery* differs by backend.
+    let deferred = plan_deferred(config, &deferred_setup_commands, &template_vars)?;
+
+    // Multiplexer backends (tmux, Zellij) block inside `open_workspace`, so
+    // there is no "after" in which to send anything: their chain has to be
+    // baked into the pane command upfront. Backends that return can have the
+    // target pane's own command suppressed and the whole chain sent once the
+    // workspace is up.
     let backend = terminal::detect_terminal()?;
     let can_defer = backend.supports_run_in_pane();
 
-    // Collect names of deferred panes — their commands will be sent separately
-    // (only if the backend supports it). Otherwise, deferred commands are
-    // pre-chained into the pane command via open_workspace's deferred_commands map.
-    let skip_command_panes: HashSet<String> = if can_defer {
-        config
-            .panes
-            .iter()
-            .filter(|p| p.deferred && p.agent.is_none())
-            .map(|p| p.name.clone())
-            .collect()
-    } else {
-        HashSet::new()
-    };
-
-    // For backends that don't support run_in_pane, build a map of pane name →
-    // pre-chained deferred commands to pass to open_workspace.
-    let deferred_commands: std::collections::HashMap<String, String> = if !can_defer
-        && (!deferred_scripts.is_empty() || config.panes.iter().any(|p| p.deferred))
-    {
-        let deferred_pane = config
-            .panes
-            .iter()
-            .find(|p| p.deferred && p.agent.is_none());
-        if let Some(pane) = deferred_pane {
-            let mut chain = deferred_setup_commands.clone();
-            if let Some(ref cmd) = pane.command {
-                let resolved = config::resolve_template(cmd, &template_vars)?;
-                if !resolved.is_empty() {
-                    chain.push(resolved);
-                }
-            }
-            if !chain.is_empty() {
-                let mut map = std::collections::HashMap::new();
-                map.insert(pane.name.clone(), chain.join(" && "));
-                map
-            } else {
-                std::collections::HashMap::new()
-            }
-        } else if !deferred_setup_commands.is_empty() {
-            // No deferred pane — run in the shell pane
-            let shell_pane = config
-                .panes
-                .iter()
-                .find(|p| p.command.is_none() && p.agent.is_none());
-            if let Some(pane) = shell_pane {
-                let mut map = std::collections::HashMap::new();
-                map.insert(pane.name.clone(), deferred_setup_commands.join(" && "));
-                map
-            } else {
-                std::collections::HashMap::new()
-            }
+    let mut skip_command_panes: HashSet<String> = HashSet::new();
+    let mut deferred_commands: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    if let Some(ref d) = deferred {
+        if can_defer {
+            skip_command_panes.insert(d.pane_name.clone());
         } else {
-            std::collections::HashMap::new()
+            deferred_commands.insert(d.pane_name.clone(), d.chain.clone());
         }
-    } else {
-        std::collections::HashMap::new()
-    };
+    }
 
-    // Open the workspace (deferred pane commands are suppressed if backend supports run_in_pane)
     super::open::open_workspace(
         project_name,
         name,
@@ -298,47 +256,112 @@ pub fn run(
         plan,
     )?;
 
-    // For backends that support run_in_pane, send deferred scripts now
-    if can_defer && (!deferred_setup_commands.is_empty() || !skip_command_panes.is_empty()) {
+    if can_defer && let Some(d) = deferred {
         let tab_id = state
             .find_by_worktree_path(&worktree_path.to_string_lossy())
             .map(|w| w.terminal_tab_id.clone())
             .unwrap_or_default();
-
-        let deferred_pane = config.panes.iter().enumerate().find(|(_, p)| p.deferred);
-
-        if let Some((pane_index, pane)) = deferred_pane {
-            let mut chain = deferred_setup_commands;
-            let pane_cmd = if let Some(ref cmd) = pane.command {
-                let resolved = config::resolve_template(cmd, &template_vars)?;
-                if resolved.is_empty() {
-                    None
-                } else {
-                    Some(resolved)
-                }
-            } else {
-                None
-            };
-            if let Some(cmd) = pane_cmd {
-                chain.push(cmd);
-            }
-            if !chain.is_empty() {
-                let chained = chain.join(" && ");
-                backend.run_in_pane(&tab_id, pane_index, &chained)?;
-            }
-        } else if !deferred_setup_commands.is_empty() {
-            let shell_pane_index = config
-                .panes
-                .iter()
-                .position(|p| p.command.is_none() && p.agent.is_none())
-                .unwrap_or(0);
-
-            let chained = deferred_setup_commands.join(" && ");
-            backend.run_in_pane(&tab_id, shell_pane_index, &chained)?;
-        }
+        backend.run_in_pane(&tab_id, d.pane_index, &d.chain)?;
     }
 
     Ok(())
+}
+
+/// Which pane the deferred setup scripts run in, and what runs there.
+///
+/// Both delivery paths need the same two answers and used to work them out
+/// separately, with predicates that had drifted apart. The `run_in_pane` path
+/// matched *any* pane with `deferred = true`, including one running an agent —
+/// which the suppression list deliberately excluded. So the agent launched at
+/// open time and the setup scripts were then typed into the pane on top of it,
+/// straight into the agent's prompt. Deciding once removes the possibility.
+struct DeferredPlan {
+    pane_index: usize,
+    pane_name: String,
+    /// The deferred setup scripts, then the pane's own command, joined by `&&`.
+    chain: String,
+}
+
+fn plan_deferred(
+    config: &ResolvedConfig,
+    setup_commands: &[String],
+    vars: &TemplateVars,
+) -> Result<Option<DeferredPlan>> {
+    // A pane running an agent belongs to that agent — anything chained into it
+    // is typed at the agent rather than at a shell.
+    for pane in config.panes.iter().filter(|p| p.deferred) {
+        if pane.agent.is_some() {
+            eprintln!(
+                "Warning: pane '{}' sets `deferred` but runs agent '{}'. \
+                 Deferred setup scripts cannot run in an agent pane, so this is ignored.",
+                pane.name,
+                pane.agent.as_deref().unwrap_or_default()
+            );
+        }
+    }
+
+    let targets: Vec<(usize, &config::PaneConfig)> = config
+        .panes
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.deferred && p.agent.is_none())
+        .collect();
+
+    if targets.len() > 1 {
+        eprintln!(
+            "Warning: {} panes are marked `deferred`; only '{}' receives the deferred \
+             setup scripts. The others start normally.",
+            targets.len(),
+            targets[0].1.name
+        );
+    }
+
+    if let Some(&(pane_index, pane)) = targets.first() {
+        let mut chain: Vec<String> = setup_commands.to_vec();
+        if let Some(ref cmd) = pane.command {
+            let resolved = config::resolve_template(cmd, vars)?;
+            if !resolved.is_empty() {
+                chain.push(resolved);
+            }
+        }
+        if chain.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(DeferredPlan {
+            pane_index,
+            pane_name: pane.name.clone(),
+            chain: chain.join(" && "),
+        }));
+    }
+
+    if setup_commands.is_empty() {
+        return Ok(None);
+    }
+
+    // No pane opted in, so fall back to a plain shell pane. There may not be
+    // one — a layout of nothing but agents and fixed commands — in which case
+    // the scripts have nowhere safe to run. Say so rather than picking pane 0,
+    // which is the agent pane in the default layout.
+    match config
+        .panes
+        .iter()
+        .enumerate()
+        .find(|(_, p)| p.command.is_none() && p.agent.is_none())
+    {
+        Some((pane_index, pane)) => Ok(Some(DeferredPlan {
+            pane_index,
+            pane_name: pane.name.clone(),
+            chain: setup_commands.join(" && "),
+        })),
+        None => {
+            eprintln!(
+                "Warning: {} deferred setup script(s) have no pane to run in — every pane \
+                 runs an agent or its own command. Mark a pane `deferred` to give them one.",
+                setup_commands.len()
+            );
+            Ok(None)
+        }
+    }
 }
 
 /// Build worktree context string for agent system prompt injection.
@@ -411,4 +434,122 @@ fn build_agent_context(
     }
 
     parts.join("\n\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{GlobalConfig, PaneConfig, SplitDirection, merge_configs};
+
+    fn pane(name: &str, agent: Option<&str>, command: Option<&str>, deferred: bool) -> PaneConfig {
+        PaneConfig {
+            name: name.into(),
+            agent: agent.map(Into::into),
+            command: command.map(Into::into),
+            split_from: (name != "agent").then(|| "agent".to_string()),
+            direction: (name != "agent").then_some(SplitDirection::Right),
+            optional: false,
+            env: Default::default(),
+            deferred,
+        }
+    }
+
+    fn config_with(panes: Vec<PaneConfig>) -> ResolvedConfig {
+        merge_configs(
+            &GlobalConfig {
+                panes,
+                ..Default::default()
+            },
+            None,
+        )
+    }
+
+    fn vars() -> TemplateVars {
+        TemplateVars {
+            source: "/src".into(),
+            worktree: "/wt".into(),
+            branch: "feat".into(),
+            name: "feat".into(),
+            project: "proj".into(),
+        }
+    }
+
+    #[test]
+    fn deferred_pane_receives_the_scripts_then_its_own_command() {
+        let config = config_with(vec![
+            pane("agent", Some("claude"), None, false),
+            pane("dev", None, Some("pnpm dev"), true),
+        ]);
+        let plan = plan_deferred(&config, &["pnpm install".into()], &vars())
+            .unwrap()
+            .expect("expected a plan");
+        assert_eq!(plan.pane_index, 1);
+        assert_eq!(plan.pane_name, "dev");
+        assert_eq!(plan.chain, "pnpm install && pnpm dev");
+    }
+
+    #[test]
+    fn without_a_deferred_pane_the_scripts_go_to_the_shell_pane() {
+        let config = config_with(vec![
+            pane("agent", Some("claude"), None, false),
+            pane("shell", None, None, false),
+        ]);
+        let plan = plan_deferred(&config, &["pnpm install".into()], &vars())
+            .unwrap()
+            .expect("expected a plan");
+        assert_eq!(plan.pane_name, "shell");
+        assert_eq!(plan.chain, "pnpm install");
+    }
+
+    /// The regression: the `run_in_pane` path matched any pane with
+    /// `deferred = true`, so a deferred *agent* pane became the target. Its
+    /// command was not suppressed, so the agent launched and the setup scripts
+    /// were then typed into its prompt.
+    #[test]
+    fn a_deferred_agent_pane_is_never_the_target() {
+        let config = config_with(vec![
+            pane("agent", Some("claude"), None, true),
+            pane("shell", None, None, false),
+        ]);
+        let plan = plan_deferred(&config, &["pnpm install".into()], &vars())
+            .unwrap()
+            .expect("expected a plan");
+        assert_eq!(plan.pane_name, "shell", "must not target the agent pane");
+        assert_eq!(plan.pane_index, 1);
+    }
+
+    /// Falling back to pane 0 would be the agent pane in the default layout.
+    #[test]
+    fn scripts_with_nowhere_safe_to_run_are_reported_not_forced_into_pane_zero() {
+        let config = config_with(vec![
+            pane("agent", Some("claude"), None, false),
+            pane("logs", None, Some("tail -f log"), false),
+        ]);
+        assert!(
+            plan_deferred(&config, &["pnpm install".into()], &vars())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn nothing_deferred_means_no_plan() {
+        let config = config_with(vec![
+            pane("agent", Some("claude"), None, false),
+            pane("shell", None, None, false),
+        ]);
+        assert!(plan_deferred(&config, &[], &vars()).unwrap().is_none());
+    }
+
+    /// A deferred pane with no scripts still defers its own command, so it
+    /// starts after the blocking setup phase rather than during it.
+    #[test]
+    fn a_deferred_pane_with_no_scripts_still_defers_its_command() {
+        let config = config_with(vec![
+            pane("agent", Some("claude"), None, false),
+            pane("dev", None, Some("pnpm dev"), true),
+        ]);
+        let plan = plan_deferred(&config, &[], &vars()).unwrap().unwrap();
+        assert_eq!(plan.chain, "pnpm dev");
+    }
 }
