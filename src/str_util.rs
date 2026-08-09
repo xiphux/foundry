@@ -1,5 +1,19 @@
 //! Small string helpers shared across modules.
 
+/// Escape a value for inclusion in a POSIX single-quoted string.
+///
+/// Closes the quote, emits an escaped literal quote, and reopens — the only way
+/// to represent `'` inside `'...'`, since a single-quoted shell string has no
+/// escape character of its own.
+///
+/// Two callers, and they had a copy each: the terminal backends quoting env
+/// values and worktree paths they type into a live shell, and the agent
+/// registry quoting a prompt into an argv. Both handle text foundry did not
+/// write — a GitHub issue body reaches the second one — so they must not drift.
+pub fn escape_single_quoted(value: &str) -> String {
+    value.replace('\'', "'\\''")
+}
+
 /// Truncate `s` to at most `max_bytes`, cutting on a character boundary.
 ///
 /// Rust's `&s[..n]` panics when `n` lands inside a multi-byte character, so any

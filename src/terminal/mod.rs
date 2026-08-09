@@ -16,15 +16,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::config::types::SplitDirection;
-
-/// Escape a value for inclusion in a POSIX single-quoted string.
-///
-/// Closes the quote, emits an escaped literal quote, and reopens — the only
-/// way to represent `'` inside `'...'`, since a single-quoted shell string has
-/// no escape character of its own.
-pub(crate) fn escape_single_quoted(value: &str) -> String {
-    value.replace('\'', "'\\''")
-}
+use crate::str_util::escape_single_quoted;
 
 /// Render `export KEY='value'` for a POSIX shell.
 ///

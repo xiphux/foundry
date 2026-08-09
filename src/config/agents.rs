@@ -50,11 +50,6 @@ pub struct AgentInvocation<'a> {
     pub plan: bool,
 }
 
-/// Escape a prompt string for use in a shell single-quoted argument.
-fn escape_prompt(prompt: &str) -> String {
-    prompt.replace('\'', "'\\''")
-}
-
 /// Registry of known agents and their capabilities.
 const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
     (
@@ -81,7 +76,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
                     cmd += " --continue";
                 }
                 if let Some(p) = inv.prompt {
-                    cmd += &format!(" '{}'", escape_prompt(p));
+                    cmd += &format!(" '{}'", crate::str_util::escape_single_quoted(p));
                 }
                 cmd
             },
@@ -100,7 +95,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
                     cmd += " --resume";
                 }
                 if let Some(p) = inv.prompt {
-                    cmd += &format!(" '{}'", escape_prompt(p));
+                    cmd += &format!(" '{}'", crate::str_util::escape_single_quoted(p));
                 }
                 cmd
             },
@@ -118,7 +113,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
                     cmd += " --resume";
                 }
                 if let Some(p) = inv.prompt {
-                    cmd += &format!(" '{}'", escape_prompt(p));
+                    cmd += &format!(" '{}'", crate::str_util::escape_single_quoted(p));
                 }
                 cmd
             },
@@ -141,7 +136,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
                     cmd += " --resume";
                 }
                 if let Some(p) = inv.prompt {
-                    cmd += &format!(" -p '{}'", escape_prompt(p));
+                    cmd += &format!(" -p '{}'", crate::str_util::escape_single_quoted(p));
                 }
                 cmd
             },
@@ -178,7 +173,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
                     "copilot".to_string()
                 };
                 if let Some(p) = inv.prompt {
-                    cmd += &format!(" -p '{}'", escape_prompt(p));
+                    cmd += &format!(" -p '{}'", crate::str_util::escape_single_quoted(p));
                 }
                 cmd
             },
@@ -200,7 +195,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
                     cmd += " --resume";
                 }
                 if let Some(p) = inv.prompt {
-                    cmd += &format!(" '{}'", escape_prompt(p));
+                    cmd += &format!(" '{}'", crate::str_util::escape_single_quoted(p));
                 }
                 cmd
             },
@@ -225,7 +220,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
                     cmd += " --continue";
                 }
                 if let Some(p) = inv.prompt {
-                    cmd += &format!(" --prompt '{}'", escape_prompt(p));
+                    cmd += &format!(" --prompt '{}'", crate::str_util::escape_single_quoted(p));
                 }
                 cmd
             },
@@ -263,7 +258,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
             build_command: |inv| {
                 let mut cmd = "nanocoder".to_string();
                 if let Some(p) = inv.prompt {
-                    cmd += &format!(" '{}'", escape_prompt(p));
+                    cmd += &format!(" '{}'", crate::str_util::escape_single_quoted(p));
                 }
                 cmd
             },
@@ -285,7 +280,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
                     cmd += " --continue";
                 }
                 if let Some(p) = inv.prompt {
-                    cmd += &format!(" '{}'", escape_prompt(p));
+                    cmd += &format!(" '{}'", crate::str_util::escape_single_quoted(p));
                 }
                 cmd
             },
