@@ -51,14 +51,11 @@ impl WorkspaceState {
     }
 
     pub fn save_to(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
         let contents = toml::to_string_pretty(&self.inner).context("failed to serialize state")?;
-        std::fs::write(path, contents)
-            .with_context(|| format!("failed to write {}", path.display()))?;
-        Ok(())
+        // Atomic: `status --watch` re-reads this file every 2 seconds, and
+        // `workspaces` is `#[serde(default)]`, so a truncate-then-write would
+        // let the dashboard parse a half-written file as zero workspaces.
+        crate::fs_util::write_atomic(path, &contents)
     }
 
     pub fn add(&mut self, workspace: Workspace) {

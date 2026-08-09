@@ -45,7 +45,8 @@ Foundry is a CLI that manages AI agent workspaces using git worktrees and termin
 - **`agent_hooks.rs`** — Per-agent workspace setup (Claude settings.local.json, worktree-scoped permissions, conversation detection). Agent status tracking for the status dashboard.
 - **`github.rs`** — GitHub issue fetching (`gh issue view`), issue-to-prompt conversion, slugification for branch names.
 - **`history.rs`** — JSONL-based activity log (`~/.foundry/history.jsonl`). Events: started, finished, discarded, restored, pr_created, pr_merged.
-- **`registry.rs`** / **`state.rs`** — TOML-backed persistence for project registry (`~/.foundry/projects.toml`) and active workspace state (`~/.foundry/state.toml`).
+- **`registry.rs`** / **`state.rs`** — TOML-backed persistence for project registry (`~/.foundry/projects.toml`) and active workspace state (`~/.foundry/state.toml`). Both save via `fs_util::write_atomic`.
+- **`fs_util.rs`** — `write_atomic()`: temp-file-plus-rename write. Used by `registry.rs`/`state.rs` so a concurrent reader (`status --watch` polls `state.toml` every 2s) can never observe a truncated file — both structs deserialize an empty file as "no entries" rather than failing.
 
 ### Key Design Constraints
 

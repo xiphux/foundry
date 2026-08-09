@@ -7,7 +7,19 @@
 - Claude now launches with `--permission-mode auto` instead of `acceptEdits` plus the OS sandbox. Auto mode uses model analysis to approve most permission requests, which covers the cases the sandbox was working around (GPG signing, worktree `.git` writes, pre-commit hooks) without the sandbox's escape hatches. Foundry no longer writes a `sandbox` block into the worktree's `.claude/settings.local.json`; worktree-scoped allow/deny rules and status hooks are unchanged.
 - `unrestricted_permissions = true` now launches OpenCode with `--auto` (approve everything not explicitly denied in `opencode.json`). Previously the setting was a no-op for OpenCode. Its default remains ask-for-permission — unlike Claude's `auto`, OpenCode's `--auto` performs no model analysis and never falls back to a prompt.
 
+### Quality of Life
+
+- `foundry diff` streams git's output instead of buffering the whole patch, so large diffs start printing immediately instead of after the entire patch has been read, and render in color when attached to a terminal. Piped output is unchanged.
+- `foundry status` is faster: it probes workspaces concurrently rather than one at a time, detects each project's main branch once per repo instead of once per workspace, and no longer runs the same `rev-list --count` twice per row.
+- `foundry history` reads the tail of the log rather than parsing every event ever recorded. Showing the last 20 entries now costs the same on a 200,000-line log as on a short one; previously it deserialized the whole file.
+- `open --all` no longer pauses between workspaces on tmux, Zellij, WezTerm, or the bare fallback. Those backends block until the workspace is up, so the 500 ms settle delay now applies only to Ghostty, iTerm2, and Windows Terminal, whose launches can return before the tab is ready.
+
 ### Fixed
+
+- `foundry status --watch` now reloads `state.toml` on each refresh, so workspaces started or finished in another tab appear and disappear live. Previously the dashboard stayed frozen on the snapshot taken when it launched, while still re-running every git command each tick.
+- Read-only `git status` calls now pass `--no-optional-locks`, so foundry's status polling no longer rewrites the index or contends for `.git/index.lock` with agents running git in the same worktree. `status --watch` did this against every worktree every 2 seconds.
+- Piping foundry's output into a command that stops reading early — `foundry diff | head`, or quitting a pager — no longer prints a "failed printing to stdout: Broken pipe" panic. Foundry now exits quietly on `SIGPIPE` the way other Unix tools in a pipeline do.
+- Workspace state and project registry writes are now atomic (write to a temp file, then rename). A plain truncate-then-write left a window where a concurrent reader — notably `status --watch` — could parse a half-written file as "no workspaces" rather than failing, and two commands saving at once could interleave.
 
 - Ghostty: deferred setup scripts now run, and `finish`/`discard` now close the workspace tab. Both operations located the tab by matching a terminal's `working directory` against the worktree path, but Ghostty never populates that property (empty on 1.3.1 even with shell integration active), so the lookup silently matched nothing. Foundry now records the tab id when it creates the tab and addresses the tab by id. Note that Ghostty's `confirm-close-surface` (on by default) prompts before closing a tab whose panes still have running processes.
 

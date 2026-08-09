@@ -51,11 +51,13 @@ fn test_detect_terminal_is_stable() {
     assert_eq!(first.supports_run_in_pane(), second.supports_run_in_pane());
 }
 
-/// `open --all` pauses between workspaces only for backends that need the
-/// window manager to settle. Socket/CLI-driven backends are synchronous, so a
-/// hardcoded pause there was pure dead time.
+/// `open --all` pauses between workspaces only for backends whose launch is
+/// not synchronous. Ghostty and iTerm2 drive the window manager via
+/// AppleScript; `wt.exe -w 0` dispatches to an existing window and returns
+/// before the tab exists. tmux, Zellij, WezTerm and the bare fallback block
+/// until the workspace is up, so a pause there was pure dead time.
 #[test]
-fn test_settle_delay_only_for_applescript_backends() {
+fn test_settle_delay_only_where_launch_is_async() {
     use foundry::terminal::TerminalBackend as _;
 
     assert!(
@@ -65,6 +67,11 @@ fn test_settle_delay_only_for_applescript_backends() {
     );
     assert!(
         !foundry::terminal::iterm2::Iterm2Backend
+            .settle_delay()
+            .is_zero()
+    );
+    assert!(
+        !foundry::terminal::windows_terminal::WindowsTerminalBackend
             .settle_delay()
             .is_zero()
     );

@@ -63,7 +63,29 @@ fn load_config(source_path: &Path) -> Result<ResolvedConfig> {
     ))
 }
 
+/// Restore the default `SIGPIPE` disposition.
+///
+/// Rust ignores `SIGPIPE` and surfaces the closed pipe as an `EPIPE` error,
+/// which `println!` turns into a panic — so `foundry diff | head` printed a
+/// "failed printing to stdout: Broken pipe" backtrace instead of just stopping.
+/// Restoring the default makes foundry exit quietly the way every other Unix
+/// tool in a pipeline does.
+#[cfg(unix)]
+fn restore_sigpipe() {
+    // SAFETY: called once at startup, before any threads are spawned, and only
+    // resets a signal to the disposition the process would have had without
+    // Rust's runtime overriding it.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn restore_sigpipe() {}
+
 fn main() -> Result<()> {
+    restore_sigpipe();
+
     let cli = Cli::parse();
 
     let (registry_path, state_path) = workflow::foundry_paths()?;
@@ -160,9 +182,11 @@ fn main() -> Result<()> {
                 if workspaces.is_empty() {
                     println!("No active workspaces for project '{project_name}'.");
                 } else {
-                    // Only the AppleScript-driven backends need a pause between
-                    // opens; the rest are synchronous and were sleeping for
-                    // nothing. Detection is memoized, so this is cheap.
+                    // Only backends whose open can return before the tab is
+                    // ready (Ghostty, iTerm2, Windows Terminal) need a pause
+                    // between opens; the rest block until the workspace is up
+                    // and were sleeping for nothing. Detection is memoized, so
+                    // this is cheap.
                     let settle = foundry::terminal::detect_terminal()?.settle_delay();
 
                     for (i, ws_name) in workspaces.iter().enumerate() {

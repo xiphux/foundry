@@ -77,13 +77,13 @@ pub fn run(
     // Diff output, streamed rather than buffered — a large branch diff would
     // otherwise be held in memory several times over before anything printed.
     if commit_count > 0 {
-        let _ = git::stream_diff_committed(source_path, &main_branch, branch, stat);
+        git::stream_diff_committed(source_path, &main_branch, branch, stat)?;
     }
     if uncommitted_status {
         if commit_count > 0 {
             println!();
         }
-        let _ = git::stream_diff_uncommitted(&worktree_path, stat);
+        git::stream_diff_uncommitted(&worktree_path, stat)?;
     }
 
     Ok(())

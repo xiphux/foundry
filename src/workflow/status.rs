@@ -45,39 +45,43 @@ pub fn run(state: &WorkspaceState, state_path: &Path, watch: bool) -> Result<()>
     }
 }
 
-/// Probe every workspace concurrently.
+/// Apply `f` to every item across at most `available_parallelism` threads,
+/// returning results in input order.
 ///
-/// Each row costs a couple of git subprocesses, and they are independent and
-/// IO-bound, so running them serially made a refresh take the sum of every
-/// repo's `git status`. Work is chunked across at most `available_parallelism`
-/// threads; rows come back in input order.
-fn probe_workspaces(
-    workspaces: &[Workspace],
-    main_branches: &HashMap<&str, Option<String>>,
-) -> Vec<Row> {
+/// Every probe the dashboard performs costs at least one git subprocess, and
+/// they are independent and IO-bound, so running them serially made a refresh
+/// take the sum of every repo's git calls.
+fn parallel_map<T, R, F>(items: &[T], f: F) -> Vec<R>
+where
+    T: Sync,
+    R: Send,
+    F: Fn(&T) -> R + Sync,
+{
+    // Guard the empty case here rather than in the callers: `chunk_size` would
+    // otherwise be 0, and `slice::chunks(0)` panics.
+    if items.is_empty() {
+        return Vec::new();
+    }
+
     let threads = std::thread::available_parallelism()
         .map(|p| p.get())
         .unwrap_or(4)
-        .min(workspaces.len())
+        .min(items.len())
         .max(1);
-    let chunk_size = workspaces.len().div_ceil(threads);
+    let chunk_size = items.len().div_ceil(threads);
 
     std::thread::scope(|scope| {
-        let handles: Vec<_> = workspaces
+        let handles: Vec<_> = items
             .chunks(chunk_size)
             .map(|chunk| {
-                scope.spawn(move || {
-                    chunk
-                        .iter()
-                        .map(|ws| probe_one(ws, main_branches))
-                        .collect::<Vec<Row>>()
-                })
+                let f = &f;
+                scope.spawn(move || chunk.iter().map(f).collect::<Vec<R>>())
             })
             .collect();
 
         handles
             .into_iter()
-            .flat_map(|h| h.join().expect("status probe thread panicked"))
+            .flat_map(|h| h.join().expect("parallel_map worker thread panicked"))
             .collect()
     })
 }
@@ -139,15 +143,20 @@ fn render_dashboard(state: &WorkspaceState) -> Result<()> {
     println!("  {}", "\u{2500}".repeat(80));
 
     // Every workspace in a project shares one source repo, so detect the main
-    // branch once per repo rather than once per workspace.
-    let mut main_branches: HashMap<&str, Option<String>> = HashMap::new();
-    for ws in workspaces {
-        main_branches
-            .entry(ws.source_path.as_str())
-            .or_insert_with(|| git::detect_main_branch(Path::new(&ws.source_path)).ok());
-    }
+    // branch once per repo rather than once per workspace. Detection costs one
+    // subprocess, or two when the repo has no origin/HEAD, so it runs in
+    // parallel too rather than as a serial prefix to every refresh.
+    let mut sources: Vec<&str> = workspaces.iter().map(|w| w.source_path.as_str()).collect();
+    sources.sort_unstable();
+    sources.dedup();
 
-    for row in probe_workspaces(workspaces, &main_branches) {
+    let main_branches: HashMap<&str, Option<String>> = parallel_map(&sources, |src| {
+        (*src, git::detect_main_branch(Path::new(src)).ok())
+    })
+    .into_iter()
+    .collect();
+
+    for row in parallel_map(workspaces, |ws| probe_one(ws, &main_branches)) {
         let Row {
             workspace_name,
             missing,

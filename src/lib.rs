@@ -1,6 +1,7 @@
 pub mod agent_hooks;
 pub mod config;
 pub mod forge;
+pub mod fs_util;
 pub mod git;
 pub mod github;
 pub mod history;

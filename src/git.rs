@@ -225,6 +225,11 @@ fn stream_git(repo_path: &Path, args: &[&str]) -> Result<()> {
     std::io::stdout().flush().ok();
 
     let status = Command::new("git")
+        // Because the child inherits our stdout, git would see a tty and start
+        // its pager, blocking until the user quits it — and `foundry diff` runs
+        // up to three git commands, so that meant up to three pagers. Capturing
+        // output used to suppress paging implicitly by handing git a pipe.
+        .arg("--no-pager")
         .arg("-C")
         .arg(repo_path)
         .args(args)
@@ -232,6 +237,18 @@ fn stream_git(repo_path: &Path, args: &[&str]) -> Result<()> {
         .context("failed to execute git")?;
 
     if !status.success() {
+        // A reader closing the pipe — quitting a pager, `foundry diff | head` —
+        // kills git with SIGPIPE. That is the consumer saying "enough", not a
+        // failure, so report it as a normal end of output rather than an error
+        // on top of a perfectly good partial diff.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt as _;
+            const SIGPIPE: i32 = 13;
+            if status.signal() == Some(SIGPIPE) {
+                return Ok(());
+            }
+        }
         bail!("git {} failed", args.join(" "));
     }
     Ok(())
@@ -248,6 +265,11 @@ pub fn stream_diff_committed(repo_path: &Path, base: &str, branch: &str, stat: b
 }
 
 /// Stream the uncommitted changes (staged, then unstaged) in a worktree to stdout.
+///
+/// Both halves run unconditionally. Deciding up front which half has content
+/// would mean re-deriving it from `git status --porcelain` text, and getting
+/// that wrong silently drops the patch — so git is simply asked for both and
+/// prints whichever is non-empty. The cost is one extra no-op subprocess.
 pub fn stream_diff_uncommitted(worktree_path: &Path, stat: bool) -> Result<()> {
     if stat {
         stream_git(worktree_path, &["diff", "--cached", "--stat"])?;

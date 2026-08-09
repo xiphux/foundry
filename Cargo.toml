@@ -18,6 +18,9 @@ which = "7"
 chrono = { version = "0.4", features = ["serde"] }
 serde_json = "1"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
 

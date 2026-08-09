@@ -260,6 +260,14 @@ impl WindowsTerminalBackend {
 }
 
 impl TerminalBackend for WindowsTerminalBackend {
+    /// `wt.exe -w 0` hands the command to the existing window process and
+    /// exits, so the call returning does not mean the tab and its splits are
+    /// ready. Keep the pause `open --all` has always had here rather than
+    /// assume the dispatch is synchronous.
+    fn settle_delay(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(500)
+    }
+
     fn supports_run_in_pane(&self) -> bool {
         false
     }

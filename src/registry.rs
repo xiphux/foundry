@@ -34,15 +34,12 @@ impl Registry {
     }
 
     pub fn save_to(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
         let contents =
             toml::to_string_pretty(&self.inner).context("failed to serialize registry")?;
-        std::fs::write(path, contents)
-            .with_context(|| format!("failed to write {}", path.display()))?;
-        Ok(())
+        // Atomic for the same reason as the workspace state: `projects` is
+        // `#[serde(default)]`, and nearly every command reads this file, so a
+        // torn write would read back as an empty registry.
+        crate::fs_util::write_atomic(path, &contents)
     }
 
     pub fn add(&mut self, name: &str, path: PathBuf) -> Result<()> {
