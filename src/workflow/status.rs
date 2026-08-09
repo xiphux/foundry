@@ -1,23 +1,125 @@
 use anyhow::Result;
 use std::collections::HashMap;
+use std::io::Write as _;
 use std::path::Path;
 
 use crate::agent_hooks;
 use crate::git;
-use crate::state::WorkspaceState;
+use crate::state::{Workspace, WorkspaceState};
+
+/// How often `--watch` refreshes.
+const WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Everything the dashboard needs to draw one workspace row. Gathered off the
+/// main thread so the git probes for different workspaces overlap.
+struct Row {
+    workspace_name: String,
+    /// The worktree directory is gone — nothing else was probed.
+    missing: bool,
+    dirty: bool,
+    commit_info: String,
+    agent_infos: Vec<(String, agent_hooks::AgentStatusInfo)>,
+}
 
 /// Display a status dashboard of all active workspaces.
-pub fn run(state: &WorkspaceState, watch: bool) -> Result<()> {
-    if watch {
-        loop {
-            print!("\x1b[2J\x1b[H"); // clear screen
-            render_dashboard(state)?;
-            std::thread::sleep(std::time::Duration::from_secs(2));
-        }
-    } else {
-        render_dashboard(state)?;
+pub fn run(state: &WorkspaceState, state_path: &Path, watch: bool) -> Result<()> {
+    if !watch {
+        return render_dashboard(state);
     }
-    Ok(())
+
+    // Re-read state each tick so workspaces started or finished in another tab
+    // appear and disappear. A transient read failure (state.toml being
+    // rewritten concurrently) just keeps the last good snapshot on screen.
+    let mut snapshot = state.clone();
+    loop {
+        print!("\x1b[2J\x1b[H"); // clear screen
+        render_dashboard(&snapshot)?;
+        std::io::stdout().flush()?;
+
+        std::thread::sleep(WATCH_INTERVAL);
+
+        if let Ok(mut next) = WorkspaceState::load_from(state_path) {
+            next.prune_stale();
+            snapshot = next;
+        }
+    }
+}
+
+/// Probe every workspace concurrently.
+///
+/// Each row costs a couple of git subprocesses, and they are independent and
+/// IO-bound, so running them serially made a refresh take the sum of every
+/// repo's `git status`. Work is chunked across at most `available_parallelism`
+/// threads; rows come back in input order.
+fn probe_workspaces(
+    workspaces: &[Workspace],
+    main_branches: &HashMap<&str, Option<String>>,
+) -> Vec<Row> {
+    let threads = std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(4)
+        .min(workspaces.len())
+        .max(1);
+    let chunk_size = workspaces.len().div_ceil(threads);
+
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = workspaces
+            .chunks(chunk_size)
+            .map(|chunk| {
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .map(|ws| probe_one(ws, main_branches))
+                        .collect::<Vec<Row>>()
+                })
+            })
+            .collect();
+
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().expect("status probe thread panicked"))
+            .collect()
+    })
+}
+
+/// Gather the display data for a single workspace.
+fn probe_one(ws: &Workspace, main_branches: &HashMap<&str, Option<String>>) -> Row {
+    let workspace_name = format!("{}/{}", ws.project, ws.name);
+    let worktree = Path::new(&ws.worktree_path);
+    let source = Path::new(&ws.source_path);
+
+    if !worktree.exists() {
+        return Row {
+            workspace_name,
+            missing: true,
+            dirty: false,
+            commit_info: String::new(),
+            agent_infos: Vec::new(),
+        };
+    }
+
+    // Commit count vs main. One `rev-list --count` answers both "are there
+    // commits?" and "how many?" — asking twice ran the identical command.
+    let commit_info = match main_branches
+        .get(ws.source_path.as_str())
+        .and_then(|m| m.as_ref())
+    {
+        Some(main_branch) => match git::commit_count(source, &ws.branch, main_branch) {
+            Ok(0) => "no commits".to_string(),
+            Ok(1) => "1 commit".to_string(),
+            Ok(count) => format!("{count} commits"),
+            Err(_) => "unknown".to_string(),
+        },
+        None => "unknown".to_string(),
+    };
+
+    Row {
+        workspace_name,
+        missing: false,
+        dirty: git::has_uncommitted_changes(worktree).unwrap_or(false),
+        commit_info,
+        agent_infos: agent_hooks::read_all_status_infos(&ws.project, &ws.name),
+    }
 }
 
 /// Render the status dashboard once.
@@ -39,44 +141,32 @@ fn render_dashboard(state: &WorkspaceState) -> Result<()> {
     // Every workspace in a project shares one source repo, so detect the main
     // branch once per repo rather than once per workspace.
     let mut main_branches: HashMap<&str, Option<String>> = HashMap::new();
-
     for ws in workspaces {
-        let worktree = Path::new(&ws.worktree_path);
-        let source = Path::new(&ws.source_path);
-        let workspace_name = format!("{}/{}", ws.project, ws.name);
+        main_branches
+            .entry(ws.source_path.as_str())
+            .or_insert_with(|| git::detect_main_branch(Path::new(&ws.source_path)).ok());
+    }
 
-        // Check if worktree still exists
-        if !worktree.exists() {
+    for row in probe_workspaces(workspaces, &main_branches) {
+        let Row {
+            workspace_name,
+            missing,
+            dirty,
+            commit_info,
+            agent_infos,
+        } = row;
+
+        if missing {
             println!("  {:<30} \x1b[31m✗ missing\x1b[0m", workspace_name);
             continue;
         }
 
-        // Git status
-        let dirty = git::has_uncommitted_changes(worktree).unwrap_or(false);
         let (git_label, git_color) = if dirty {
             ("⚠ dirty", "\x1b[33m")
         } else {
             ("✓ clean", "\x1b[32m")
         };
 
-        // Commit count vs main. One `rev-list --count` answers both "are there
-        // commits?" and "how many?" — asking twice ran the identical command.
-        let main_branch = main_branches
-            .entry(ws.source_path.as_str())
-            .or_insert_with(|| git::detect_main_branch(source).ok());
-
-        let commit_info = match main_branch {
-            Some(main_branch) => match git::commit_count(source, &ws.branch, main_branch) {
-                Ok(0) => "no commits".to_string(),
-                Ok(1) => "1 commit".to_string(),
-                Ok(count) => format!("{count} commits"),
-                Err(_) => "unknown".to_string(),
-            },
-            None => "unknown".to_string(),
-        };
-
-        // Agent status (may have multiple agents per workspace)
-        let agent_infos = agent_hooks::read_all_status_infos(&ws.project, &ws.name);
         let (agent_label, agent_color, activity) = if agent_infos.is_empty() {
             ("unknown".to_string(), "", String::new())
         } else if agent_infos.len() == 1 {

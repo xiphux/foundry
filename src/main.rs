@@ -425,7 +425,7 @@ fn main() -> Result<()> {
             let mut state = WorkspaceState::load_from(&state_path)?;
             state.prune_stale();
             state.save_to(&state_path)?;
-            workflow::status::run(&state, watch)?;
+            workflow::status::run(&state, &state_path, watch)?;
         }
         cli::Commands::Pr { name, title, body } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
