@@ -81,13 +81,15 @@ pub fn open_workspace(
             // Each agent's build_command knows whether to add a resume flag.
             let continue_session =
                 pane_prompt.is_none() && agent_hooks::has_agent_conversation(agent, worktree_path);
-            Some(config::build_agent_command_with_plan(
+            Some(config::build_agent_command(
                 agent,
                 config.custom_agent_command.as_deref(),
-                pane_prompt,
-                continue_session,
-                config.unrestricted_permissions,
-                plan,
+                &config::AgentInvocation {
+                    prompt: pane_prompt,
+                    resume: continue_session,
+                    unrestricted: config.unrestricted_permissions,
+                    plan,
+                },
             ))
         } else if let Some(ref cmd) = pane.command {
             let resolved = config::resolve_template(cmd, &template_vars)?;
