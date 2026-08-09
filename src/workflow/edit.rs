@@ -1,21 +1,12 @@
 use anyhow::{Context, Result};
 use std::process::Command;
 
-use crate::config::ResolvedConfig;
-use crate::state::WorkspaceState;
+pub fn run(ctx: &mut super::WorkflowCtx, name: &str) -> Result<()> {
+    let worktree_path = ctx.workspace(name)?.worktree_path;
 
-pub fn run(
-    name: &str,
-    project_name: &str,
-    config: &ResolvedConfig,
-    state: &WorkspaceState,
-    verbose: bool,
-) -> Result<()> {
-    let worktree_path = super::resolve_active_workspace(state, project_name, name)?.worktree_path;
+    let editor = resolve_editor(ctx.config.editor.as_deref())?;
 
-    let editor = resolve_editor(config.editor.as_deref())?;
-
-    if verbose {
+    if ctx.verbose {
         eprintln!("Opening {} in '{editor}'...", worktree_path.display());
     }
 
@@ -50,12 +41,12 @@ fn resolve_editor(configured: Option<&str>) -> Result<String> {
     )
 }
 
-pub fn browse(name: &str, project_name: &str, state: &WorkspaceState, verbose: bool) -> Result<()> {
-    let worktree_path = super::resolve_active_workspace(state, project_name, name)?.worktree_path;
+pub fn browse(ctx: &mut super::WorkflowCtx, name: &str) -> Result<()> {
+    let worktree_path = ctx.workspace(name)?.worktree_path;
 
     let cmd = file_explorer_command();
 
-    if verbose {
+    if ctx.verbose {
         eprintln!("Opening {} in file explorer...", worktree_path.display());
     }
 

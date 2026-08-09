@@ -1,29 +1,29 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::collections::HashSet;
-use std::path::Path;
 
 use crate::agent_hooks;
 use crate::config::{self, ResolvedConfig, TemplateVars};
 use crate::git;
 use crate::history;
-use crate::state::{Workspace, WorkspaceState};
+use crate::state::Workspace;
 use crate::terminal;
 
-#[allow(clippy::too_many_arguments)]
 pub fn run(
+    ctx: &mut super::WorkflowCtx,
     name: &str,
-    project_name: &str,
-    source_path: &Path,
-    config: &ResolvedConfig,
-    state: &mut WorkspaceState,
-    state_path: &Path,
-    verbose: bool,
     prompt: Option<&str>,
     fetch: bool,
     issue_ref: Option<&str>,
     plan: bool,
 ) -> Result<()> {
+    let (project_name, source_path, config, state_path, verbose) = (
+        ctx.project,
+        ctx.source_path,
+        ctx.config,
+        ctx.state_path,
+        ctx.verbose,
+    );
     let branch = super::compute_branch_name(name, config.branch_prefix.as_deref());
     let worktree_path = config.worktree_dir.join(project_name).join(name);
 
@@ -35,13 +35,9 @@ pub fn run(
             );
         }
         return super::open::open_workspace(
-            project_name,
+            ctx,
             name,
             &worktree_path,
-            config,
-            state,
-            state_path,
-            verbose,
             &HashSet::new(),
             prompt,
             &std::collections::HashMap::new(),
@@ -118,7 +114,7 @@ pub fn run(
     let allocated_ports = if config.ports.is_empty() {
         std::collections::HashMap::new()
     } else {
-        let reserved = state.all_allocated_ports();
+        let reserved = ctx.state.all_allocated_ports();
         let ports = super::allocate_ports(&config.ports, &reserved, config.port_range_start);
         if verbose {
             let mut sorted: Vec<_> = ports.iter().collect();
@@ -131,7 +127,7 @@ pub fn run(
     };
 
     // Record state BEFORE setup scripts so discard can clean up on failure
-    state.add(Workspace {
+    ctx.state.add(Workspace {
         project: project_name.into(),
         name: name.into(),
         branch: branch.clone(),
@@ -143,7 +139,7 @@ pub fn run(
         pr_number: None,
         pr_url: None,
     });
-    state.save_to(state_path)?;
+    ctx.state.save_to(state_path)?;
 
     // Validate that no agent type appears in more than one pane
     let mut seen_agents = std::collections::HashMap::new();
@@ -164,7 +160,7 @@ pub fn run(
     let agents: Vec<String> = seen_agents.into_keys().collect();
 
     // Build worktree context for agents that support it (e.g., Claude SessionStart hook)
-    let agent_context = build_agent_context(config, state, &worktree_path);
+    let agent_context = build_agent_context(config, ctx.state, &worktree_path);
 
     for agent in &agents {
         if let Err(e) = agent_hooks::setup_agent_hooks(
@@ -194,7 +190,8 @@ pub fn run(
 
     // Run immediate scripts before opening the workspace, with the workspace's
     // allocated ports exported so a setup script binds what the panes will use.
-    let script_env = state
+    let script_env = ctx
+        .state
         .find_by_worktree_path(&worktree_path.to_string_lossy())
         .map(|ws| ws.allocated_ports.clone())
         .unwrap_or_default();
@@ -243,13 +240,9 @@ pub fn run(
     }
 
     super::open::open_workspace(
-        project_name,
+        ctx,
         name,
         &worktree_path,
-        config,
-        state,
-        state_path,
-        verbose,
         &skip_command_panes,
         prompt,
         &deferred_commands,
@@ -257,7 +250,8 @@ pub fn run(
     )?;
 
     if can_defer && let Some(d) = deferred {
-        let tab_id = state
+        let tab_id = ctx
+            .state
             .find_by_worktree_path(&worktree_path.to_string_lossy())
             .map(|w| w.terminal_tab_id.clone())
             .unwrap_or_default();

@@ -2,10 +2,10 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use std::path::Path;
 
-use crate::config::{ResolvedConfig, TemplateVars};
+use crate::config::TemplateVars;
 use crate::git;
 use crate::history;
-use crate::state::{Workspace, WorkspaceState};
+use crate::state::Workspace;
 
 /// Derive a short worktree name from an archived branch name.
 /// e.g., "archive/xiphux/my-feature-20260321" → "my-feature"
@@ -66,29 +66,20 @@ pub fn list_archived(source_path: &Path, archive_prefix: &str) -> Result<()> {
 }
 
 /// Restore a workspace from an archived branch.
-pub fn run(
-    branch: &str,
-    project_name: &str,
-    source_path: &Path,
-    config: &ResolvedConfig,
-    state: &mut WorkspaceState,
-    state_path: &Path,
-    verbose: bool,
-) -> Result<()> {
+pub fn run(ctx: &mut super::WorkflowCtx, branch: &str) -> Result<()> {
+    let (project_name, source_path, config, state_path, verbose) = (
+        ctx.project,
+        ctx.source_path,
+        ctx.config,
+        ctx.state_path,
+        ctx.verbose,
+    );
     // Verify the branch exists
     if !git::branch_exists(source_path, branch)? {
         // Try prepending the archive prefix if not already present
         let with_prefix = format!("{}/{branch}", config.archive_prefix);
         if git::branch_exists(source_path, &with_prefix)? {
-            return run(
-                &with_prefix,
-                project_name,
-                source_path,
-                config,
-                state,
-                state_path,
-                verbose,
-            );
+            return run(ctx, &with_prefix);
         }
         anyhow::bail!(
             "branch '{branch}' not found. Run `foundry restore` with no arguments to see archived branches."
@@ -114,13 +105,9 @@ pub fn run(
             );
         }
         return super::open::open_workspace(
-            project_name,
+            ctx,
             &name,
             &worktree_path,
-            config,
-            state,
-            state_path,
-            verbose,
             &std::collections::HashSet::new(),
             None, // no prompt for restore
             &std::collections::HashMap::new(),
@@ -156,7 +143,7 @@ pub fn run(
     let allocated_ports = if config.ports.is_empty() {
         std::collections::HashMap::new()
     } else {
-        let reserved = state.all_allocated_ports();
+        let reserved = ctx.state.all_allocated_ports();
         let ports = super::allocate_ports(&config.ports, &reserved, config.port_range_start);
         if verbose {
             let mut sorted: Vec<_> = ports.iter().collect();
@@ -169,7 +156,7 @@ pub fn run(
     };
 
     // Record state before setup scripts
-    state.add(Workspace {
+    ctx.state.add(Workspace {
         project: project_name.into(),
         name: name.clone(),
         branch: branch.into(),
@@ -181,7 +168,7 @@ pub fn run(
         pr_number: None,
         pr_url: None,
     });
-    state.save_to(state_path)?;
+    ctx.state.save_to(state_path)?;
 
     // Run setup scripts
     let template_vars = TemplateVars {
@@ -208,7 +195,8 @@ pub fn run(
 
     // Same port environment `start` gives its setup scripts, read back from the
     // state entry written above.
-    let script_env = state
+    let script_env = ctx
+        .state
         .find_by_worktree_path(&worktree_path.to_string_lossy())
         .map(|ws| ws.allocated_ports.clone())
         .unwrap_or_default();
@@ -225,13 +213,9 @@ pub fn run(
 
     // Open workspace
     super::open::open_workspace(
-        project_name,
+        ctx,
         &name,
         &worktree_path,
-        config,
-        state,
-        state_path,
-        verbose,
         &std::collections::HashSet::new(),
         None, // no prompt for restore
         &std::collections::HashMap::new(),

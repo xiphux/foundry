@@ -1,20 +1,11 @@
 use anyhow::Result;
-use std::path::Path;
 
-use crate::config::ResolvedConfig;
 use crate::forge;
 use crate::forge::CheckConclusion;
-use crate::state::WorkspaceState;
 
-pub fn run(
-    name: &str,
-    project_name: &str,
-    source_path: &Path,
-    config: &ResolvedConfig,
-    state: &WorkspaceState,
-    verbose: bool,
-) -> Result<()> {
-    let workspace = super::resolve_active_workspace(state, project_name, name)?;
+pub fn run(ctx: &mut super::WorkflowCtx, name: &str) -> Result<()> {
+    let workspace = ctx.workspace(name)?;
+    let (source_path, config, verbose) = (ctx.source_path, ctx.config, ctx.verbose);
 
     let pr_number = workspace.pr_number.ok_or_else(|| {
         anyhow::anyhow!("workspace '{name}' has no associated PR. Run `foundry pr {name}` first.")

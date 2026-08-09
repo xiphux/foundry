@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::agent_hooks;
-use crate::config::{self, ResolvedConfig, TemplateVars};
+use crate::config::{self, TemplateVars};
 use crate::state::WorkspaceState;
 use crate::terminal::{self, PaneSpec};
 
@@ -11,20 +11,27 @@ use crate::terminal::{self, PaneSpec};
 /// `skip_command_panes` contains pane names whose commands should be suppressed
 /// (the pane is still created, but no command is sent). Used by `start` to
 /// defer certain pane commands until after setup scripts complete.
+///
+/// The one signature still over the argument limit. The remaining seven are all
+/// genuinely independent inputs rather than the project context that the other
+/// workflows were threading, so there is nothing left here to bundle.
 #[allow(clippy::too_many_arguments)]
 pub fn open_workspace(
-    project_name: &str,
+    ctx: &mut super::WorkflowCtx,
     name: &str,
     worktree_path: &Path,
-    config: &ResolvedConfig,
-    state: &mut WorkspaceState,
-    state_path: &Path,
-    verbose: bool,
     skip_command_panes: &HashSet<String>,
     prompt: Option<&str>,
     deferred_commands: &std::collections::HashMap<String, String>,
     plan: bool,
 ) -> Result<()> {
+    let (project_name, config, state, state_path, verbose) = (
+        ctx.project,
+        ctx.config,
+        &mut *ctx.state,
+        ctx.state_path,
+        ctx.verbose,
+    );
     // The single funnel for turning configured panes into a terminal layout, so
     // the one place worth rejecting a layout that cannot be built.
     config::validate_panes(&config.panes)?;

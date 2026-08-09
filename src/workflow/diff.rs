@@ -1,17 +1,10 @@
 use anyhow::Result;
-use std::path::Path;
 
 use crate::git;
-use crate::state::WorkspaceState;
 
-pub fn run(
-    name: &str,
-    project_name: &str,
-    source_path: &Path,
-    state: &WorkspaceState,
-    stat: bool,
-) -> Result<()> {
-    let workspace = super::resolve_active_workspace(state, project_name, name)?;
+pub fn run(ctx: &mut super::WorkflowCtx, name: &str, stat: bool) -> Result<()> {
+    let workspace = ctx.workspace(name)?;
+    let source_path = ctx.source_path;
     let worktree_path = &workspace.worktree_path;
     let branch = &workspace.branch;
 

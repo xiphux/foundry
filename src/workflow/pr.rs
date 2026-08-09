@@ -1,27 +1,19 @@
 use anyhow::{Context, Result};
-use std::path::Path;
 
-use crate::config::ResolvedConfig;
 use crate::forge;
 use crate::git;
 use crate::history;
-use crate::state::WorkspaceState;
 
-#[allow(clippy::too_many_arguments)]
 pub fn run(
+    ctx: &mut super::WorkflowCtx,
     name: &str,
-    project_name: &str,
-    source_path: &Path,
-    config: &ResolvedConfig,
-    state: &mut WorkspaceState,
-    state_path: &Path,
-    verbose: bool,
     title: Option<&str>,
     body: Option<&str>,
 ) -> Result<()> {
-    let workspace = super::resolve_active_workspace(state, project_name, name)?;
+    let workspace = ctx.workspace(name)?;
     let worktree_path = workspace.worktree_path;
     let branch = workspace.branch;
+    let (source_path, config, verbose) = (ctx.source_path, ctx.config, ctx.verbose);
 
     // Check for uncommitted changes in the worktree
     if git::has_uncommitted_changes(&worktree_path)? {
@@ -44,8 +36,9 @@ pub fn run(
     // Check if a PR already exists for this branch
     if let Some(existing) = forge_impl.pr_for_branch(source_path, &branch)? {
         // Link existing PR in state (may have been created manually on GitHub)
-        state.set_pr_info(project_name, name, existing.number, &existing.url);
-        state.save_to(state_path)?;
+        ctx.state
+            .set_pr_info(ctx.project, name, existing.number, &existing.url);
+        ctx.state.save_to(ctx.state_path)?;
         eprintln!("Linked existing PR for branch '{branch}': {}", existing.url);
         return Ok(());
     }
@@ -68,11 +61,12 @@ pub fn run(
     let pr_info = forge_impl.create_pr(source_path, &branch, &main_branch, &pr_title, pr_body)?;
 
     // Store PR info in workspace state
-    state.set_pr_info(project_name, name, pr_info.number, &pr_info.url);
-    state.save_to(state_path)?;
+    ctx.state
+        .set_pr_info(ctx.project, name, pr_info.number, &pr_info.url);
+    ctx.state.save_to(ctx.state_path)?;
 
     let _ = history::record(&history::HistoryEvent::pr_created(
-        project_name,
+        ctx.project,
         name,
         &branch,
         pr_info.number,

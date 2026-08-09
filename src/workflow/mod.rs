@@ -73,6 +73,46 @@ pub fn resolve_project(
     Ok((name, repo_root))
 }
 
+/// The project-level context every workflow runs inside.
+///
+/// These six travelled together through every workflow as positional
+/// parameters, which is how eight functions ended up carrying
+/// `#[allow(clippy::too_many_arguments)]` — `cleanup_workspace` took thirteen.
+/// The lint was right: `(name, project_name, source_path, ...)` is four
+/// same-typed `&str`/`&Path` arguments in a row, and nothing but discipline
+/// stopped a caller transposing two of them.
+///
+/// Holds `state` mutably even for read-only commands. Splitting the struct by
+/// mutability would reintroduce the threading this exists to remove, and the
+/// commands that only read are not harmed by holding a mutable borrow they do
+/// not use.
+pub struct WorkflowCtx<'a> {
+    pub project: &'a str,
+    pub source_path: &'a Path,
+    pub config: &'a config::ResolvedConfig,
+    pub state: &'a mut crate::state::WorkspaceState,
+    pub state_path: &'a Path,
+    pub verbose: bool,
+}
+
+impl WorkflowCtx<'_> {
+    /// Resolve one of this project's active workspaces by name.
+    pub fn workspace(&self, name: &str) -> Result<ActiveWorkspace> {
+        resolve_active_workspace(self.state, self.project, name)
+    }
+
+    /// Template variables for a workspace's setup, teardown and pane commands.
+    pub fn template_vars(&self, ws: &ActiveWorkspace) -> config::TemplateVars {
+        config::TemplateVars {
+            source: self.source_path.to_string_lossy().into(),
+            worktree: ws.worktree_path.to_string_lossy().into(),
+            branch: ws.branch.clone(),
+            name: ws.name.clone(),
+            project: self.project.into(),
+        }
+    }
+}
+
 /// An active workspace, resolved from recorded state rather than rebuilt.
 ///
 /// Every command that operates on an existing workspace needs the same handful

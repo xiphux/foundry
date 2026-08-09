@@ -1,10 +1,7 @@
 use anyhow::{Context, Result};
-use std::path::Path;
 
 use crate::agent_hooks;
-use crate::config::{ResolvedConfig, TemplateVars};
 use crate::git;
-use crate::state::WorkspaceState;
 use crate::terminal;
 
 /// What to do with the local branch after cleanup.
@@ -34,29 +31,22 @@ pub enum BranchCleanup {
 /// If the caller is running from inside the worktree's tab, closing the
 /// tab will kill the process, so all state must be persisted first.
 /// Print any user-visible success messages BEFORE calling this function.
-#[allow(clippy::too_many_arguments)]
 pub fn cleanup_workspace(
-    name: &str,
-    project_name: &str,
-    source_path: &Path,
-    worktree_path: &Path,
-    branch: &str,
-    tab_id: &str,
-    config: &ResolvedConfig,
-    state: &mut WorkspaceState,
-    state_path: &Path,
-    verbose: bool,
+    ctx: &mut super::WorkflowCtx,
+    ws: &super::ActiveWorkspace,
     branch_cleanup: BranchCleanup,
     force_remove: bool,
     history_event: impl FnOnce(Option<&str>) -> crate::history::HistoryEvent,
 ) -> Result<()> {
-    let template_vars = TemplateVars {
-        source: source_path.to_string_lossy().into(),
-        worktree: worktree_path.to_string_lossy().into(),
-        branch: branch.into(),
-        name: name.into(),
-        project: project_name.into(),
-    };
+    let template_vars = ctx.template_vars(ws);
+    let super::ActiveWorkspace {
+        name,
+        worktree_path,
+        branch,
+        terminal_tab_id: tab_id,
+        ..
+    } = ws;
+    let (source_path, config, verbose) = (ctx.source_path, ctx.config, ctx.verbose);
 
     // Run teardown scripts
     super::run_scripts(
@@ -147,10 +137,10 @@ pub fn cleanup_workspace(
     let _ = crate::history::record(&history_event(archived_as.as_deref()));
 
     // Update state
-    state.remove(project_name, name);
-    state.save_to(state_path)?;
-    agent_hooks::remove_status(project_name, name);
-    agent_hooks::remove_context(project_name, name);
+    ctx.state.remove(ctx.project, name);
+    ctx.state.save_to(ctx.state_path)?;
+    agent_hooks::remove_status(ctx.project, name);
+    agent_hooks::remove_context(ctx.project, name);
 
     // Close terminal tab LAST
     if !tab_id.is_empty() {

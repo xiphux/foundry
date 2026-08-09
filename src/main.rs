@@ -84,6 +84,25 @@ fn restore_sigpipe() {
 #[cfg(not(unix))]
 fn restore_sigpipe() {}
 
+/// Build the context every workflow runs inside.
+fn ctx<'a>(
+    project: &'a str,
+    source_path: &'a Path,
+    config: &'a ResolvedConfig,
+    state: &'a mut WorkspaceState,
+    state_path: &'a Path,
+    verbose: bool,
+) -> workflow::WorkflowCtx<'a> {
+    workflow::WorkflowCtx {
+        project,
+        source_path,
+        config,
+        state,
+        state_path,
+        verbose,
+    }
+}
+
 fn main() -> Result<()> {
     restore_sigpipe();
 
@@ -149,14 +168,17 @@ fn main() -> Result<()> {
 
             workflow::validate_workspace_name(&resolved_name)?;
 
-            workflow::start::run(
-                &resolved_name,
+            let mut c = ctx(
                 &project_name,
                 &source_path,
                 &resolved,
                 &mut state,
                 &state_path,
                 cli.verbose,
+            );
+            workflow::start::run(
+                &mut c,
+                &resolved_name,
                 prompt_text.as_deref(),
                 fetch,
                 issue.as_deref(),
@@ -205,14 +227,18 @@ fn main() -> Result<()> {
                             eprintln!("Opening workspace '{ws_name}'...");
                         }
 
-                        workflow::open::open_workspace(
+                        let mut c = ctx(
                             &project_name,
-                            ws_name,
-                            worktree_path,
+                            &source_path,
                             &resolved,
                             &mut state,
                             &state_path,
                             cli.verbose,
+                        );
+                        workflow::open::open_workspace(
+                            &mut c,
+                            ws_name,
+                            worktree_path,
                             &std::collections::HashSet::new(),
                             None,
                             &std::collections::HashMap::new(),
@@ -252,14 +278,18 @@ fn main() -> Result<()> {
                     );
                 }
 
-                workflow::open::open_workspace(
+                let mut c = ctx(
                     &project_name,
-                    &name,
-                    &worktree_path,
+                    &source_path,
                     &resolved,
                     &mut state,
                     &state_path,
                     cli.verbose,
+                );
+                workflow::open::open_workspace(
+                    &mut c,
+                    &name,
+                    &worktree_path,
                     &std::collections::HashSet::new(),
                     None, // no prompt for open
                     &std::collections::HashMap::new(),
@@ -276,14 +306,22 @@ fn main() -> Result<()> {
             }
         }
         cli::Commands::Edit { name } => {
-            let state = WorkspaceState::load_from(&state_path)?;
+            let mut state = WorkspaceState::load_from(&state_path)?;
             let ws =
                 resolve_workspace(name, cli.project.as_deref(), &registry_path, &state, "edit")?;
             let resolved = load_config(&ws.source_path)?;
-            workflow::edit::run(&ws.name, &ws.project_name, &resolved, &state, cli.verbose)?;
+            let mut c = ctx(
+                &ws.project_name,
+                &ws.source_path,
+                &resolved,
+                &mut state,
+                &state_path,
+                cli.verbose,
+            );
+            workflow::edit::run(&mut c, &ws.name)?;
         }
         cli::Commands::Browse { name } => {
-            let state = WorkspaceState::load_from(&state_path)?;
+            let mut state = WorkspaceState::load_from(&state_path)?;
             let ws = resolve_workspace(
                 name,
                 cli.project.as_deref(),
@@ -291,21 +329,31 @@ fn main() -> Result<()> {
                 &state,
                 "browse",
             )?;
-            // Neither command needs anything from the config, but loading the
-            // project config is what runs the trust gate, and dropping the call
-            // would silently stop `.foundry.toml` approval being requested here.
-            let _ = load_config(&ws.source_path)?;
-            workflow::edit::browse(&ws.name, &ws.project_name, &state, cli.verbose)?;
+            let resolved = load_config(&ws.source_path)?;
+            let mut c = ctx(
+                &ws.project_name,
+                &ws.source_path,
+                &resolved,
+                &mut state,
+                &state_path,
+                cli.verbose,
+            );
+            workflow::edit::browse(&mut c, &ws.name)?;
         }
         cli::Commands::Diff { name, stat } => {
-            let state = WorkspaceState::load_from(&state_path)?;
+            let mut state = WorkspaceState::load_from(&state_path)?;
             let ws =
                 resolve_workspace(name, cli.project.as_deref(), &registry_path, &state, "diff")?;
-            // Neither command needs anything from the config, but loading the
-            // project config is what runs the trust gate, and dropping the call
-            // would silently stop `.foundry.toml` approval being requested here.
-            let _ = load_config(&ws.source_path)?;
-            workflow::diff::run(&ws.name, &ws.project_name, &ws.source_path, &state, stat)?;
+            let resolved = load_config(&ws.source_path)?;
+            let mut c = ctx(
+                &ws.project_name,
+                &ws.source_path,
+                &resolved,
+                &mut state,
+                &state_path,
+                cli.verbose,
+            );
+            workflow::diff::run(&mut c, &ws.name, stat)?;
         }
         cli::Commands::Switch { name } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
@@ -372,17 +420,15 @@ fn main() -> Result<()> {
             )?;
             let resolved = load_config(&ws.source_path)?;
 
-            workflow::finish::run(
-                &ws.name,
+            let mut c = ctx(
                 &ws.project_name,
                 &ws.source_path,
                 &resolved,
                 &mut state,
                 &state_path,
                 cli.verbose,
-                local,
-                cli.yes,
-            )?;
+            );
+            workflow::finish::run(&mut c, &ws.name, local, cli.yes)?;
         }
         cli::Commands::Discard { name, force } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
@@ -395,17 +441,15 @@ fn main() -> Result<()> {
             )?;
             let resolved = load_config(&ws.source_path)?;
 
-            workflow::discard::run(
-                &ws.name,
+            let mut c = ctx(
                 &ws.project_name,
                 &ws.source_path,
                 &resolved,
                 &mut state,
                 &state_path,
                 cli.verbose,
-                cli.yes,
-                force,
-            )?;
+            );
+            workflow::discard::run(&mut c, &ws.name, cli.yes, force)?;
         }
         cli::Commands::Restore { branch } => {
             let mut registry = Registry::load_from(&registry_path)?;
@@ -415,15 +459,15 @@ fn main() -> Result<()> {
 
             if let Some(branch) = branch {
                 let mut state = WorkspaceState::load_from(&state_path)?;
-                workflow::restore::run(
-                    &branch,
+                let mut c = ctx(
                     &project_name,
                     &source_path,
                     &resolved,
                     &mut state,
                     &state_path,
                     cli.verbose,
-                )?;
+                );
+                workflow::restore::run(&mut c, &branch)?;
             } else {
                 workflow::restore::list_archived(&source_path, &resolved.archive_prefix)?;
             }
@@ -559,20 +603,18 @@ fn main() -> Result<()> {
             let ws = resolve_workspace(name, cli.project.as_deref(), &registry_path, &state, "pr")?;
             let resolved = load_config(&ws.source_path)?;
 
-            workflow::pr::run(
-                &ws.name,
+            let mut c = ctx(
                 &ws.project_name,
                 &ws.source_path,
                 &resolved,
                 &mut state,
                 &state_path,
                 cli.verbose,
-                title.as_deref(),
-                body.as_deref(),
-            )?;
+            );
+            workflow::pr::run(&mut c, &ws.name, title.as_deref(), body.as_deref())?;
         }
         cli::Commands::Checks { name } => {
-            let state = WorkspaceState::load_from(&state_path)?;
+            let mut state = WorkspaceState::load_from(&state_path)?;
             let ws = resolve_workspace(
                 name,
                 cli.project.as_deref(),
@@ -582,14 +624,15 @@ fn main() -> Result<()> {
             )?;
             let resolved = load_config(&ws.source_path)?;
 
-            workflow::checks::run(
-                &ws.name,
+            let mut c = ctx(
                 &ws.project_name,
                 &ws.source_path,
                 &resolved,
-                &state,
+                &mut state,
+                &state_path,
                 cli.verbose,
-            )?;
+            );
+            workflow::checks::run(&mut c, &ws.name)?;
         }
         cli::Commands::Completions { shell } => {
             clap_complete::generate(

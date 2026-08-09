@@ -1,114 +1,59 @@
 use anyhow::{Context, Result};
-use std::path::Path;
 
 use std::io::{self, Write as _};
 
-use crate::config::{MergeStrategy, ResolvedConfig};
+use crate::config::MergeStrategy;
 use crate::forge;
 use crate::git;
 use crate::history;
-use crate::state::WorkspaceState;
 
-#[allow(clippy::too_many_arguments)]
 pub fn run(
+    ctx: &mut super::WorkflowCtx,
     name: &str,
-    project_name: &str,
-    source_path: &Path,
-    config: &ResolvedConfig,
-    state: &mut WorkspaceState,
-    state_path: &Path,
-    verbose: bool,
     force_local: bool,
     skip_confirm: bool,
 ) -> Result<()> {
-    let workspace = super::resolve_active_workspace(state, project_name, name)?;
-    let worktree_path = workspace.worktree_path;
-    let branch = workspace.branch;
-    let tab_id = workspace.terminal_tab_id;
-    let pr_number = workspace.pr_number;
-    let pr_url = workspace.pr_url;
+    let ws = ctx.workspace(name)?;
 
-    if git::has_uncommitted_changes(&worktree_path)? {
+    if git::has_uncommitted_changes(&ws.worktree_path)? {
         anyhow::bail!(
             "worktree '{}' has uncommitted changes. Commit or stash them before finishing.",
-            worktree_path.display()
+            ws.worktree_path.display()
         );
     }
 
     // Decide: merge PR on GitHub, or merge locally?
-    if let Some(pr_num) = pr_number {
-        if force_local {
+    match ws.pr_number {
+        Some(pr_num) if !force_local => do_pr_merge(ctx, &ws, pr_num, skip_confirm),
+        Some(pr_num) => {
             // User explicitly chose local merge, clear PR info
-            state.clear_pr_info(project_name, name);
-            state.save_to(state_path)?;
-            if verbose {
+            ctx.state.clear_pr_info(ctx.project, name);
+            ctx.state.save_to(ctx.state_path)?;
+            if ctx.verbose {
                 eprintln!("Ignoring PR #{pr_num}, merging locally...");
             }
-            do_local_merge(
-                name,
-                project_name,
-                source_path,
-                &worktree_path,
-                &branch,
-                &tab_id,
-                config,
-                state,
-                state_path,
-                verbose,
-            )
-        } else {
-            do_pr_merge(
-                name,
-                project_name,
-                source_path,
-                &worktree_path,
-                &branch,
-                &tab_id,
-                pr_num,
-                pr_url.as_deref(),
-                config,
-                state,
-                state_path,
-                verbose,
-                skip_confirm,
-            )
+            do_local_merge(ctx, &ws)
         }
-    } else {
-        if force_local && verbose {
-            eprintln!("No PR associated, merging locally...");
+        None => {
+            if force_local && ctx.verbose {
+                eprintln!("No PR associated, merging locally...");
+            }
+            do_local_merge(ctx, &ws)
         }
-        do_local_merge(
-            name,
-            project_name,
-            source_path,
-            &worktree_path,
-            &branch,
-            &tab_id,
-            config,
-            state,
-            state_path,
-            verbose,
-        )
     }
 }
 
 /// Merge the PR on GitHub, then clean up the workspace.
-#[allow(clippy::too_many_arguments)]
 fn do_pr_merge(
-    name: &str,
-    project_name: &str,
-    source_path: &Path,
-    worktree_path: &Path,
-    branch: &str,
-    tab_id: &str,
+    ctx: &mut super::WorkflowCtx,
+    ws: &super::ActiveWorkspace,
     pr_number: u64,
-    pr_url: Option<&str>,
-    config: &ResolvedConfig,
-    state: &mut WorkspaceState,
-    state_path: &Path,
-    verbose: bool,
     skip_confirm: bool,
 ) -> Result<()> {
+    let (name, branch) = (ws.name.as_str(), ws.branch.as_str());
+    let (source_path, config, verbose) = (ctx.source_path, ctx.config, ctx.verbose);
+    let pr_url = ws.pr_url.as_deref();
+
     // Detect forge
     let (forge_impl, remote) = forge::detect_forge(source_path, config.pr_remote.as_deref())?;
 
@@ -158,7 +103,7 @@ fn do_pr_merge(
 
     forge_impl.merge_pr(source_path, branch)?;
 
-    let history_event = history::HistoryEvent::pr_merged(project_name, name, branch, pr_number);
+    let history_event = history::HistoryEvent::pr_merged(ctx.project, name, branch, pr_number);
 
     // Fetch to update local refs after the remote merge
     let main_branch = git::detect_main_branch(source_path)?;
@@ -172,16 +117,8 @@ fn do_pr_merge(
     eprintln!("Merged PR #{pr_number}.");
 
     super::cleanup_workspace(
-        name,
-        project_name,
-        source_path,
-        worktree_path,
-        branch,
-        tab_id,
-        config,
-        state,
-        state_path,
-        verbose,
+        ctx,
+        ws,
         super::BranchCleanup::Delete,
         // finish refuses to run on a dirty worktree, so a plain remove is
         // always enough here.
@@ -193,19 +130,10 @@ fn do_pr_merge(
 }
 
 /// Merge the branch locally into main, then clean up the workspace.
-#[allow(clippy::too_many_arguments)]
-fn do_local_merge(
-    name: &str,
-    project_name: &str,
-    source_path: &Path,
-    worktree_path: &Path,
-    branch: &str,
-    tab_id: &str,
-    config: &ResolvedConfig,
-    state: &mut WorkspaceState,
-    state_path: &Path,
-    verbose: bool,
-) -> Result<()> {
+fn do_local_merge(ctx: &mut super::WorkflowCtx, ws: &super::ActiveWorkspace) -> Result<()> {
+    let (name, branch) = (ws.name.as_str(), ws.branch.as_str());
+    let (source_path, config, verbose) = (ctx.source_path, ctx.config, ctx.verbose);
+
     if git::has_modified_tracked_files(source_path)? {
         anyhow::bail!(
             "main repo at '{}' has uncommitted changes to tracked files. \
@@ -282,7 +210,7 @@ fn do_local_merge(
     };
 
     let history_event =
-        history::HistoryEvent::finished(project_name, name, branch, commit_count, strategy_str);
+        history::HistoryEvent::finished(ctx.project, name, branch, commit_count, strategy_str);
 
     // Print success BEFORE cleanup
     if has_commits {
@@ -291,21 +219,9 @@ fn do_local_merge(
         eprintln!("Finished workspace '{name}'. Branch '{branch}' deleted (no commits).");
     }
 
-    super::cleanup_workspace(
-        name,
-        project_name,
-        source_path,
-        worktree_path,
-        branch,
-        tab_id,
-        config,
-        state,
-        state_path,
-        verbose,
-        super::BranchCleanup::Archive,
-        false,
-        |_| history_event,
-    )?;
+    super::cleanup_workspace(ctx, ws, super::BranchCleanup::Archive, false, |_| {
+        history_event
+    })?;
 
     Ok(())
 }

@@ -1,34 +1,24 @@
 use anyhow::Result;
 use std::io::{self, Write};
-use std::path::Path;
 
-use crate::config::ResolvedConfig;
 use crate::git;
 use crate::history;
-use crate::state::WorkspaceState;
 
-#[allow(clippy::too_many_arguments)]
 pub fn run(
+    ctx: &mut super::WorkflowCtx,
     name: &str,
-    project_name: &str,
-    source_path: &Path,
-    config: &ResolvedConfig,
-    state: &mut WorkspaceState,
-    state_path: &Path,
-    verbose: bool,
     skip_confirm: bool,
     force: bool,
 ) -> Result<()> {
-    let workspace = super::resolve_active_workspace(state, project_name, name)?;
-    let worktree_path = workspace.worktree_path;
-    let branch = workspace.branch;
-    let tab_id = workspace.terminal_tab_id;
+    let ws = ctx.workspace(name)?;
+    let source_path = ctx.source_path;
 
     // Check for unmerged commits — require --force to discard work
     let main_branch = git::detect_main_branch(source_path)?;
-    let has_commits = git::branch_has_commits(source_path, &branch, &main_branch).unwrap_or(false);
+    let has_commits =
+        git::branch_has_commits(source_path, &ws.branch, &main_branch).unwrap_or(false);
     let commit_count = if has_commits {
-        git::log_commits(source_path, &main_branch, &branch)
+        git::log_commits(source_path, &main_branch, &ws.branch)
             .map(|log| log.lines().filter(|l| !l.is_empty()).count() as u64)
             .unwrap_or(0)
     } else {
@@ -37,13 +27,14 @@ pub fn run(
     if has_commits && !force {
         let s = if commit_count == 1 { "" } else { "s" };
         anyhow::bail!(
-            "branch '{branch}' has {commit_count} unmerged commit{s}. \
+            "branch '{}' has {commit_count} unmerged commit{s}. \
              Use `foundry discard {name} --force` to discard anyway, \
-             or `foundry finish {name}` to merge first."
+             or `foundry finish {name}` to merge first.",
+            ws.branch
         );
     }
 
-    if git::has_uncommitted_changes(&worktree_path)? && !skip_confirm && !force {
+    if git::has_uncommitted_changes(&ws.worktree_path)? && !skip_confirm && !force {
         print!("Worktree has uncommitted changes. Discard anyway? [y/N] ");
         io::stdout().flush()?;
         let mut input = String::new();
@@ -57,28 +48,28 @@ pub fn run(
     // Print the outcome BEFORE cleanup: the tab close at the end of
     // `cleanup_workspace` kills this process when run from inside the worktree.
     if has_commits {
-        eprintln!("Discarded workspace '{name}'. Branch '{branch}' archived.");
+        eprintln!(
+            "Discarded workspace '{name}'. Branch '{}' archived.",
+            ws.branch
+        );
     } else {
-        eprintln!("Discarded workspace '{name}'. Branch '{branch}' deleted (no commits).");
+        eprintln!(
+            "Discarded workspace '{name}'. Branch '{}' deleted (no commits).",
+            ws.branch
+        );
     }
 
+    let project = ctx.project.to_string();
+    let branch = ws.branch.clone();
     super::cleanup_workspace(
-        name,
-        project_name,
-        source_path,
-        &worktree_path,
-        &branch,
-        &tab_id,
-        config,
-        state,
-        state_path,
-        verbose,
+        ctx,
+        &ws,
         super::BranchCleanup::Archive,
         // Discard exists to throw work away, so a dirty worktree is expected
         // here — unlike finish, which refuses to run on one.
         true,
         |archived_as| {
-            history::HistoryEvent::discarded(project_name, name, &branch, commit_count, archived_as)
+            history::HistoryEvent::discarded(&project, name, &branch, commit_count, archived_as)
         },
     )
 }
