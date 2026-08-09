@@ -192,11 +192,32 @@ pub fn run(
         project: project_name.into(),
     };
 
+    // A deferred script is one the user asked to run *in a pane* — typically a
+    // long-lived process like a dev server. Running it here would block
+    // `restore` until the user killed it, so only the blocking phase runs.
+    // (`start` chains the deferred ones into a pane; restore does not yet.)
+    let (immediate, deferred): (Vec<_>, Vec<_>) =
+        config.setup_scripts.iter().partition(|s| !s.deferred);
+    if !deferred.is_empty() {
+        eprintln!(
+            "Note: {} deferred setup script(s) were not run — restore does not \
+             start deferred scripts. Run them in the workspace if you need them.",
+            deferred.len()
+        );
+    }
+
+    // Same port environment `start` gives its setup scripts, read back from the
+    // state entry written above.
+    let script_env = state
+        .find_by_worktree_path(&worktree_path.to_string_lossy())
+        .map(|ws| ws.allocated_ports.clone())
+        .unwrap_or_default();
+
     super::run_scripts(
-        &config.setup_scripts,
+        immediate.iter().copied(),
         super::ScriptKind::Setup,
         &template_vars,
-        &std::collections::HashMap::new(),
+        &script_env,
         verbose,
     )?;
 
