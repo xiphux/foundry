@@ -396,6 +396,55 @@ fn main() -> Result<()> {
                 workflow::restore::list_archived(&source_path, &resolved.archive_prefix)?;
             }
         }
+        cli::Commands::Trust { path, revoke } => {
+            let repo_root = match path {
+                Some(p) => foundry::git::repo_root(&p).unwrap_or(p),
+                None => {
+                    let cwd = std::env::current_dir()?;
+                    foundry::git::repo_root(&cwd).context("not inside a git repository")?
+                }
+            };
+
+            let store_path = foundry::trust::trust_store_path()?;
+            let mut store = foundry::trust::TrustStore::load_from(&store_path)?;
+
+            if revoke {
+                if store.revoke(&repo_root) {
+                    store.save_to(&store_path)?;
+                    println!("Withdrew approval for {}.", repo_root.display());
+                } else {
+                    println!("{} was not approved.", repo_root.display());
+                }
+                return Ok(());
+            }
+
+            let config_path = repo_root.join(".foundry.toml");
+            if !config_path.exists() {
+                anyhow::bail!("no .foundry.toml at {}", config_path.display());
+            }
+            let contents = std::fs::read_to_string(&config_path)
+                .with_context(|| format!("failed to read {}", config_path.display()))?;
+            let project_config: config::ProjectConfig = toml::from_str(&contents)
+                .with_context(|| format!("failed to parse {}", config_path.display()))?;
+
+            let directives = foundry::trust::executable_directives(&project_config);
+            if directives.is_empty() {
+                println!(
+                    "{} contains no commands — no approval needed.",
+                    config_path.display()
+                );
+                return Ok(());
+            }
+
+            println!("{} will run:", config_path.display());
+            for directive in &directives {
+                println!("  - {directive}");
+            }
+
+            store.trust(&repo_root, &foundry::trust::hash_config(&contents));
+            store.save_to(&store_path)?;
+            println!("\nApproved. Foundry will ask again if the file changes.");
+        }
         cli::Commands::Projects(cmd) => match cmd {
             cli::ProjectsCommands::List => {
                 let registry = Registry::load_from(&registry_path)?;

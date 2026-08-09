@@ -135,6 +135,10 @@ pub fn load_project_config(repo_root: &Path) -> Result<Option<ProjectConfig>> {
         }
     }
 
+    // This file is checked into the repository, so anything executable in it
+    // was authored by the repo, not by the user running foundry. Gate it.
+    crate::trust::ensure_trusted(repo_root, &contents, &config)?;
+
     Ok(Some(config))
 }
 

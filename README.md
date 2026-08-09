@@ -69,6 +69,8 @@ foundry discard
 | `foundry diff [name] --stat` | Show file change summary vs main |
 | `foundry history` | Show workspace activity history |
 | `foundry list` | List all active workspaces across all projects |
+| `foundry trust [path]` | Review and approve a project's `.foundry.toml` |
+| `foundry trust [path] --revoke` | Withdraw a previous approval |
 | `foundry projects list` | List registered projects |
 | `foundry projects add <name> <path>` | Register a project |
 | `foundry projects remove <name>` | Unregister a project |
@@ -355,6 +357,38 @@ The following variables can be used in `command` and `working_dir` fields in scr
 - **Scalar values** (branch_prefix, agent_command, etc.): project overrides global
 - **Pane layout**: global defines the structure; project can override `command` and `env` for existing panes by name, and opt in to optional panes
 - **Scripts**: project-only (no global scripts)
+
+### Trusting Project Configs
+
+`.foundry.toml` lives in the repo root and is checked into version control, so
+its contents come from whoever wrote the repository. Several keys are
+executable: setup and teardown scripts run through `sh -c`, pane `command`
+overrides are typed into a shell, and `agent_command` runs verbatim.
+
+The first time foundry uses a project config containing any of those, it shows
+exactly what would run and asks for approval:
+
+```
+/path/to/repo/.foundry.toml contains commands that foundry will run:
+  - setup script 'install': pnpm install
+
+This file comes from the repository, not from your own configuration.
+Only approve it if you trust this repo.
+Trust this project config? [y/N]
+```
+
+Approval is recorded per project in `~/.foundry/trust.toml`, keyed to a hash of
+the file, and is requested again whenever the file changes. Configs with no
+executable content never prompt.
+
+Approve ahead of time — or in a script, where foundry refuses to prompt and
+fails instead — with `foundry trust`:
+
+```bash
+foundry trust                    # approve the current repo
+foundry trust /path/to/repo      # approve a specific repo
+foundry trust --revoke           # withdraw approval
+```
 
 ## Project Registry
 

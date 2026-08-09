@@ -129,6 +129,19 @@ pub enum Commands {
         /// Archived branch name (lists archived branches if omitted)
         branch: Option<String>,
     },
+    /// Review and approve a project's .foundry.toml
+    ///
+    /// Project configs are checked into the repository and can specify
+    /// commands foundry will run. Approval is recorded per project and is
+    /// requested again whenever the file changes.
+    Trust {
+        /// Path to the project root (defaults to the current repository)
+        path: Option<PathBuf>,
+
+        /// Withdraw a previous approval instead of granting one
+        #[arg(long)]
+        revoke: bool,
+    },
     /// Manage project registry
     #[command(subcommand)]
     Projects(ProjectsCommands),
