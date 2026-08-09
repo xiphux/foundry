@@ -102,6 +102,8 @@ pub fn run(
         &config.archive_prefix,
         config.branch_prefix.as_deref(),
     );
+    super::validate_workspace_name(&name)
+        .with_context(|| format!("branch '{branch}' does not map to a usable workspace name"))?;
     let worktree_path = config.worktree_dir.join(project_name).join(&name);
 
     // Check if worktree already exists

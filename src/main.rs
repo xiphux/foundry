@@ -26,6 +26,7 @@ fn resolve_workspace(
 ) -> Result<WorkspaceRef> {
     match explicit_name {
         Some(name) => {
+            workflow::validate_workspace_name(&name)?;
             let mut registry = Registry::load_from(registry_path)?;
             let (project_name, source_path) =
                 workflow::resolve_project(project, &mut registry, registry_path)?;
@@ -146,6 +147,8 @@ fn main() -> Result<()> {
                     prompt_text
                 };
 
+            workflow::validate_workspace_name(&resolved_name)?;
+
             workflow::start::run(
                 &resolved_name,
                 &project_name,
@@ -222,6 +225,7 @@ fn main() -> Result<()> {
                     eprintln!("Opened {} workspace(s).", workspaces.len());
                 }
             } else if let Some(name) = name {
+                workflow::validate_workspace_name(&name)?;
                 let mut registry = Registry::load_from(&registry_path)?;
                 let (project_name, source_path) = workflow::resolve_project(
                     cli.project.as_deref(),
@@ -298,6 +302,7 @@ fn main() -> Result<()> {
             state.prune_stale();
 
             if let Some(name) = name {
+                workflow::validate_workspace_name(&name)?;
                 let mut registry = Registry::load_from(&registry_path)?;
                 let (project_name, source_path) = workflow::resolve_project(
                     cli.project.as_deref(),

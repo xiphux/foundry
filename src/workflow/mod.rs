@@ -12,7 +12,7 @@ pub mod status;
 
 pub use cleanup::{BranchCleanup, cleanup_workspace};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 
 use crate::config;
@@ -61,6 +61,52 @@ pub fn resolve_project(
     registry.save_to(registry_path)?;
 
     Ok((name, repo_root))
+}
+
+/// Longest workspace name accepted. The name is one component of a path that
+/// also carries the worktree root and the project name, so this leaves room
+/// under the usual 255-byte limit on a single filesystem component.
+const MAX_WORKSPACE_NAME_LEN: usize = 100;
+
+/// Reject workspace names that are unsafe to use as a path component.
+///
+/// The name is not just a label: it is joined into the worktree path, used as
+/// a git branch name, embedded in the status filename, and interpolated into
+/// the quoted hook command written to `.claude/settings.local.json`. A `/` or
+/// a `..` therefore escapes the worktree root, and a `'` breaks out of the
+/// quoting in the hook command.
+///
+/// Unicode letters and digits are allowed, because `--issue` derives the name
+/// from the issue title and titles are not always Latin script. Everything
+/// outside letters, digits, `-`, `_` and `.` is refused.
+pub fn validate_workspace_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        bail!("workspace name cannot be empty");
+    }
+    if name.len() > MAX_WORKSPACE_NAME_LEN {
+        bail!(
+            "workspace name is too long ({} bytes, maximum {MAX_WORKSPACE_NAME_LEN})",
+            name.len()
+        );
+    }
+    // A leading '-' reads as a flag to git; a leading '.' hides the worktree
+    // and covers the `.` and `..` path components.
+    if name.starts_with('-') {
+        bail!("workspace name cannot start with '-': {name:?}");
+    }
+    if name.starts_with('.') {
+        bail!("workspace name cannot start with '.': {name:?}");
+    }
+    if let Some(bad) = name
+        .chars()
+        .find(|c| !(c.is_alphanumeric() || *c == '-' || *c == '_' || *c == '.'))
+    {
+        bail!(
+            "workspace name contains an unsupported character {bad:?}: {name:?}. \
+             Use letters, digits, '-', '_' or '.'."
+        );
+    }
+    Ok(())
 }
 
 pub fn compute_branch_name(name: &str, prefix: Option<&str>) -> String {
@@ -122,6 +168,71 @@ pub fn foundry_paths() -> Result<(PathBuf, PathBuf)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_workspace_name_accepts_ordinary_names() {
+        for name in ["feature", "fix-auth-timeout", "v1.2_beta", "42-fix-auth"] {
+            assert!(
+                validate_workspace_name(name).is_ok(),
+                "should accept {name:?}"
+            );
+        }
+    }
+
+    /// `--issue` derives the name from the issue title, which is not always
+    /// Latin script, so letters outside ASCII have to stay valid.
+    #[test]
+    fn validate_workspace_name_accepts_non_ascii_letters() {
+        assert!(validate_workspace_name("42-日本語").is_ok());
+        assert!(validate_workspace_name("café").is_ok());
+    }
+
+    /// The name is joined into the worktree path, so anything that could climb
+    /// out of it has to be refused.
+    #[test]
+    fn validate_workspace_name_rejects_path_traversal() {
+        for name in ["..", ".", "../evil", "a/b", "a\\b", ".hidden", "/abs"] {
+            assert!(
+                validate_workspace_name(name).is_err(),
+                "should reject {name:?}"
+            );
+        }
+    }
+
+    /// The name is interpolated into the single-quoted hook command written to
+    /// settings.local.json, so a quote must not get through.
+    #[test]
+    fn validate_workspace_name_rejects_shell_metacharacters() {
+        for name in [
+            "a'b",
+            "a\"b",
+            "a;rm -rf /",
+            "a$(id)",
+            "a`id`",
+            "a|b",
+            "a b",
+            "a\nb",
+        ] {
+            assert!(
+                validate_workspace_name(name).is_err(),
+                "should reject {name:?}"
+            );
+        }
+    }
+
+    /// A leading hyphen would be read as a flag by git.
+    #[test]
+    fn validate_workspace_name_rejects_leading_hyphen() {
+        assert!(validate_workspace_name("-force").is_err());
+        assert!(validate_workspace_name("--upload-pack=evil").is_err());
+    }
+
+    #[test]
+    fn validate_workspace_name_rejects_empty_and_overlong() {
+        assert!(validate_workspace_name("").is_err());
+        assert!(validate_workspace_name(&"a".repeat(MAX_WORKSPACE_NAME_LEN)).is_ok());
+        assert!(validate_workspace_name(&"a".repeat(MAX_WORKSPACE_NAME_LEN + 1)).is_err());
+    }
 
     #[test]
     fn compute_branch_name_with_prefix() {
