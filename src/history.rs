@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::Path;
 
 use crate::config;
 
@@ -85,6 +86,92 @@ mod tests {
         assert!(json.contains("\"event\":\"pr_created\""));
         assert!(json.contains("\"pr_number\":42"));
         assert!(json.contains("\"pr_url\":\"https://github.com/user/repo/pull/42\""));
+    }
+
+    /// Write `count` events to a temp log, named "ws-0".."ws-N" in order.
+    fn write_log(count: usize) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("history.jsonl");
+        let mut out = String::new();
+        for i in 0..count {
+            let event = HistoryEvent::started("proj", &format!("ws-{i}"), "branch", None);
+            out.push_str(&serde_json::to_string(&event).unwrap());
+            out.push('\n');
+        }
+        std::fs::write(&path, out).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn read_recent_returns_newest_first() {
+        let (_dir, path) = write_log(5);
+        let events = read_recent_from(&path, 3).unwrap();
+        let names: Vec<&str> = events.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["ws-4", "ws-3", "ws-2"]);
+    }
+
+    #[test]
+    fn read_recent_handles_missing_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let events = read_recent_from(&dir.path().join("nope.jsonl"), 10).unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn read_recent_limit_zero_returns_empty() {
+        let (_dir, path) = write_log(5);
+        assert!(read_recent_from(&path, 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn read_recent_limit_exceeding_file_returns_all() {
+        let (_dir, path) = write_log(3);
+        let events = read_recent_from(&path, 100).unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[2].name, "ws-0");
+    }
+
+    /// The window must grow past TAIL_WINDOW rather than truncating the result.
+    #[test]
+    fn read_recent_grows_window_past_first_read() {
+        // Each event is ~150 bytes, so 2000 of them far exceed the 64 KiB window.
+        let (_dir, path) = write_log(2000);
+        let events = read_recent_from(&path, 1500).unwrap();
+        assert_eq!(events.len(), 1500);
+        assert_eq!(events[0].name, "ws-1999");
+        assert_eq!(events[1499].name, "ws-500");
+    }
+
+    /// A record split by the window boundary must not surface as a partial event.
+    #[test]
+    fn read_recent_discards_record_split_by_window() {
+        let (_dir, path) = write_log(1000);
+        // Ask for few events so the first window is used and its leading line
+        // is almost certainly a partial record.
+        let events = read_recent_from(&path, 5).unwrap();
+        assert_eq!(events.len(), 5);
+        assert_eq!(events[0].name, "ws-999");
+        assert!(events.iter().all(|e| e.event == "started"));
+    }
+
+    #[test]
+    fn read_recent_skips_corrupt_lines() {
+        let (_dir, path) = write_log(4);
+        let mut content = std::fs::read_to_string(&path).unwrap();
+        content.push_str("{ not valid json\n\n");
+        std::fs::write(&path, content).unwrap();
+
+        let events = read_recent_from(&path, 3).unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].name, "ws-3");
+    }
+
+    #[test]
+    fn read_recent_handles_empty_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("history.jsonl");
+        std::fs::write(&path, "").unwrap();
+        assert!(read_recent_from(&path, 10).unwrap().is_empty());
     }
 
     #[test]
@@ -270,33 +357,65 @@ pub fn record(event: &HistoryEvent) -> Result<()> {
     Ok(())
 }
 
+/// How much of the tail to read on the first attempt, in bytes. Doubles until
+/// enough events are found or the whole file has been read.
+const TAIL_WINDOW: u64 = 64 * 1024;
+
 /// Read the most recent history events, up to `limit`.
 pub fn read_recent(limit: usize) -> Result<Vec<HistoryEvent>> {
-    let path = history_path()?;
+    read_recent_from(&history_path()?, limit)
+}
 
-    if !path.exists() {
+/// Read the most recent events from a specific log file (for testability).
+///
+/// The log is append-only and never rotated, so it grows without bound. Reading
+/// it front-to-back to show the last 20 entries meant parsing every event ever
+/// recorded. Instead, seek to a window at the end of the file and parse
+/// backward from there, growing the window only if it held too few events.
+fn read_recent_from(path: &Path, limit: usize) -> Result<Vec<HistoryEvent>> {
+    if limit == 0 || !path.exists() {
         return Ok(Vec::new());
     }
 
-    let file = File::open(&path)
+    let mut file = File::open(path)
         .with_context(|| format!("failed to open history log at {}", path.display()))?;
+    let file_len = file
+        .metadata()
+        .with_context(|| format!("failed to stat history log at {}", path.display()))?
+        .len();
 
-    let reader = BufReader::new(file);
-    let mut events: Vec<HistoryEvent> = reader
-        .lines()
-        .filter_map(|line| {
-            let line = line.ok()?;
-            if line.trim().is_empty() {
-                return None;
-            }
-            serde_json::from_str(&line).ok()
-        })
-        .collect();
+    let mut window = TAIL_WINDOW;
+    loop {
+        let start = file_len.saturating_sub(window);
+        file.seek(SeekFrom::Start(start))?;
 
-    // Return most recent first
-    events.reverse();
-    events.truncate(limit);
-    Ok(events)
+        let mut buf = Vec::with_capacity((file_len - start) as usize);
+        file.read_to_end(&mut buf)?;
+
+        let text = String::from_utf8_lossy(&buf);
+        let lines: Vec<&str> = text.lines().collect();
+        // Unless the window reaches the start of the file, its first line is
+        // probably a record the boundary cut in half — drop it.
+        let lines = if start > 0 && !lines.is_empty() {
+            &lines[1..]
+        } else {
+            &lines[..]
+        };
+
+        let events: Vec<HistoryEvent> = lines
+            .iter()
+            .rev()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .take(limit)
+            .collect();
+
+        // Enough events, or there is no more file to read.
+        if events.len() >= limit || start == 0 {
+            return Ok(events);
+        }
+        window *= 2;
+    }
 }
 
 /// Display history events to stdout.
