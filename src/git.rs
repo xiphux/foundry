@@ -169,6 +169,15 @@ pub fn branch_exists(repo_path: &Path, name: &str) -> Result<bool> {
     Ok(!output.is_empty())
 }
 
+/// Check whether `relative` is tracked by git in this repo.
+///
+/// Used to tell a user's own local file apart from one the repository ships.
+/// Errors (not a repo, git missing) report "not tracked", which is the safe
+/// answer for callers that only relax behaviour for untracked files.
+pub fn is_tracked(repo_path: &Path, relative: &str) -> bool {
+    run_git(repo_path, &["ls-files", "--error-unmatch", "--", relative]).is_ok()
+}
+
 pub fn has_uncommitted_changes(repo_path: &Path) -> Result<bool> {
     let output = run_git_readonly(repo_path, &["status", "--porcelain"])?;
     Ok(!output.is_empty())
