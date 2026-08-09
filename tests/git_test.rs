@@ -407,3 +407,46 @@ fn test_branch_operations_survive_the_end_of_options_delimiter() {
             .is_empty()
     );
 }
+
+/// Inside a linked worktree, `repo_root` reports the worktree itself. Anything
+/// that identifies a *project* has to resolve back to the source repo instead —
+/// `resolve_project` used the former and auto-registered a workspace's worktree
+/// as a new project, then created worktrees of it.
+#[test]
+fn test_main_repo_root_resolves_back_from_a_linked_worktree() {
+    let repo = init_test_repo();
+    let wt_parent = TempDir::new().unwrap();
+    let worktree = wt_parent.path().join("feature");
+
+    Command::new("git")
+        .args([
+            "worktree",
+            "add",
+            worktree.to_str().unwrap(),
+            "-b",
+            "feature",
+        ])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(worktree.exists(), "worktree was not created");
+
+    let canonical_repo = std::fs::canonicalize(repo.path()).unwrap();
+
+    // The worktree reports itself...
+    assert_eq!(
+        std::fs::canonicalize(foundry::git::repo_root(&worktree).unwrap()).unwrap(),
+        std::fs::canonicalize(&worktree).unwrap()
+    );
+    // ...while the project resolution reaches the source repo.
+    assert_eq!(
+        std::fs::canonicalize(foundry::git::main_repo_root(&worktree).unwrap()).unwrap(),
+        canonical_repo
+    );
+
+    // And it stays correct when already in the main repo.
+    assert_eq!(
+        std::fs::canonicalize(foundry::git::main_repo_root(repo.path()).unwrap()).unwrap(),
+        canonical_repo
+    );
+}

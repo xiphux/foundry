@@ -34,7 +34,15 @@ pub fn resolve_project(
     }
 
     let cwd = std::env::current_dir().context("failed to get current directory")?;
-    let repo_root = git::repo_root(&cwd).context("not inside a git repository")?;
+
+    // `main_repo_root`, not `repo_root`: inside a linked worktree the latter
+    // reports the *worktree*, which is not a project. Running `foundry start`
+    // from a workspace tab therefore auto-registered that workspace's worktree
+    // as a brand-new project, and then created worktrees of it — nesting
+    // workspaces inside workspaces, with a registry entry that dangles as soon
+    // as the original workspace is finished. Resolving back to the source repo
+    // is the same normalization the trust gate does, for the same reason.
+    let repo_root = git::main_repo_root(&cwd).context("not inside a git repository")?;
 
     if let Some(name) = registry.find_by_path(&repo_root) {
         return Ok((name, repo_root));
