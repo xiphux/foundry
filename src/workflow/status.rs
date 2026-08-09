@@ -256,31 +256,33 @@ fn status_display(status: &agent_hooks::AgentStatus) -> (&'static str, &'static 
     }
 }
 
+/// Shorten `s` to at most `max_bytes`, appending an ellipsis when it was cut.
+///
+/// Both inputs are agent-authored text: `last_tool` is a shell command the
+/// agent ran and `last_message` is its prose, both copied into the status file
+/// by the hook script. Neither is ASCII-only in practice, so the cut has to
+/// land on a character boundary — `&s[..n]` panics otherwise, and this runs on
+/// every row of every refresh, so the dashboard aborted mid-draw.
+fn ellipsize(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    let head = crate::str_util::truncate_on_char_boundary(s, max_bytes.saturating_sub(3));
+    format!("{head}...")
+}
+
 /// Build an activity string from rich status info.
 fn activity_text(info: &agent_hooks::AgentStatusInfo) -> String {
     match info.status {
         agent_hooks::AgentStatus::Working => info
             .last_tool
             .as_deref()
-            .map(|t| {
-                if t.len() > 50 {
-                    format!("{}...", &t[..47])
-                } else {
-                    t.to_string()
-                }
-            })
+            .map(|t| ellipsize(t, 50))
             .unwrap_or_default(),
         agent_hooks::AgentStatus::Idle => info
             .last_message
             .as_deref()
-            .map(|m| {
-                let truncated = if m.len() > 60 {
-                    format!("{}...", &m[..57])
-                } else {
-                    m.to_string()
-                };
-                format!("\"{truncated}\"")
-            })
+            .map(|m| format!("\"{}\"", ellipsize(m, 60)))
             .unwrap_or_default(),
         agent_hooks::AgentStatus::Error => info
             .error
@@ -292,52 +294,65 @@ fn activity_text(info: &agent_hooks::AgentStatusInfo) -> String {
 
 #[cfg(test)]
 mod tests {
-    /// Format a Unix timestamp as a human-readable "X ago" string.
-    fn format_time_ago(timestamp: i64) -> String {
-        let now = chrono::Utc::now().timestamp();
-        let diff = now - timestamp;
+    use super::*;
 
-        if diff < 0 {
-            return "just now".to_string();
-        }
+    #[test]
+    fn ellipsize_returns_short_input_unchanged() {
+        assert_eq!(ellipsize("cargo test", 50), "cargo test");
+        assert_eq!(ellipsize("", 50), "");
+    }
 
-        let seconds = diff as u64;
-        let minutes = seconds / 60;
-        let hours = minutes / 60;
-        let days = hours / 24;
+    #[test]
+    fn ellipsize_cuts_ascii_at_the_limit() {
+        let s = "a".repeat(60);
+        let out = ellipsize(&s, 50);
+        assert_eq!(out.len(), 50);
+        assert!(out.ends_with("..."));
+    }
 
-        if days > 0 {
-            if days == 1 {
-                "1d ago".to_string()
-            } else {
-                format!("{days}d ago")
-            }
-        } else if hours > 0 {
-            if hours == 1 {
-                "1h ago".to_string()
-            } else {
-                format!("{hours}h ago")
-            }
-        } else if minutes > 0 {
-            if minutes == 1 {
-                "1m ago".to_string()
-            } else {
-                format!("{minutes}m ago")
-            }
-        } else {
-            "just now".to_string()
+    /// The case that aborted the dashboard: the byte limit lands inside a
+    /// character, which `&s[..n]` refuses to slice.
+    #[test]
+    fn ellipsize_backs_off_to_a_char_boundary() {
+        let s = format!("{}émigré work is finished", "a".repeat(56));
+        assert!(
+            !s.is_char_boundary(57),
+            "test input no longer exercises this"
+        );
+        let out = ellipsize(&s, 60);
+        assert!(out.ends_with("..."));
+        assert!(out.len() <= 60);
+    }
+
+    /// Agent prose and shell commands are routinely non-ASCII, so no limit may
+    /// panic for any input.
+    #[test]
+    fn ellipsize_never_panics_at_any_limit() {
+        let s = "café-日本語-naïve-ünïcödé-✅-done with the refactor";
+        for limit in 0..s.len() + 5 {
+            let out = ellipsize(s, limit);
+            assert!(out.len() <= limit.max(3) + 3);
         }
     }
 
     #[test]
-    fn test_format_time_ago() {
-        let now = chrono::Utc::now().timestamp();
-        assert_eq!(format_time_ago(now), "just now");
-        assert_eq!(format_time_ago(now - 30), "just now");
-        assert_eq!(format_time_ago(now - 120), "2m ago");
-        assert_eq!(format_time_ago(now - 3600), "1h ago");
-        assert_eq!(format_time_ago(now - 7200), "2h ago");
-        assert_eq!(format_time_ago(now - 86400), "1d ago");
-        assert_eq!(format_time_ago(now - 259200), "3d ago");
+    fn activity_text_truncates_a_long_multibyte_message() {
+        let info = agent_hooks::AgentStatusInfo {
+            status: agent_hooks::AgentStatus::Idle,
+            last_message: Some(format!("{}émigré refactor complete", "a".repeat(56))),
+            ..Default::default()
+        };
+        let out = activity_text(&info);
+        assert!(out.starts_with('"') && out.ends_with("...\""), "{out}");
+    }
+
+    #[test]
+    fn activity_text_truncates_a_long_multibyte_tool() {
+        let info = agent_hooks::AgentStatusInfo {
+            status: agent_hooks::AgentStatus::Working,
+            last_tool: Some(format!("grep {}é pattern", "a".repeat(46))),
+            ..Default::default()
+        };
+        assert!(activity_text(&info).ends_with("..."));
     }
 }
