@@ -10,6 +10,7 @@ pub mod zellij;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::config::types::SplitDirection;
 
@@ -31,35 +32,66 @@ pub struct PaneSpec {
     pub shell: Option<String>,
 }
 
-/// Detect the current terminal and return a boxed automation backend.
-pub fn detect_terminal() -> Result<Box<dyn TerminalBackend>> {
-    if let Some(term) = ghostty::GhosttyBackend::detect() {
-        return Ok(Box::new(term));
-    }
+/// Which backend `detect_terminal` settled on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackendKind {
+    Ghostty,
+    Iterm2,
+    Wezterm,
+    WindowsTerminal,
+    Zellij,
+    Tmux,
+    Bare,
+}
 
-    if let Some(term) = iterm2::Iterm2Backend::detect() {
-        return Ok(Box::new(term));
+/// Work out which backend to use.
+///
+/// Ordering is deliberate: native terminals are probed first, and the
+/// multiplexers come last as a fallback for launching a *new detached*
+/// session — both refuse to run from inside an existing one.
+fn detect_kind() -> BackendKind {
+    if ghostty::GhosttyBackend::detect().is_some() {
+        return BackendKind::Ghostty;
     }
-
-    if let Some(term) = wezterm::WeztermBackend::detect() {
-        return Ok(Box::new(term));
+    if iterm2::Iterm2Backend::detect().is_some() {
+        return BackendKind::Iterm2;
     }
-
-    if let Some(term) = windows_terminal::WindowsTerminalBackend::detect() {
-        return Ok(Box::new(term));
+    if wezterm::WeztermBackend::detect().is_some() {
+        return BackendKind::Wezterm;
     }
-
+    if windows_terminal::WindowsTerminalBackend::detect().is_some() {
+        return BackendKind::WindowsTerminal;
+    }
     // Fallback to terminal multiplexers (Zellij, then tmux)
-    if let Some(term) = zellij::ZellijBackend::detect() {
-        return Ok(Box::new(term));
+    if zellij::ZellijBackend::detect().is_some() {
+        return BackendKind::Zellij;
     }
-
-    if let Some(term) = tmux::TmuxBackend::detect() {
-        return Ok(Box::new(term));
+    if tmux::TmuxBackend::detect().is_some() {
+        return BackendKind::Tmux;
     }
-
     // Bare fallback — no splits, just run the agent command
-    Ok(Box::new(bare::BareBackend::new()))
+    BackendKind::Bare
+}
+
+/// Detect the current terminal and return a boxed automation backend.
+///
+/// The result is memoized for the life of the process. The native backends
+/// only read env vars, but the Zellij and tmux probes each spawn a process,
+/// and this is called once per workspace by `open --all` and twice by
+/// workspace cleanup — so an unmemoized probe re-paid that cost every time,
+/// including for users who have neither multiplexer installed.
+pub fn detect_terminal() -> Result<Box<dyn TerminalBackend>> {
+    static KIND: OnceLock<BackendKind> = OnceLock::new();
+
+    Ok(match KIND.get_or_init(detect_kind) {
+        BackendKind::Ghostty => Box::new(ghostty::GhosttyBackend),
+        BackendKind::Iterm2 => Box::new(iterm2::Iterm2Backend),
+        BackendKind::Wezterm => Box::new(wezterm::WeztermBackend),
+        BackendKind::WindowsTerminal => Box::new(windows_terminal::WindowsTerminalBackend),
+        BackendKind::Zellij => Box::new(zellij::ZellijBackend),
+        BackendKind::Tmux => Box::new(tmux::TmuxBackend),
+        BackendKind::Bare => Box::new(bare::BareBackend::new()),
+    })
 }
 
 /// Object-safe trait for terminal automation backends.
