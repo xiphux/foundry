@@ -213,6 +213,12 @@ end tell"#
 }
 
 impl TerminalBackend for GhosttyBackend {
+    /// `open_workspace` returns as soon as the layout script finishes, and the
+    /// tab stays reachable by id, so a later `input text` lands in a live pane.
+    fn supports_run_in_pane(&self) -> bool {
+        true
+    }
+
     fn settle_delay(&self) -> std::time::Duration {
         std::time::Duration::from_millis(500)
     }

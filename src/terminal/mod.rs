@@ -125,12 +125,19 @@ pub fn detect_terminal() -> Result<&'static dyn TerminalBackend> {
 /// need all pane references within a single script execution — object handles
 /// cannot be passed between separate script invocations.
 pub trait TerminalBackend {
-    /// Whether this backend supports sending commands to existing panes after
-    /// the workspace is opened. Multiplexer backends (tmux, zellij) block
-    /// during open_workspace, so run_in_pane is not available.
-    fn supports_run_in_pane(&self) -> bool {
-        true
-    }
+    /// Whether this backend can send commands to existing panes *after*
+    /// `open_workspace` has returned.
+    ///
+    /// Deliberately has no default. It used to default to `true`, which is the
+    /// answer that does damage when it is wrong: `start` suppresses a deferred
+    /// pane's command at open time on the promise of sending it afterwards, so
+    /// a backend that silently inherited `true` while blocking inside
+    /// `open_workspace` would drop that command entirely. Every backend that
+    /// answers `false` today (tmux, Zellij, bare) does so because it blocks or
+    /// has no pane model at all — which is not a corner case, it is half of
+    /// them. Making it required means a new backend cannot get this by
+    /// omission.
+    fn supports_run_in_pane(&self) -> bool;
 
     /// How long to pause after opening a workspace before opening the next one
     /// in a batch (`open --all`).

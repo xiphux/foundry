@@ -127,6 +127,12 @@ impl Iterm2Backend {
 }
 
 impl TerminalBackend for Iterm2Backend {
+    /// The layout script returns once the tab is built, and sessions stay
+    /// addressable afterwards, so a later `write text` reaches a live pane.
+    fn supports_run_in_pane(&self) -> bool {
+        true
+    }
+
     fn settle_delay(&self) -> std::time::Duration {
         std::time::Duration::from_millis(500)
     }

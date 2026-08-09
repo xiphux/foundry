@@ -89,6 +89,12 @@ impl WeztermBackend {
 }
 
 impl TerminalBackend for WeztermBackend {
+    /// `wezterm cli spawn` returns once the pane exists and panes are addressed
+    /// by id, so `send-text` works for the life of the tab.
+    fn supports_run_in_pane(&self) -> bool {
+        true
+    }
+
     fn open_workspace(&self, path: &Path, panes: &[PaneSpec], verbose: bool) -> Result<String> {
         let path_str = path.to_str().context("invalid worktree path")?;
 

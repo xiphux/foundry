@@ -97,3 +97,24 @@ fn test_settle_delay_only_where_launch_is_async() {
             .is_zero()
     );
 }
+
+/// `start` suppresses a deferred pane's command at open time on the promise
+/// that it will be sent afterwards, so this answer decides whether that command
+/// ever runs. It used to have a `true` default, which meant a backend got the
+/// damaging answer by saying nothing; it is now a required method, and this
+/// pins what each backend actually answers.
+#[test]
+fn test_run_in_pane_support_matches_whether_open_blocks() {
+    use foundry::terminal::TerminalBackend as _;
+
+    // Return once the layout is built and stay addressable afterwards.
+    assert!(foundry::terminal::ghostty::GhosttyBackend.supports_run_in_pane());
+    assert!(foundry::terminal::iterm2::Iterm2Backend.supports_run_in_pane());
+    assert!(foundry::terminal::wezterm::WeztermBackend.supports_run_in_pane());
+
+    // Block for the life of the session, or have no pane model at all, so
+    // there is no "afterwards" to send anything into.
+    assert!(!foundry::terminal::tmux::TmuxBackend.supports_run_in_pane());
+    assert!(!foundry::terminal::zellij::ZellijBackend.supports_run_in_pane());
+    assert!(!foundry::terminal::bare::BareBackend::new().supports_run_in_pane());
+}
