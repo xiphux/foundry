@@ -73,6 +73,78 @@ pub fn resolve_project(
     Ok((name, repo_root))
 }
 
+/// An active workspace, resolved from recorded state rather than rebuilt.
+///
+/// Every command that operates on an existing workspace needs the same handful
+/// of facts, and each used to derive them itself:
+///
+/// ```ignore
+/// let worktree_path = config.worktree_dir.join(project_name).join(name);
+/// if !worktree_path.exists() { bail!("worktree '{name}' does not exist") }
+/// let workspace = state.find_by_worktree_path(&worktree_path.to_string_lossy())
+///     .ok_or_else(|| anyhow!("workspace '{name}' not found in state"))?;
+/// ```
+///
+/// That recomputes the worktree path from `worktree_dir` — but `state.toml`
+/// already records where the worktree actually is. The two agree only while
+/// the config is unchanged, so editing `worktree_dir` made every existing
+/// workspace unreachable: each command rebuilt a path that was never created,
+/// found nothing there, and reported "worktree does not exist" about a
+/// worktree sitting healthy at its recorded location. Including `discard`, so
+/// there was no way back short of hand-editing state.
+///
+/// Reading the recorded path instead makes `worktree_dir` mean what it says —
+/// where *new* worktrees go — and leaves existing ones alone.
+#[derive(Debug, Clone)]
+pub struct ActiveWorkspace {
+    pub name: String,
+    pub project: String,
+    pub source_path: PathBuf,
+    pub worktree_path: PathBuf,
+    pub branch: String,
+    pub terminal_tab_id: String,
+    pub pr_number: Option<u64>,
+    pub pr_url: Option<String>,
+}
+
+/// Resolve an active workspace, or explain which half is missing.
+///
+/// The two failures are worth separating. Absent from state means foundry is
+/// not tracking it; present in state but gone from disk means something removed
+/// the directory behind foundry's back, and the state entry needs clearing.
+pub fn resolve_active_workspace(
+    state: &crate::state::WorkspaceState,
+    project: &str,
+    name: &str,
+) -> Result<ActiveWorkspace> {
+    let ws = state.find(project, name).ok_or_else(|| {
+        anyhow::anyhow!(
+            "workspace '{name}' is not active in project '{project}'. \
+             Run `foundry list` to see active workspaces."
+        )
+    })?;
+
+    let worktree_path = PathBuf::from(&ws.worktree_path);
+    if !worktree_path.exists() {
+        bail!(
+            "workspace '{name}' is recorded at {} but that directory no longer exists. \
+             Run `foundry list` to refresh, or `foundry discard {name}` to clear the entry.",
+            worktree_path.display()
+        );
+    }
+
+    Ok(ActiveWorkspace {
+        name: ws.name.clone(),
+        project: ws.project.clone(),
+        source_path: PathBuf::from(&ws.source_path),
+        worktree_path,
+        branch: ws.branch.clone(),
+        terminal_tab_id: ws.terminal_tab_id.clone(),
+        pr_number: ws.pr_number,
+        pr_url: ws.pr_url.clone(),
+    })
+}
+
 /// Longest workspace name accepted. The name is one component of a path that
 /// also carries the worktree root and the project name, so this leaves room
 /// under the usual 255-byte limit on a single filesystem component.

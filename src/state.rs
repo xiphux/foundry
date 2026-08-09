@@ -76,6 +76,20 @@ impl WorkspaceState {
         &self.inner.workspaces
     }
 
+    /// Look up a workspace by its identity.
+    ///
+    /// `(project, name)` is the key `add` and `remove` already use, and the one
+    /// every command has in hand by the time it reaches a workflow. Looking up
+    /// by *path* instead — which the workflows used to do, after rebuilding the
+    /// path from config — makes the answer depend on `worktree_dir` still
+    /// holding the value it had when the workspace was created.
+    pub fn find(&self, project: &str, name: &str) -> Option<&Workspace> {
+        self.inner
+            .workspaces
+            .iter()
+            .find(|w| w.project == project && w.name == name)
+    }
+
     pub fn find_by_project(&self, project: &str) -> Vec<&Workspace> {
         self.inner
             .workspaces

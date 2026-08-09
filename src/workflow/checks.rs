@@ -14,11 +14,7 @@ pub fn run(
     state: &WorkspaceState,
     verbose: bool,
 ) -> Result<()> {
-    let worktree_path = config.worktree_dir.join(project_name).join(name);
-
-    let workspace = state
-        .find_by_worktree_path(&worktree_path.to_string_lossy())
-        .ok_or_else(|| anyhow::anyhow!("workspace '{name}' not found in state"))?;
+    let workspace = super::resolve_active_workspace(state, project_name, name)?;
 
     let pr_number = workspace.pr_number.ok_or_else(|| {
         anyhow::anyhow!("workspace '{name}' has no associated PR. Run `foundry pr {name}` first.")

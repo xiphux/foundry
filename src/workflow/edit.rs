@@ -11,19 +11,7 @@ pub fn run(
     state: &WorkspaceState,
     verbose: bool,
 ) -> Result<()> {
-    let worktree_path = config.worktree_dir.join(project_name).join(name);
-
-    if !worktree_path.exists() {
-        anyhow::bail!(
-            "worktree '{name}' does not exist at {}",
-            worktree_path.display()
-        );
-    }
-
-    // Verify workspace is tracked in state
-    state
-        .find_by_worktree_path(&worktree_path.to_string_lossy())
-        .ok_or_else(|| anyhow::anyhow!("workspace '{name}' not found in state"))?;
+    let worktree_path = super::resolve_active_workspace(state, project_name, name)?.worktree_path;
 
     let editor = resolve_editor(config.editor.as_deref())?;
 
@@ -62,25 +50,8 @@ fn resolve_editor(configured: Option<&str>) -> Result<String> {
     )
 }
 
-pub fn browse(
-    name: &str,
-    project_name: &str,
-    config: &ResolvedConfig,
-    state: &WorkspaceState,
-    verbose: bool,
-) -> Result<()> {
-    let worktree_path = config.worktree_dir.join(project_name).join(name);
-
-    if !worktree_path.exists() {
-        anyhow::bail!(
-            "worktree '{name}' does not exist at {}",
-            worktree_path.display()
-        );
-    }
-
-    state
-        .find_by_worktree_path(&worktree_path.to_string_lossy())
-        .ok_or_else(|| anyhow::anyhow!("workspace '{name}' not found in state"))?;
+pub fn browse(name: &str, project_name: &str, state: &WorkspaceState, verbose: bool) -> Result<()> {
+    let worktree_path = super::resolve_active_workspace(state, project_name, name)?.worktree_path;
 
     let cmd = file_explorer_command();
 

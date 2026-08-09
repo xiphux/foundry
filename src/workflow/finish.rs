@@ -21,22 +21,12 @@ pub fn run(
     force_local: bool,
     skip_confirm: bool,
 ) -> Result<()> {
-    let worktree_path = config.worktree_dir.join(project_name).join(name);
-
-    if !worktree_path.exists() {
-        anyhow::bail!(
-            "worktree '{name}' does not exist at {}",
-            worktree_path.display()
-        );
-    }
-
-    let workspace = state
-        .find_by_worktree_path(&worktree_path.to_string_lossy())
-        .ok_or_else(|| anyhow::anyhow!("workspace '{name}' not found in state"))?;
-    let branch = workspace.branch.clone();
-    let tab_id = workspace.terminal_tab_id.clone();
+    let workspace = super::resolve_active_workspace(state, project_name, name)?;
+    let worktree_path = workspace.worktree_path;
+    let branch = workspace.branch;
+    let tab_id = workspace.terminal_tab_id;
     let pr_number = workspace.pr_number;
-    let pr_url = workspace.pr_url.clone();
+    let pr_url = workspace.pr_url;
 
     if git::has_uncommitted_changes(&worktree_path)? {
         anyhow::bail!(

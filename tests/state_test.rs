@@ -312,3 +312,88 @@ fn test_pr_info_none_not_serialized() {
         "None pr_url should not appear in TOML"
     );
 }
+
+fn workspace_at(
+    project: &str,
+    name: &str,
+    worktree: &std::path::Path,
+) -> foundry::state::Workspace {
+    foundry::state::Workspace {
+        project: project.into(),
+        name: name.into(),
+        branch: name.into(),
+        worktree_path: worktree.to_string_lossy().into(),
+        source_path: "/code/myapp".into(),
+        created_at: Utc::now(),
+        terminal_tab_id: String::new(),
+        allocated_ports: Default::default(),
+        pr_number: None,
+        pr_url: None,
+    }
+}
+
+#[test]
+fn test_find_by_identity() {
+    let dir = TempDir::new().unwrap();
+    let mut state = foundry::state::WorkspaceState::load_from(&dir.path().join("s.toml")).unwrap();
+    state.add(workspace_at("myapp", "feat", dir.path()));
+    state.add(workspace_at("other", "feat", dir.path()));
+
+    assert_eq!(state.find("myapp", "feat").unwrap().project, "myapp");
+    assert_eq!(state.find("other", "feat").unwrap().project, "other");
+    assert!(state.find("myapp", "nope").is_none());
+    assert!(state.find("nope", "feat").is_none());
+}
+
+/// The path a workspace lives at is recorded when it is created. Rebuilding it
+/// from the current `worktree_dir` — which every command used to do — meant
+/// that editing that setting made every existing workspace unreachable: the
+/// rebuilt path pointed somewhere that was never created, so commands reported
+/// "worktree does not exist" about a worktree sitting healthy where it was put.
+/// `discard` was among them, so there was no way back but to edit state by hand.
+#[test]
+fn test_workspace_survives_a_worktree_dir_change() {
+    let old_root = TempDir::new().unwrap();
+    let worktree = old_root.path().join("myapp").join("feat");
+    std::fs::create_dir_all(&worktree).unwrap();
+
+    let dir = TempDir::new().unwrap();
+    let mut state = foundry::state::WorkspaceState::load_from(&dir.path().join("s.toml")).unwrap();
+    state.add(workspace_at("myapp", "feat", &worktree));
+
+    // The user then points worktree_dir somewhere else entirely.
+    let new_root = TempDir::new().unwrap();
+    let rebuilt = new_root.path().join("myapp").join("feat");
+    assert!(
+        !rebuilt.exists(),
+        "the rebuilt path is the one that misleads"
+    );
+
+    // Resolution follows the record, not the config.
+    let resolved = foundry::workflow::resolve_active_workspace(&state, "myapp", "feat").unwrap();
+    assert_eq!(resolved.worktree_path, worktree);
+    assert!(resolved.worktree_path.exists());
+}
+
+/// An entry whose directory was removed behind foundry's back must say so,
+/// distinctly from one that was never tracked.
+#[test]
+fn test_resolve_distinguishes_untracked_from_vanished() {
+    let dir = TempDir::new().unwrap();
+    let mut state = foundry::state::WorkspaceState::load_from(&dir.path().join("s.toml")).unwrap();
+    state.add(workspace_at(
+        "myapp",
+        "gone",
+        &dir.path().join("never-created"),
+    ));
+
+    let vanished = foundry::workflow::resolve_active_workspace(&state, "myapp", "gone")
+        .unwrap_err()
+        .to_string();
+    assert!(vanished.contains("no longer exists"), "{vanished}");
+
+    let untracked = foundry::workflow::resolve_active_workspace(&state, "myapp", "unknown")
+        .unwrap_err()
+        .to_string();
+    assert!(untracked.contains("not active"), "{untracked}");
+}

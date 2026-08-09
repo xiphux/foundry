@@ -1,7 +1,6 @@
 use anyhow::Result;
 use std::path::Path;
 
-use crate::config::ResolvedConfig;
 use crate::git;
 use crate::state::WorkspaceState;
 
@@ -9,22 +8,11 @@ pub fn run(
     name: &str,
     project_name: &str,
     source_path: &Path,
-    config: &ResolvedConfig,
     state: &WorkspaceState,
     stat: bool,
 ) -> Result<()> {
-    let worktree_path = config.worktree_dir.join(project_name).join(name);
-    if !worktree_path.exists() {
-        anyhow::bail!(
-            "worktree '{name}' does not exist at {}",
-            worktree_path.display()
-        );
-    }
-
-    // Look up branch name from state
-    let workspace = state
-        .find_by_worktree_path(&worktree_path.to_string_lossy())
-        .ok_or_else(|| anyhow::anyhow!("workspace '{name}' not found in state"))?;
+    let workspace = super::resolve_active_workspace(state, project_name, name)?;
+    let worktree_path = &workspace.worktree_path;
     let branch = &workspace.branch;
 
     let main_branch = git::detect_main_branch(source_path)?;
@@ -33,7 +21,7 @@ pub fn run(
     // and "what changed?" — asking separately ran the identical command twice.
     let commit_log = git::log_commits(source_path, &main_branch, branch).unwrap_or_default();
     let commit_count = commit_log.lines().filter(|l| !l.is_empty()).count();
-    let porcelain = git::status_porcelain(&worktree_path).unwrap_or_default();
+    let porcelain = git::status_porcelain(worktree_path).unwrap_or_default();
     let uncommitted_status = !porcelain.is_empty();
 
     // Header
@@ -83,7 +71,7 @@ pub fn run(
         if commit_count > 0 {
             println!();
         }
-        git::stream_diff_uncommitted(&worktree_path, stat)?;
+        git::stream_diff_uncommitted(worktree_path, stat)?;
     }
 
     Ok(())

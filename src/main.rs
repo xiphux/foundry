@@ -176,10 +176,13 @@ fn main() -> Result<()> {
                 )?;
                 let resolved = load_config(&source_path)?;
 
-                let workspaces: Vec<_> = state
+                // Carry the recorded worktree path, not just the name: rebuilding
+                // it from `worktree_dir` skips every workspace created before
+                // that setting was last changed.
+                let workspaces: Vec<(String, PathBuf)> = state
                     .find_by_project(&project_name)
                     .iter()
-                    .map(|w| w.name.clone())
+                    .map(|w| (w.name.clone(), PathBuf::from(&w.worktree_path)))
                     .collect();
 
                 if workspaces.is_empty() {
@@ -192,8 +195,7 @@ fn main() -> Result<()> {
                     // this is cheap.
                     let settle = foundry::terminal::detect_terminal()?.settle_delay();
 
-                    for (i, ws_name) in workspaces.iter().enumerate() {
-                        let worktree_path = resolved.worktree_dir.join(&project_name).join(ws_name);
+                    for (i, (ws_name, worktree_path)) in workspaces.iter().enumerate() {
                         if !worktree_path.exists() {
                             eprintln!("Warning: worktree '{ws_name}' no longer exists, skipping.");
                             continue;
@@ -206,7 +208,7 @@ fn main() -> Result<()> {
                         workflow::open::open_workspace(
                             &project_name,
                             ws_name,
-                            &worktree_path,
+                            worktree_path,
                             &resolved,
                             &mut state,
                             &state_path,
@@ -234,10 +236,19 @@ fn main() -> Result<()> {
                 )?;
                 let resolved = load_config(&source_path)?;
 
-                let worktree_path = resolved.worktree_dir.join(&project_name).join(&name);
+                // Prefer the recorded path — rebuilding it from `worktree_dir`
+                // misses workspaces created before that setting last changed.
+                // Fall back to the derived path so a worktree that exists on
+                // disk but is absent from state can still be opened.
+                let worktree_path = state
+                    .find(&project_name, &name)
+                    .map(|w| PathBuf::from(&w.worktree_path))
+                    .unwrap_or_else(|| resolved.worktree_dir.join(&project_name).join(&name));
                 if !worktree_path.exists() {
                     anyhow::bail!(
-                        "worktree '{name}' does not exist. Use `foundry start {name}` to create it."
+                        "worktree '{name}' does not exist at {}. \
+                         Use `foundry start {name}` to create it.",
+                        worktree_path.display()
                     );
                 }
 
@@ -280,22 +291,21 @@ fn main() -> Result<()> {
                 &state,
                 "browse",
             )?;
-            let resolved = load_config(&ws.source_path)?;
-            workflow::edit::browse(&ws.name, &ws.project_name, &resolved, &state, cli.verbose)?;
+            // Neither command needs anything from the config, but loading the
+            // project config is what runs the trust gate, and dropping the call
+            // would silently stop `.foundry.toml` approval being requested here.
+            let _ = load_config(&ws.source_path)?;
+            workflow::edit::browse(&ws.name, &ws.project_name, &state, cli.verbose)?;
         }
         cli::Commands::Diff { name, stat } => {
             let state = WorkspaceState::load_from(&state_path)?;
             let ws =
                 resolve_workspace(name, cli.project.as_deref(), &registry_path, &state, "diff")?;
-            let resolved = load_config(&ws.source_path)?;
-            workflow::diff::run(
-                &ws.name,
-                &ws.project_name,
-                &ws.source_path,
-                &resolved,
-                &state,
-                stat,
-            )?;
+            // Neither command needs anything from the config, but loading the
+            // project config is what runs the trust gate, and dropping the call
+            // would silently stop `.foundry.toml` approval being requested here.
+            let _ = load_config(&ws.source_path)?;
+            workflow::diff::run(&ws.name, &ws.project_name, &ws.source_path, &state, stat)?;
         }
         cli::Commands::Switch { name } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
@@ -309,13 +319,30 @@ fn main() -> Result<()> {
                     &mut registry,
                     &registry_path,
                 )?;
-                let resolved = load_config(&source_path)?;
+                // The trust gate runs here; nothing else is needed from the config.
+                let _ = load_config(&source_path)?;
 
-                let worktree_path = resolved.worktree_dir.join(&project_name).join(&name);
+                // Look the workspace up by identity rather than by a path
+                // rebuilt from `worktree_dir`, which stopped matching whenever
+                // that setting changed and left `switch` unable to find a tab
+                // for a workspace that was open in front of the user. The
+                // fallback is the recorded path, which is the tab id the bare
+                // backend hands out.
                 let tab_id = state
-                    .find_by_worktree_path(&worktree_path.to_string_lossy())
-                    .map(|w| w.terminal_tab_id.clone())
-                    .unwrap_or_else(|| worktree_path.to_string_lossy().to_string());
+                    .find(&project_name, &name)
+                    .map(|w| {
+                        if w.terminal_tab_id.is_empty() {
+                            w.worktree_path.clone()
+                        } else {
+                            w.terminal_tab_id.clone()
+                        }
+                    })
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "workspace '{name}' is not active in project '{project_name}'. \
+                             Run `foundry list` to see active workspaces."
+                        )
+                    })?;
 
                 let backend = foundry::terminal::detect_terminal()?;
                 if !backend.focus_tab(&tab_id)? {

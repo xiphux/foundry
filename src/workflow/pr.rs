@@ -19,20 +19,9 @@ pub fn run(
     title: Option<&str>,
     body: Option<&str>,
 ) -> Result<()> {
-    let worktree_path = config.worktree_dir.join(project_name).join(name);
-
-    if !worktree_path.exists() {
-        anyhow::bail!(
-            "worktree '{name}' does not exist at {}",
-            worktree_path.display()
-        );
-    }
-
-    let branch = state
-        .find_by_worktree_path(&worktree_path.to_string_lossy())
-        .ok_or_else(|| anyhow::anyhow!("workspace '{name}' not found in state"))?
-        .branch
-        .clone();
+    let workspace = super::resolve_active_workspace(state, project_name, name)?;
+    let worktree_path = workspace.worktree_path;
+    let branch = workspace.branch;
 
     // Check for uncommitted changes in the worktree
     if git::has_uncommitted_changes(&worktree_path)? {
