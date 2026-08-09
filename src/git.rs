@@ -3,7 +3,27 @@ use std::path::Path;
 use std::process::Command;
 
 fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
+    run_git_inner(repo_path, args, false)
+}
+
+/// Run a read-only git command with `--no-optional-locks`.
+///
+/// `git status` normally refreshes the index and writes it back, which takes
+/// `.git/index.lock`. Foundry polls status across every worktree (every 2s in
+/// `status --watch`), and those worktrees have agents running git commands in
+/// them — so the poll would contend for the lock and lose races against real
+/// work. `--no-optional-locks` skips the writeback; the reported status is the
+/// same.
+fn run_git_readonly(repo_path: &Path, args: &[&str]) -> Result<String> {
+    run_git_inner(repo_path, args, true)
+}
+
+fn run_git_inner(repo_path: &Path, args: &[&str], no_optional_locks: bool) -> Result<String> {
+    let mut cmd = Command::new("git");
+    if no_optional_locks {
+        cmd.arg("--no-optional-locks");
+    }
+    let output = cmd
         .arg("-C")
         .arg(repo_path)
         .args(args)
@@ -145,7 +165,7 @@ pub fn branch_exists(repo_path: &Path, name: &str) -> Result<bool> {
 }
 
 pub fn has_uncommitted_changes(repo_path: &Path) -> Result<bool> {
-    let output = run_git(repo_path, &["status", "--porcelain"])?;
+    let output = run_git_readonly(repo_path, &["status", "--porcelain"])?;
     Ok(!output.is_empty())
 }
 
@@ -153,13 +173,13 @@ pub fn has_uncommitted_changes(repo_path: &Path) -> Result<bool> {
 /// Unlike `has_uncommitted_changes`, this ignores untracked files —
 /// useful for checking if a merge target is clean enough to proceed.
 pub fn has_modified_tracked_files(repo_path: &Path) -> Result<bool> {
-    let output = run_git(repo_path, &["status", "--porcelain", "-uno"])?;
+    let output = run_git_readonly(repo_path, &["status", "--porcelain", "-uno"])?;
     Ok(!output.is_empty())
 }
 
 /// Get the porcelain status output listing changed files.
 pub fn status_porcelain(repo_path: &Path) -> Result<String> {
-    run_git(repo_path, &["status", "--porcelain"])
+    run_git_readonly(repo_path, &["status", "--porcelain"])
 }
 
 pub fn current_branch(repo_path: &Path) -> Result<String> {
