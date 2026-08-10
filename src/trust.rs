@@ -398,6 +398,18 @@ mod tests {
         assert_eq!(hash_config("a = 1"), hash_config("a = 1"));
         assert_ne!(hash_config("a = 1"), hash_config("a = 2"));
         assert_eq!(hash_config("").len(), 64);
+        // Pinned against the digests every already-trusted config was recorded
+        // under. A hashing change would silently invalidate every entry in the
+        // trust store and re-prompt users, so the values are asserted rather
+        // than merely compared to each other.
+        assert_eq!(
+            hash_config("a = 1"),
+            "b5bc1ffd90912fb18bef6e7d80909192c7a6492896320156d67fbaf104c6544a"
+        );
+        assert_eq!(
+            hash_config(""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
     }
 
     #[test]

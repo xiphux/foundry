@@ -432,7 +432,7 @@ mod tests {
             worktree_dir = "~/.foundry/worktrees"
             auto_fetch = false
         "#;
-        let value: toml::Value = toml_str.parse().unwrap();
+        let value: toml::Value = toml::from_str(toml_str).unwrap();
         check_global_config_keys(&value, "test");
     }
 
@@ -442,7 +442,7 @@ mod tests {
             agent = "claude"
             branchprefix = "typo"
         "#;
-        let value: toml::Value = toml_str.parse().unwrap();
+        let value: toml::Value = toml::from_str(toml_str).unwrap();
         check_global_config_keys(&value, "test");
     }
 
@@ -461,7 +461,7 @@ mod tests {
             [panes.server]
             command = "npm run dev"
         "#;
-        let value: toml::Value = toml_str.parse().unwrap();
+        let value: toml::Value = toml::from_str(toml_str).unwrap();
         check_project_config_keys(&value, "test");
     }
 
@@ -473,7 +473,7 @@ mod tests {
             command = "npm install"
             timeout = 30
         "#;
-        let value: toml::Value = toml_str.parse().unwrap();
+        let value: toml::Value = toml::from_str(toml_str).unwrap();
         check_project_config_keys(&value, "test");
     }
 
@@ -484,7 +484,7 @@ mod tests {
             command = "bash"
             split_from = "agent"
         "#;
-        let value: toml::Value = toml_str.parse().unwrap();
+        let value: toml::Value = toml::from_str(toml_str).unwrap();
         check_project_config_keys(&value, "test");
     }
 

@@ -81,7 +81,7 @@ pub fn load_global_config() -> Result<GlobalConfig> {
         .with_context(|| format!("failed to read {}", config_path.display()))?;
 
     // Check for unknown keys before deserializing
-    if let Ok(raw) = contents.parse::<toml::Value>() {
+    if let Ok(raw) = toml::from_str::<toml::Value>(&contents) {
         validation::check_global_config_keys(&raw, &config_path.to_string_lossy());
     }
 
@@ -114,7 +114,7 @@ pub fn load_project_config(repo_root: &Path) -> Result<Option<ProjectConfig>> {
         .with_context(|| format!("failed to read {}", config_path.display()))?;
 
     // Check for unknown keys before deserializing
-    if let Ok(raw) = contents.parse::<toml::Value>() {
+    if let Ok(raw) = toml::from_str::<toml::Value>(&contents) {
         validation::check_project_config_keys(&raw, &config_path.to_string_lossy());
     }
 

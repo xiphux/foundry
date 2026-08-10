@@ -11,13 +11,13 @@ license = "GPL-3.0-only"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "1"
 anyhow = "1"
 dirs = "6"
-which = "7"
+which = "8"
 chrono = { version = "0.4", features = ["serde"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
