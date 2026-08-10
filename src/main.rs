@@ -186,8 +186,12 @@ fn main() -> Result<()> {
             )?;
         }
         cli::Commands::Open { name, all } => {
+            // Deliberately not pruned: `open_workspace` saves state to record the
+            // tab id, which would persist the prune and delete the entry that
+            // `discard` needs to clean up a vanished workspace. Pruning bought
+            // nothing here anyway — the `--all` loop skips missing worktrees and
+            // the named path checks the directory itself.
             let mut state = WorkspaceState::load_from(&state_path)?;
-            state.prune_stale();
 
             if all {
                 let mut registry = Registry::load_from(&registry_path)?;
@@ -578,8 +582,14 @@ fn main() -> Result<()> {
         }
         cli::Commands::List => {
             let mut state = WorkspaceState::load_from(&state_path)?;
+            // Filtered from display, but deliberately NOT persisted: dropping a
+            // stale entry from state.toml is what `discard` needs it for. A
+            // workspace whose directory vanished still owns a git worktree
+            // registration, a branch, a status directory and a context file, and
+            // `cleanup_workspace` — reachable only through discard/finish — is the
+            // only thing that clears them. Saving the prune here erased the entry
+            // and stranded all four with no command able to reach them.
             state.prune_stale();
-            state.save_to(&state_path)?;
             let workspaces = state.list();
             if workspaces.is_empty() {
                 println!("No active workspaces.");
@@ -594,8 +604,14 @@ fn main() -> Result<()> {
         }
         cli::Commands::Status { watch } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
+            // Filtered from display, but deliberately NOT persisted: dropping a
+            // stale entry from state.toml is what `discard` needs it for. A
+            // workspace whose directory vanished still owns a git worktree
+            // registration, a branch, a status directory and a context file, and
+            // `cleanup_workspace` — reachable only through discard/finish — is the
+            // only thing that clears them. Saving the prune here erased the entry
+            // and stranded all four with no command able to reach them.
             state.prune_stale();
-            state.save_to(&state_path)?;
             workflow::status::run(&state, &state_path, watch)?;
         }
         cli::Commands::Pr { name, title, body } => {

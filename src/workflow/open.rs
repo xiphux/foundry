@@ -12,10 +12,10 @@ use crate::terminal::{self, PaneSpec};
 /// (the pane is still created, but no command is sent). Used by `start` to
 /// defer certain pane commands until after setup scripts complete.
 ///
-/// The one signature still over the argument limit. The remaining seven are all
-/// genuinely independent inputs rather than the project context that the other
-/// workflows were threading, so there is nothing left here to bundle.
-#[allow(clippy::too_many_arguments)]
+/// The widest signature left, sitting exactly at clippy's seven-argument limit.
+/// The seven are all genuinely independent inputs rather than the project
+/// context the other workflows were threading, so there is nothing left here to
+/// bundle.
 pub fn open_workspace(
     ctx: &mut super::WorkflowCtx,
     name: &str,
@@ -146,8 +146,16 @@ pub fn list_workspaces(state: &WorkspaceState, project: &str) {
     }
     println!("Active workspaces for '{project}':");
     for ws in workspaces {
+        // Entries whose directory is gone are listed rather than hidden: they
+        // still own a branch and a git worktree registration, and `discard` is
+        // what clears them, so the user needs to be able to see one.
+        let missing = if std::path::Path::new(&ws.worktree_path).exists() {
+            ""
+        } else {
+            " [missing — run `foundry discard` to clean up]"
+        };
         println!(
-            "  {} (branch: {}, path: {})",
+            "  {} (branch: {}, path: {}){missing}",
             ws.name, ws.branch, ws.worktree_path
         );
     }
