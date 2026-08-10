@@ -117,4 +117,6 @@ fn test_run_in_pane_support_matches_whether_open_blocks() {
     assert!(!foundry::terminal::tmux::TmuxBackend.supports_run_in_pane());
     assert!(!foundry::terminal::zellij::ZellijBackend.supports_run_in_pane());
     assert!(!foundry::terminal::bare::BareBackend::new().supports_run_in_pane());
+    // Hands the command to an existing wt.exe and returns before the tab exists.
+    assert!(!foundry::terminal::windows_terminal::WindowsTerminalBackend.supports_run_in_pane());
 }

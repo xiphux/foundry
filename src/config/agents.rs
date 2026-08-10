@@ -760,27 +760,27 @@ mod tests {
     }
 
     #[test]
-    fn resolve_agent_command_claude() {
+    fn base_command_claude() {
         let cmd = build_agent_command("claude", None, &AgentInvocation::default());
         assert!(cmd.starts_with("claude"));
     }
 
     #[test]
-    fn resolve_agent_command_codex() {
+    fn base_command_codex() {
         let cmd = build_agent_command("codex", None, &AgentInvocation::default());
         assert!(cmd.starts_with("codex "));
         assert!(cmd.contains("--full-auto"));
     }
 
     #[test]
-    fn resolve_agent_command_every_code() {
+    fn base_command_every_code() {
         let cmd = build_agent_command("every-code", None, &AgentInvocation::default());
         assert!(cmd.starts_with("coder "));
         assert!(cmd.contains("--full-auto"));
     }
 
     #[test]
-    fn resolve_agent_command_custom_with_command() {
+    fn base_command_custom_with_command() {
         assert_eq!(
             build_agent_command(
                 "custom",
@@ -792,7 +792,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_agent_command_custom_without_command_defaults_to_claude() {
+    fn base_command_custom_without_command_defaults_to_claude() {
         assert_eq!(
             build_agent_command("custom", None, &AgentInvocation::default()),
             "claude"
@@ -800,7 +800,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_agent_command_unknown_passthrough() {
+    fn base_command_unknown_passthrough() {
         assert_eq!(
             build_agent_command("some-other-agent", None, &AgentInvocation::default()),
             "some-other-agent"

@@ -501,7 +501,7 @@ pub fn setup_agent_hooks(
 ) -> Result<()> {
     match agent {
         "claude" => setup_claude(worktree_path, source_path, project, name, context),
-        // Codex permissions are handled via CLI flags in resolve_agent_command.
+        // Codex permissions are handled via CLI flags in build_agent_command.
         // No config file setup needed since .codex/config.toml is tracked in git.
         _ => Ok(()),
     }

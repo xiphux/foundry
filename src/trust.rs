@@ -156,7 +156,7 @@ pub fn executable_directives(config: &ProjectConfig) -> Vec<String> {
 
     // An `agent` value is normally a registry key like "claude", which resolves
     // to a fixed command line. An identifier that is *not* in the registry is
-    // returned verbatim by `build_agent_command_with_plan` and becomes the
+    // returned verbatim by `build_agent_command` and becomes the
     // pane's shell command — so setting `agent` is a second way to name an
     // arbitrary command to run, and it has to be approved like `agent_command`.
     if let Some(ref agent) = config.agent

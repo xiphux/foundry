@@ -125,10 +125,10 @@ pub trait TerminalBackend {
     /// pane's command at open time on the promise of sending it afterwards, so
     /// a backend that silently inherited `true` while blocking inside
     /// `open_workspace` would drop that command entirely. Every backend that
-    /// answers `false` today (tmux, Zellij, bare) does so because it blocks or
-    /// has no pane model at all — which is not a corner case, it is half of
-    /// them. Making it required means a new backend cannot get this by
-    /// omission.
+    /// answers `false` today (tmux, Zellij, Windows Terminal, bare) does so
+    /// because it blocks, dispatches and returns, or has no pane model at all —
+    /// which is not a corner case, it is most of them. Making it required means
+    /// a new backend cannot get this by omission.
     fn supports_run_in_pane(&self) -> bool;
 
     /// How long to pause after opening a workspace before opening the next one
