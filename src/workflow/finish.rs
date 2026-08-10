@@ -113,7 +113,8 @@ fn do_pr_merge(
     let _ = git::fetch(source_path, &remote);
     let _ = git::ff_to_remote(source_path, &remote, &main_branch);
 
-    // Print success BEFORE cleanup
+    // Earned before cleanup starts: the PR is already merged on the forge, and
+    // this message claims nothing about the local worktree or branch.
     eprintln!("Merged PR #{pr_number}.");
 
     super::cleanup_workspace(
@@ -124,6 +125,9 @@ fn do_pr_merge(
         // always enough here.
         false,
         |_| history_event,
+        // Nothing further to announce — the merge is the outcome, and it has
+        // already been reported.
+        |_| {},
     )?;
 
     Ok(())
@@ -212,16 +216,30 @@ fn do_local_merge(ctx: &mut super::WorkflowCtx, ws: &super::ActiveWorkspace) -> 
     let history_event =
         history::HistoryEvent::finished(ctx.project, name, branch, commit_count, strategy_str);
 
-    // Print success BEFORE cleanup
-    if has_commits {
-        eprintln!("Finished workspace '{name}'. Branch '{branch}' archived.");
-    } else {
-        eprintln!("Finished workspace '{name}'. Branch '{branch}' deleted (no commits).");
-    }
-
-    super::cleanup_workspace(ctx, ws, super::BranchCleanup::Archive, false, |_| {
-        history_event
-    })?;
+    super::cleanup_workspace(
+        ctx,
+        ws,
+        // Hand over the count taken *before* the merge. Merging the branch into
+        // main empties `main..branch`, so letting cleanup recompute would read
+        // every merged branch as commitless and delete it instead of archiving
+        // it — which is what has been happening.
+        super::BranchCleanup::Archive {
+            has_commits: Some(has_commits),
+        },
+        false,
+        |_| history_event,
+        // The merge into main has already happened by the time cleanup starts,
+        // but the branch disposition has not — so the whole message is
+        // announced from inside, once both are true.
+        |archived_as| match archived_as {
+            Some(archived) => {
+                eprintln!("Finished workspace '{name}'. Branch '{branch}' archived as {archived}.")
+            }
+            None => {
+                eprintln!("Finished workspace '{name}'. Branch '{branch}' deleted (no commits).")
+            }
+        },
+    )?;
 
     Ok(())
 }

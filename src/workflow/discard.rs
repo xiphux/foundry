@@ -10,8 +10,13 @@ pub fn run(
     skip_confirm: bool,
     force: bool,
 ) -> Result<()> {
-    let ws = ctx.workspace(name)?;
+    // Resolved without requiring the worktree directory: a workspace whose
+    // directory has already gone still has a git worktree registration, a
+    // branch and a state entry to clean up, and discard is the only command
+    // that can clear them.
+    let ws = ctx.recorded_workspace(name)?;
     let source_path = ctx.source_path;
+    let worktree_present = ws.worktree_path.exists();
 
     // Check for unmerged commits — require --force to discard work
     let main_branch = git::detect_main_branch(source_path)?;
@@ -34,7 +39,13 @@ pub fn run(
         );
     }
 
-    if git::has_uncommitted_changes(&ws.worktree_path)? && !skip_confirm && !force {
+    // Only meaningful when the directory is still there; with it gone there is
+    // nothing left to lose, and asking git about a missing worktree errors.
+    if worktree_present
+        && git::has_uncommitted_changes(&ws.worktree_path)?
+        && !skip_confirm
+        && !force
+    {
         print!("Worktree has uncommitted changes. Discard anyway? [y/N] ");
         io::stdout().flush()?;
         let mut input = String::new();
@@ -45,17 +56,10 @@ pub fn run(
         }
     }
 
-    // Print the outcome BEFORE cleanup: the tab close at the end of
-    // `cleanup_workspace` kills this process when run from inside the worktree.
-    if has_commits {
+    if !worktree_present {
         eprintln!(
-            "Discarded workspace '{name}'. Branch '{}' archived.",
-            ws.branch
-        );
-    } else {
-        eprintln!(
-            "Discarded workspace '{name}'. Branch '{}' deleted (no commits).",
-            ws.branch
+            "Worktree directory {} is already gone — clearing the leftover branch and state.",
+            ws.worktree_path.display()
         );
     }
 
@@ -64,12 +68,27 @@ pub fn run(
     super::cleanup_workspace(
         ctx,
         &ws,
-        super::BranchCleanup::Archive,
+        // Recomputed inside cleanup: discard changes no history beforehand, so
+        // the count taken there is the true one.
+        super::BranchCleanup::Archive { has_commits: None },
         // Discard exists to throw work away, so a dirty worktree is expected
         // here — unlike finish, which refuses to run on one.
         true,
         |archived_as| {
             history::HistoryEvent::discarded(&project, name, &branch, commit_count, archived_as)
+        },
+        // Announced from inside the cleanup rather than before it, so the
+        // message is only printed once the branch has actually been dealt with.
+        // `archived_as` is the outcome itself, so this reports what happened
+        // instead of re-deriving it from `has_commits` — which is computed with
+        // the opposite error fallback and can disagree.
+        |archived_as| match archived_as {
+            Some(archived) => {
+                eprintln!("Discarded workspace '{name}'. Branch '{branch}' archived as {archived}.")
+            }
+            None => {
+                eprintln!("Discarded workspace '{name}'. Branch '{branch}' deleted (no commits).")
+            }
         },
     )
 }

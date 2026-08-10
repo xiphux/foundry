@@ -4,7 +4,11 @@ use crate::forge;
 use crate::forge::CheckConclusion;
 
 pub fn run(ctx: &mut super::WorkflowCtx, name: &str) -> Result<()> {
-    let workspace = ctx.workspace(name)?;
+    // Resolved from state alone: this command reads the PR number and branch
+    // and then talks to the forge, touching no file in the worktree. Requiring
+    // the directory would refuse to report CI status for a live PR just because
+    // the worktree had been removed out of band.
+    let workspace = ctx.recorded_workspace(name)?;
     let (source_path, config, verbose) = (ctx.source_path, ctx.config, ctx.verbose);
 
     let pr_number = workspace.pr_number.ok_or_else(|| {

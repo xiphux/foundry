@@ -397,3 +397,27 @@ fn test_resolve_distinguishes_untracked_from_vanished() {
         .to_string();
     assert!(untracked.contains("not active"), "{untracked}");
 }
+
+/// `discard` is the only command that can clear a workspace whose directory is
+/// already gone — git still has the worktree registered, which keeps the branch
+/// checked out and the name unusable — so it resolves without the existence
+/// check that every other command needs.
+#[test]
+fn test_recorded_workspace_resolves_without_the_directory() {
+    let dir = TempDir::new().unwrap();
+    let mut state = foundry::state::WorkspaceState::load_from(&dir.path().join("s.toml")).unwrap();
+    let vanished = dir.path().join("never-created");
+    state.add(workspace_at("myapp", "gone", &vanished));
+
+    // The existence-checked resolver refuses it...
+    assert!(foundry::workflow::resolve_active_workspace(&state, "myapp", "gone").is_err());
+
+    // ...while the recorded resolver hands back the entry to be cleaned up.
+    let ws = foundry::workflow::resolve_recorded_workspace(&state, "myapp", "gone").unwrap();
+    assert_eq!(ws.name, "gone");
+    assert_eq!(ws.branch, "gone");
+    assert_eq!(ws.worktree_path, vanished);
+
+    // Still refuses a workspace it is not tracking at all.
+    assert!(foundry::workflow::resolve_recorded_workspace(&state, "myapp", "unknown").is_err());
+}

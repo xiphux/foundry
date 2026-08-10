@@ -101,6 +101,19 @@ pub fn remove_worktree(repo_path: &Path, worktree_path: &Path, force: bool) -> R
     Ok(())
 }
 
+/// Drop registrations for worktrees whose directories are gone.
+///
+/// `git worktree remove` refuses a path that is not there, so it cannot clean
+/// up after a worktree directory that was deleted behind foundry's back. The
+/// registration under `.git/worktrees/<name>` outlives the directory, and while
+/// it exists git still considers the branch checked out — so the branch cannot
+/// be deleted, and `git worktree add` refuses to reuse the name. Pruning is the
+/// only way to clear it.
+pub fn prune_worktrees(repo_path: &Path) -> Result<()> {
+    run_git(repo_path, &["worktree", "prune"])?;
+    Ok(())
+}
+
 /// Fetch from a remote.
 pub fn fetch(repo_path: &Path, remote: &str) -> Result<()> {
     run_git(repo_path, &["fetch", "--", remote])?;

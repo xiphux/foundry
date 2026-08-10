@@ -77,7 +77,8 @@ pub fn resolve_project(
 ///
 /// These six travelled together through every workflow as positional
 /// parameters, which is how eight functions ended up carrying
-/// `#[allow(clippy::too_many_arguments)]` — `cleanup_workspace` took thirteen.
+/// `#[allow(clippy::too_many_arguments)]` — `cleanup_workspace` had grown to
+/// thirteen of them by the time this landed.
 /// The lint was right: `(name, project_name, source_path, ...)` is four
 /// same-typed `&str`/`&Path` arguments in a row, and nothing but discipline
 /// stopped a caller transposing two of them.
@@ -96,9 +97,16 @@ pub struct WorkflowCtx<'a> {
 }
 
 impl WorkflowCtx<'_> {
-    /// Resolve one of this project's active workspaces by name.
+    /// Resolve one of this project's active workspaces by name, requiring its
+    /// worktree to still be on disk.
     pub fn workspace(&self, name: &str) -> Result<ActiveWorkspace> {
         resolve_active_workspace(self.state, self.project, name)
+    }
+
+    /// Resolve a workspace from state without requiring its worktree directory.
+    /// See `resolve_recorded_workspace` — used by `discard` and `checks`.
+    pub fn recorded_workspace(&self, name: &str) -> Result<ActiveWorkspace> {
+        resolve_recorded_workspace(self.state, self.project, name)
     }
 
     /// Template variables for a workspace's setup, teardown and pane commands.
@@ -147,12 +155,22 @@ pub struct ActiveWorkspace {
     pub pr_url: Option<String>,
 }
 
-/// Resolve an active workspace, or explain which half is missing.
+/// Resolve a workspace from state alone, without requiring its worktree to
+/// still be on disk.
 ///
-/// The two failures are worth separating. Absent from state means foundry is
-/// not tracking it; present in state but gone from disk means something removed
-/// the directory behind foundry's back, and the state entry needs clearing.
-pub fn resolve_active_workspace(
+/// Use this only for a command that touches nothing inside the worktree.
+/// `discard` and `checks` qualify; `resolve_active_workspace` also builds on it
+/// and then adds the existence check that everything else needs — you cannot
+/// diff, edit or merge a worktree that is not there.
+///
+/// `discard`'s whole job is to take a workspace apart, and a workspace whose
+/// directory has already gone is precisely the one that most needs taking
+/// apart: git still has the worktree registered, the branch is still checked
+/// out by that registration, and the state entry is still present. Requiring
+/// the directory here made discard refuse the one case only it could fix.
+/// `checks` reads a PR number and a branch and then talks to the forge, so the
+/// directory is irrelevant to it.
+pub fn resolve_recorded_workspace(
     state: &crate::state::WorkspaceState,
     project: &str,
     name: &str,
@@ -164,25 +182,40 @@ pub fn resolve_active_workspace(
         )
     })?;
 
-    let worktree_path = PathBuf::from(&ws.worktree_path);
-    if !worktree_path.exists() {
-        bail!(
-            "workspace '{name}' is recorded at {} but that directory no longer exists. \
-             Run `foundry list` to refresh, or `foundry discard {name}` to clear the entry.",
-            worktree_path.display()
-        );
-    }
-
     Ok(ActiveWorkspace {
         name: ws.name.clone(),
         project: ws.project.clone(),
         source_path: PathBuf::from(&ws.source_path),
-        worktree_path,
+        worktree_path: PathBuf::from(&ws.worktree_path),
         branch: ws.branch.clone(),
         terminal_tab_id: ws.terminal_tab_id.clone(),
         pr_number: ws.pr_number,
         pr_url: ws.pr_url.clone(),
     })
+}
+
+/// Resolve an active workspace, or explain which half is missing.
+///
+/// The two failures are worth separating. Absent from state means foundry is
+/// not tracking it; present in state but gone from disk means something removed
+/// the directory behind foundry's back, and the leftovers need clearing.
+pub fn resolve_active_workspace(
+    state: &crate::state::WorkspaceState,
+    project: &str,
+    name: &str,
+) -> Result<ActiveWorkspace> {
+    let ws = resolve_recorded_workspace(state, project, name)?;
+
+    if !ws.worktree_path.exists() {
+        bail!(
+            "workspace '{name}' is recorded at {} but that directory no longer exists. \
+             Run `foundry discard {name}` to clear the leftover branch, worktree \
+             registration and state.",
+            ws.worktree_path.display()
+        );
+    }
+
+    Ok(ws)
 }
 
 /// Longest workspace name accepted. The name is one component of a path that
