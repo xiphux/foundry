@@ -67,6 +67,20 @@ impl ResolvedConfig {
     }
 }
 
+/// Parse a config file into a raw TOML document for the unknown-key pre-scan.
+///
+/// Must go through `toml::from_str`, not `contents.parse()`: since toml 0.9
+/// `FromStr for Value` parses a bare TOML *value* rather than a whole document,
+/// so the shorthand returns `Err` for every real config file. Both callers drop
+/// the error on purpose — a genuinely malformed file is reported by the typed
+/// deserialize that follows, and reporting it twice would be noise — which
+/// means getting this wrong disables key validation silently rather than
+/// loudly. The shorthand still compiles here, so only `prescan_document`'s own
+/// test stands between that mistake and a release.
+fn prescan_document(contents: &str) -> Option<toml::Value> {
+    toml::from_str::<toml::Value>(contents).ok()
+}
+
 /// Load the global config from ~/.foundry/config.toml.
 /// Returns defaults if the file doesn't exist.
 pub fn load_global_config() -> Result<GlobalConfig> {
@@ -81,7 +95,7 @@ pub fn load_global_config() -> Result<GlobalConfig> {
         .with_context(|| format!("failed to read {}", config_path.display()))?;
 
     // Check for unknown keys before deserializing
-    if let Ok(raw) = toml::from_str::<toml::Value>(&contents) {
+    if let Some(raw) = prescan_document(&contents) {
         validation::check_global_config_keys(&raw, &config_path.to_string_lossy());
     }
 
@@ -114,7 +128,7 @@ pub fn load_project_config(repo_root: &Path) -> Result<Option<ProjectConfig>> {
         .with_context(|| format!("failed to read {}", config_path.display()))?;
 
     // Check for unknown keys before deserializing
-    if let Ok(raw) = toml::from_str::<toml::Value>(&contents) {
+    if let Some(raw) = prescan_document(&contents) {
         validation::check_project_config_keys(&raw, &config_path.to_string_lossy());
     }
 
@@ -306,6 +320,29 @@ pub fn foundry_dir() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pre-scan feeds unknown-key validation, and both call sites discard
+    /// its error, so a pre-scan that never succeeds costs every typo warning
+    /// with nothing failing to show for it. This asserts it accepts a whole
+    /// config document rather than a bare value.
+    #[test]
+    fn prescan_accepts_a_config_document() {
+        let contents = "agent = \"claude\"\n\n[[panes]]\nname = \"agent\"\n";
+        let raw = prescan_document(contents).expect("a config document must pre-scan");
+        let table = raw.as_table().expect("a document pre-scans as a table");
+        assert!(table.contains_key("agent"));
+        assert!(table.contains_key("panes"));
+
+        // The trap this guards, pinned so it stays visible: the `.parse()`
+        // shorthand for the same thing compiles and type-checks here, and
+        // fails at runtime on every config file foundry actually reads. If a
+        // future toml release makes this line succeed, the hazard is gone and
+        // the assertion can go with it.
+        assert!(
+            contents.parse::<toml::Value>().is_err(),
+            "FromStr for Value now parses documents; prescan_document's warning is stale"
+        );
+    }
 
     #[test]
     fn expand_tilde_expands_home_dir() {
