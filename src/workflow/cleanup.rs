@@ -273,6 +273,12 @@ fn remove_worktree_resiliently(
     // workspace's own panes, so close them — unless this process is one of
     // them, in which case the close would kill the cleanup it is trying to
     // finish.
+    //
+    // Best-effort, and on Ghostty often no effect at all: `confirm-close-surface`
+    // is on by default, so a tab whose panes still have running processes — a
+    // live dev server being exactly the case this path exists for — waits for
+    // the user to confirm instead of closing. The sweep below and the
+    // `Leftovers` warning are what actually carry that case.
     if !tab_id.is_empty() && !inside_worktree {
         if verbose {
             eprintln!("Worktree directory could not be deleted; closing the terminal tab...");

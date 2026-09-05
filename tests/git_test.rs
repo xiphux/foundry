@@ -467,8 +467,10 @@ fn test_worktree_registered_tracks_add_and_remove() {
 }
 
 /// Git lists the fully resolved path, so a worktree reached through a symlinked
-/// parent — `/tmp` on macOS, which is where these tests live — is spelled one
-/// way by git and another by foundry. Both have to be recognised as the same
+/// parent is spelled one way by git and another by foundry. These tests live in
+/// exactly such a path: `TempDir` sits under `std::env::temp_dir()`, which on
+/// macOS is `$TMPDIR` beneath `/var/folders/...`, reached through the `/var` ->
+/// `/private/var` symlink. Both spellings have to be recognised as the same
 /// worktree, or a partial removal reads as a refusal.
 #[cfg(unix)]
 #[test]
