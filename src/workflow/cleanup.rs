@@ -263,7 +263,8 @@ enum Removal {
 ///
 /// A removal git *refused* — a dirty worktree, a locked one, a path it does not
 /// own — is a different thing entirely: nothing has been deleted, and it stays
-/// fatal. `git::worktree_registered` is what tells the two apart.
+/// fatal. The registered-before-and-not-after transition is what tells the two
+/// apart.
 fn remove_worktree_resiliently(
     source_path: &std::path::Path,
     worktree_path: &std::path::Path,
@@ -272,14 +273,24 @@ fn remove_worktree_resiliently(
     force: bool,
     verbose: bool,
 ) -> Result<Removal> {
+    // Sampled before the attempt, because what licenses the recursive delete
+    // below is the *transition*: git had this worktree registered, and the
+    // failed removal is what dropped it. Asking only afterwards cannot tell that
+    // apart from a path git never owned — `git worktree remove` on a directory
+    // that is not a worktree fails too, and is equally absent from the listing,
+    // so a stale state entry pointing at some unrelated directory full of work
+    // would have been swept away by the recovery path.
+    //
+    // Both reads fail safe, in the direction that leaves the old fatal
+    // behaviour in place rather than deleting on a guess: an unreadable listing
+    // before means "not registered", and after means "still registered".
+    let was_registered = git::worktree_registered(source_path, worktree_path).unwrap_or(false);
+
     let Err(first_err) = git::remove_worktree(source_path, worktree_path, force) else {
         return Ok(Removal::Done);
     };
 
-    // On a listing that cannot be read, assume the worktree is still registered:
-    // that keeps the old, fatal behaviour rather than deleting a directory on a
-    // guess.
-    if git::worktree_registered(source_path, worktree_path).unwrap_or(true) {
+    if !was_registered || git::worktree_registered(source_path, worktree_path).unwrap_or(true) {
         return Err(first_err);
     }
 
@@ -414,6 +425,29 @@ mod tests {
             &dir.path().join("wt"),
             &dir.path().join("wt-other")
         ));
+    }
+
+    /// A directory git never had registered must stay fatal: the failed removal
+    /// deleted nothing, so the leftover sweep would be deleting a directory
+    /// nothing has vouched for — a stale state entry pointing at unrelated work
+    /// is enough to get here.
+    #[test]
+    fn a_directory_git_never_owned_is_never_swept() {
+        let dir = TempDir::new().unwrap();
+        let source = dir.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        git(&source, &["init", "-q"]);
+        git(&source, &["config", "user.email", "test@example.com"]);
+        git(&source, &["config", "user.name", "test"]);
+        git(&source, &["commit", "-qm", "initial", "--allow-empty"]);
+
+        let stranger = dir.path().join("not-a-worktree");
+        std::fs::create_dir(&stranger).unwrap();
+        std::fs::write(stranger.join("work.txt"), "precious").unwrap();
+
+        let outcome = remove_worktree_resiliently(&source, &stranger, "", true, true, false);
+        assert!(outcome.is_err());
+        assert!(stranger.join("work.txt").exists());
     }
 
     #[test]
