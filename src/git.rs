@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {
@@ -99,6 +99,47 @@ pub fn remove_worktree(repo_path: &Path, worktree_path: &Path, force: bool) -> R
     args.extend(["--", path_str]);
     run_git(repo_path, &args)?;
     Ok(())
+}
+
+/// Whether git still has `worktree_path` registered as a worktree of this repo.
+///
+/// This is how a *refused* `git worktree remove` is told apart from one that
+/// got part-way. Git deletes the administrative entry under `.git/worktrees/`
+/// even when deleting the worktree directory itself fails, so a path that is no
+/// longer listed has already been torn down as far as git is concerned — what
+/// is left on disk is only files. A path still listed means git stopped before
+/// touching anything: a dirty worktree, a locked one, a path it does not own.
+///
+/// Reading the state rather than matching the error text is deliberate: git
+/// translates its messages, so "contains modified or untracked files" is not
+/// something foundry can rely on seeing.
+pub fn worktree_registered(repo_path: &Path, worktree_path: &Path) -> Result<bool> {
+    let listing = run_git_readonly(repo_path, &["worktree", "list", "--porcelain"])?;
+    let target = resolve_for_compare(worktree_path);
+    Ok(listing
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .any(|listed| resolve_for_compare(Path::new(listed)) == target))
+}
+
+/// Resolve a path far enough to compare it with one git printed.
+///
+/// Git lists the fully resolved path, so a worktree reached through a symlinked
+/// parent (`/tmp` on macOS being the everyday case) is listed under a different
+/// string than the one foundry holds. `canonicalize` settles that, but it fails
+/// on a path that no longer exists — which is exactly the case this is called
+/// for — so fall back to canonicalizing the parent and re-attaching the name.
+fn resolve_for_compare(path: &Path) -> PathBuf {
+    if let Ok(resolved) = path.canonicalize() {
+        return resolved;
+    }
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => parent
+            .canonicalize()
+            .map(|resolved| resolved.join(name))
+            .unwrap_or_else(|_| path.to_path_buf()),
+        _ => path.to_path_buf(),
+    }
 }
 
 /// Drop registrations for worktrees whose directories are gone.

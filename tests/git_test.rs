@@ -450,3 +450,39 @@ fn test_main_repo_root_resolves_back_from_a_linked_worktree() {
         canonical_repo
     );
 }
+
+#[test]
+fn test_worktree_registered_tracks_add_and_remove() {
+    let repo = init_test_repo();
+    let worktree = repo.path().join("wt");
+
+    assert!(!foundry::git::worktree_registered(repo.path(), &worktree).unwrap());
+
+    foundry::git::create_branch(repo.path(), "feat").unwrap();
+    foundry::git::create_worktree(repo.path(), &worktree, "feat").unwrap();
+    assert!(foundry::git::worktree_registered(repo.path(), &worktree).unwrap());
+
+    foundry::git::remove_worktree(repo.path(), &worktree, false).unwrap();
+    assert!(!foundry::git::worktree_registered(repo.path(), &worktree).unwrap());
+}
+
+/// Git lists the fully resolved path, so a worktree reached through a symlinked
+/// parent — `/tmp` on macOS, which is where these tests live — is spelled one
+/// way by git and another by foundry. Both have to be recognised as the same
+/// worktree, or a partial removal reads as a refusal.
+#[cfg(unix)]
+#[test]
+fn test_worktree_registered_matches_a_path_spelled_through_a_symlink() {
+    let repo = init_test_repo();
+    let real = repo.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    std::os::unix::fs::symlink(&real, repo.path().join("link")).unwrap();
+
+    foundry::git::create_branch(repo.path(), "feat").unwrap();
+    foundry::git::create_worktree(repo.path(), &real.join("wt"), "feat").unwrap();
+
+    assert!(
+        foundry::git::worktree_registered(repo.path(), &repo.path().join("link").join("wt"))
+            .unwrap()
+    );
+}

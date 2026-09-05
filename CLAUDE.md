@@ -51,7 +51,8 @@ Foundry is a CLI that manages AI agent workspaces using git worktrees and termin
 ### Key Design Constraints
 
 - **Ghostty `new tab` bug**: Ghostty 1.x's `new tab` command succeeds but throws a spurious error. The backend works around this by running `new tab` in a separate `osascript` invocation with errors ignored, followed by a 500ms pause, then the layout script.
-- **Terminal tab closing must be last**: When finish/discard runs from inside the worktree's tab, closing the tab kills the foundry process. All git cleanup and state persistence must complete before `close_tab()`.
+- **Terminal tab closing must be last**: When finish/discard runs from inside the worktree's tab, closing the tab kills the foundry process. All git cleanup and state persistence must complete before `close_tab()`. The exception is the worktree-removal recovery path, which closes the tab early to stop whatever is writing into the worktree — it is guarded on the process not running inside that worktree.
+- **A partly-failed `git worktree remove` is not a failure**: git drops its registration under `.git/worktrees/` even when deleting the directory fails, so files a dev server recreated mid-delete leave nothing for a retry to remove. `git::worktree_registered` distinguishes that from a removal git refused outright; only the latter is fatal.
 - **State recorded before setup scripts**: `start` writes workspace state before running setup scripts so that `discard` can clean up if setup fails partway through.
 - **Config pane merging**: Global config defines pane layout structure. Project config can only override `command` and `env` for existing panes and opt in to `optional` panes. Projects cannot add new panes or change split relationships.
 - **Branch archiving**: Branches with commits get archived with a datestamp suffix (`archive/branch-YYYYMMDD`). Branches with no commits are deleted outright to avoid clutter.

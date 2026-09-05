@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Leftover files no longer strand a finished workspace. A pane running a dev server writes into the worktree while `git worktree remove` is deleting it — Vite's `node_modules/.vite` cache is the usual one, and because it is gitignored the clean check never sees it — so the final `rmdir` fails with "Directory not empty". Git deletes its own registration for the worktree regardless, which left `finish` with the branch merged but unarchived, the state entry still present, and no way forward: a second `foundry finish` only reported that the path is not a working tree, so the workspace had to be cleared by hand with `rm -rf` plus `foundry discard`. Foundry now checks whether git still has the worktree registered. If it does, nothing was deleted and the error stays fatal as before (a dirty worktree, a locked one). If it does not, foundry closes the workspace's terminal tab — unless the command is running inside it — to stop whatever is writing, sweeps the leftovers itself, and if files still survive that, reports them as a warning and finishes the cleanup: the branch is archived and the state entry cleared, leaving only a directory to delete.
+
 ## v0.6.0
 
 ### Security
