@@ -48,14 +48,16 @@ skip_reason() {
   return 0
 }
 
-# "name version" for each direct dependency from crates.io.
+# "name version" for each direct dependency from crates.io, one line per
+# crate. A crate depended on at two versions (renamed, or per target) keeps
+# only its lowest, the one furthest behind; two lines would collide below.
 locked=$(cargo metadata --format-version 1 --locked | jq -r '
   .resolve.root as $root
   | [.resolve.nodes[] | select(.id == $root) | .deps[].pkg] as $direct
   | .packages[]
   | select(.id as $id | $direct | index($id))
   | select((.source // "") | startswith("registry+https://github.com/rust-lang/crates.io-index"))
-  | "\(.name) \(.version)"' | sort -u)
+  | "\(.name) \(.version)"' | sort -k1,1 -k2,2V | awk '!seen[$1]++')
 if [ -z "$locked" ]; then
   echo "::error::cargo metadata listed no crates.io dependencies"
   exit 1
