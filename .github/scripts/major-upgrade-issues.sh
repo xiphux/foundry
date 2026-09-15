@@ -151,6 +151,7 @@ done
 printf '%s\n' "$open" | while IFS=$'\t' read -r number key; do
   [ -n "$key" ] || continue
   [ -d "$work/$key" ] && continue
-  gh issue close "$number" --comment 'Closing: this crate is on its latest release line now.' >/dev/null
+  # Not "caught up": the crate may instead have been removed or added to SKIP.
+  gh issue close "$number" --comment 'Closing: no breaking upgrade is pending for this crate any more.' >/dev/null
   echo "Closed #$number: $key"
 done
