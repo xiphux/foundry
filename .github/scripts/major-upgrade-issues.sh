@@ -67,10 +67,12 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 while read -r name current; do
-  # crates.io asks API clients to identify themselves, and refuses requests
-  # without a User-Agent. A failed lookup fails the run: treating it as "up
-  # to date" would close that crate's issue.
-  latest=$(curl -fsS -A 'foundry major-upgrade-check (https://github.com/xiphux/foundry)' \
+  # crates.io asks API clients to identify themselves, refuses requests
+  # without a User-Agent, and asks crawlers for at most one request a second.
+  # A failed or timed-out lookup fails the run: treating it as "up to date"
+  # would close that crate's issue.
+  sleep 1
+  latest=$(curl -fsS --max-time 30 -A 'foundry major-upgrade-check (https://github.com/xiphux/foundry)' \
     "https://crates.io/api/v1/crates/$name" | jq -r '.crate.max_stable_version // empty')
   if [ -z "$latest" ]; then
     echo "::error::No stable version of $name on crates.io"
