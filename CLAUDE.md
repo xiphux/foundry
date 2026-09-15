@@ -17,7 +17,7 @@ cargo fmt -- --check                 # Check formatting without modifying
 
 CI runs: fmt check, clippy, test, release build — on Ubuntu, macOS and Windows — plus `cargo audit` and a gitleaks secret scan.
 
-Dependabot proposes GitHub Actions and Cargo updates; `.github/workflows/dependabot-automerge.yml` merges patches and non-0.x minors once CI is green, so CI is the only gate those updates pass. Majors are ignored by Dependabot and tracked as `major-upgrade` issues by a weekly workflow (`.github/scripts/major-upgrade-issues.sh --dry-run` runs it locally).
+Dependabot proposes GitHub Actions and Cargo updates; `.github/workflows/dependabot-automerge.yml` merges patches (except 0.0.x) and minors (except 0.x) once CI is green, so CI is the only gate those updates pass. Majors are ignored by Dependabot and tracked as `major-upgrade` issues by a weekly workflow (`.github/scripts/major-upgrade-issues.sh --dry-run` runs it locally).
 
 ## Code Quality Rules
 
