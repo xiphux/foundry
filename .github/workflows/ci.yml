@@ -16,10 +16,13 @@ jobs:
       # A failure on one platform should not hide whether the others pass.
       fail-fast: false
       matrix:
-        # Windows because it ships (x86_64-pc-windows-msvc, via Scoop) and
-        # Dependabot PRs auto-merge on a green run: without it, a dependency
-        # update that breaks the Windows build would first fail at release.
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Every platform release ships to is built here, because Dependabot
+        # PRs auto-merge on a green run and cargo-dist only builds on a tag:
+        # otherwise a dependency update that broke one would first fail at
+        # release. Windows ships via Scoop; ubuntu-24.04-arm covers
+        # aarch64-unknown-linux-gnu, and the macOS leg (arm64) also builds
+        # x86_64-apple-darwin below.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
 
@@ -35,11 +38,13 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          # runner.arch too: both Linux legs report runner.os "Linux".
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           # A PR that changes Cargo.lock (every Cargo Dependabot PR) misses the
-          # exact key; start from the newest cache for this OS instead of cold.
+          # exact key; start from the newest cache for this platform instead
+          # of cold.
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       - name: Configure git
         run: |
@@ -49,14 +54,49 @@ jobs:
       - name: Check formatting
         run: cargo fmt -- --check
 
+      # --locked throughout: a Cargo.lock that disagrees with Cargo.toml fails
+      # instead of being quietly rewritten for the run. --all-targets so the
+      # tests are linted as well.
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Run tests
-        run: cargo test
+        run: cargo test --locked
 
       - name: Build release
-        run: cargo build --release
+        run: cargo build --locked --release
+
+      - name: Build for x86_64 macOS
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add x86_64-apple-darwin
+          cargo build --locked --target x86_64-apple-darwin
+
+  # Fails if line coverage drops below the floor, so tests cannot quietly
+  # thin out underneath auto-merge. Raise the floor as coverage grows; it is
+  # set a little under the measured figure so platform noise does not flake.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Configure git
+        run: |
+          git config --global user.email "ci@foundry.dev"
+          git config --global user.name "CI"
+
+      - name: Check coverage
+        run: cargo llvm-cov --locked --summary-only --fail-under-lines 72
 
   audit:
     runs-on: ubuntu-latest
