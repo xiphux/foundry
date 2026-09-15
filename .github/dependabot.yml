@@ -1,12 +1,49 @@
-# Keep GitHub Actions pins current via reviewed PRs. Dependabot opens a PR
-# whenever a workflow action ships a new release. Dependency updates (cargo)
-# are handled security-only via the repo's Dependabot security-updates
-# setting, not here, to avoid routine version-bump noise.
+# Version-update PRs for GitHub Actions pins and for Cargo crates.
+# Dependabot security updates are a separate repo setting and keep working
+# regardless of what is here; `ignore` update-types and `cooldown` apply to
+# version updates only, so a security fix that needs a major still arrives.
+#
+# Which of these PRs merge without a human is decided in
+# workflows/dependabot-automerge.yml, not here.
 version: 2
+
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      # Daily, not weekly: each run also rebases every open Dependabot PR,
+      # which is the only way a PR the auto-merge workflow held for being
+      # behind main gets rebased and re-tested.
+      interval: daily
     commit-message:
       prefix: ci
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      # Daily for the same rebasing reason as above. Cooldown still sets how
+      # often a given crate can actually change.
+      interval: daily
+    commit-message:
+      prefix: deps
+    # Majors are manual upgrades, done on purpose. Ignored rather than
+    # proposed-and-held because Dependabot offers only a crate's newest
+    # version: a pending major would replace the minor and patch updates
+    # below. workflows/major-upgrade-check.yml opens an issue for each major
+    # instead.
+    #
+    # A 0.x crate's breaking release (sha2 0.11 -> 0.12) may be classed as a
+    # minor and proposed anyway; auto-merge holds it. The major check reports
+    # it either way, since it compares by Cargo's own compatibility rule.
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+    # Hold back releases younger than this. Hijacked releases are usually
+    # caught and yanked within days, and most of these PRs merge unattended.
+    cooldown:
+      default-days: 7
+      semver-patch-days: 3
+    # No groups. A group is for crates where two separate PRs would each fail
+    # CI; clap and clap_complete do not qualify, since clap_complete's
+    # requirement on clap lets Dependabot move clap in the same lockfile
+    # update when it needs to.
