@@ -16,7 +16,8 @@
 # from the crates.io API. Only crates.io dependencies are checked.
 #
 # Issues are matched by a marker comment in the body, so a title edited by
-# hand is kept until a newer release changes the issue.
+# hand is kept until the issue's body changes (a newer release, or a new
+# locked version).
 set -euo pipefail
 
 LABEL=major-upgrade
@@ -139,8 +140,9 @@ for dir in "$work"/*/; do
   # dropping trailing newlines, must not count as a change, or every run
   # would rewrite every issue.
   elif [ "$(gh issue view "$number" --json body --jq .body | tr -d '\r')" != "$(cat "$dir/body")" ]; then
-    # The title is only rewritten along with a body change (a newer release),
-    # so a title someone edited stays put until there is news.
+    # The title is only rewritten along with a body change, so a title
+    # someone edited stays put until the body moves. The body includes the
+    # locked version, so an auto-merged patch or minor of the crate counts.
     gh issue edit "$number" --title "$title" --body-file "$dir/body" >/dev/null
     echo "Updated #$number: $title"
   else
