@@ -1,10 +1,10 @@
 # Auto-merge safe Dependabot PRs once CI passes.
 #
-# Standalone + workflow_run on purpose: embedding this in the CI workflow made
-# that (reusable) workflow request contents/pull-requests write, which exceeds
-# what its callers grant and invalidated the workflow. Running AFTER CI
-# completes keeps write-permissions out of the CI workflow. It also runs from
-# the trusted default branch, not PR code.
+# Standalone + workflow_run on purpose. It started as a job inside ci.yml
+# (removed in 8edbba2), which put contents/pull-requests write on a workflow
+# that runs PR code. Running AFTER CI completes keeps write-permissions out of
+# the CI workflow, and a workflow_run job runs from the trusted default
+# branch, not from the PR.
 #
 # What it reads: the `updated-dependencies` YAML block Dependabot writes into
 # every commit message, which names each package, its new version and its
