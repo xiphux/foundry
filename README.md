@@ -490,6 +490,8 @@ Foundry detects the terminal automatically from the `TERM_PROGRAM` environment v
 
 Native terminal backends open a new tab with splits. If no native backend is detected, foundry falls back to **Zellij** or **tmux** (whichever is available), which take over the current terminal with a multiplexer session. If neither is available, **bare mode** runs the first agent command in the current terminal with no splits.
 
+To skip detection, set `FOUNDRY_TERMINAL` to one of `ghostty`, `iterm2`, `wezterm`, `windows-terminal`, `zellij`, `tmux` or `bare` (for example, to use tmux from inside Ghostty).
+
 Windows Terminal does not support `run_in_pane` (deferred pane commands) or `focus_tab` due to `wt.exe` limitations.
 
 ### Shell Configuration

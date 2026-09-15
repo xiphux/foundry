@@ -67,8 +67,25 @@ pub struct PaneSpec {
 /// multiplexers come last as a fallback for launching a *new detached*
 /// session — both refuse to run from inside an existing one.
 ///
-/// Adding a backend is one block here and nothing else.
+/// `FOUNDRY_TERMINAL` names a backend and skips detection: for picking a
+/// multiplexer from inside a native terminal, and for the end-to-end tests,
+/// which need bare mode on machines that have tmux or Zellij installed.
+///
+/// Adding a backend is one block here and one name in `backend_named`.
 fn detect_backend() -> Box<dyn TerminalBackend + Send + Sync> {
+    if let Ok(name) = std::env::var("FOUNDRY_TERMINAL")
+        && !name.is_empty()
+    {
+        match backend_named(&name) {
+            Some(term) => return term,
+            None => eprintln!(
+                "Warning: FOUNDRY_TERMINAL={name:?} is not a known terminal backend \
+                 ({}); detecting one instead.",
+                BACKEND_NAMES.join(", ")
+            ),
+        }
+    }
+
     if let Some(term) = ghostty::GhosttyBackend::detect() {
         return Box::new(term);
     }
@@ -96,6 +113,30 @@ fn detect_backend() -> Box<dyn TerminalBackend + Send + Sync> {
 
     // Bare fallback — no splits, just run the agent command
     Box::new(bare::BareBackend::new())
+}
+
+/// Names `FOUNDRY_TERMINAL` accepts, in detection order.
+const BACKEND_NAMES: &[&str] = &[
+    "ghostty",
+    "iterm2",
+    "wezterm",
+    "windows-terminal",
+    "zellij",
+    "tmux",
+    "bare",
+];
+
+fn backend_named(name: &str) -> Option<Box<dyn TerminalBackend + Send + Sync>> {
+    Some(match name.to_ascii_lowercase().as_str() {
+        "ghostty" => Box::new(ghostty::GhosttyBackend),
+        "iterm2" => Box::new(iterm2::Iterm2Backend),
+        "wezterm" => Box::new(wezterm::WeztermBackend),
+        "windows-terminal" => Box::new(windows_terminal::WindowsTerminalBackend),
+        "zellij" => Box::new(zellij::ZellijBackend),
+        "tmux" => Box::new(tmux::TmuxBackend),
+        "bare" => Box::new(bare::BareBackend::new()),
+        _ => return None,
+    })
 }
 
 /// Detect the current terminal and return the automation backend for it.
@@ -165,6 +206,21 @@ pub trait TerminalBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_documented_backend_name_resolves() {
+        for name in BACKEND_NAMES {
+            assert!(backend_named(name).is_some(), "{name}");
+            assert!(
+                backend_named(&name.to_ascii_uppercase()).is_some(),
+                "{name}"
+            );
+        }
+        assert!(backend_named("konsole").is_none());
+        // Backends differ on this, so a name mapped to the wrong one shows.
+        assert!(!backend_named("bare").unwrap().supports_run_in_pane());
+        assert!(backend_named("ghostty").unwrap().supports_run_in_pane());
+    }
 
     #[test]
     fn shell_export_quotes_a_plain_value() {
