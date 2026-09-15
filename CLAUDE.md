@@ -10,12 +10,13 @@ cargo build --release                # Release build (binary at target/release/f
 cargo test                           # Run all tests
 cargo test --test git_test           # Run a specific test file
 cargo test test_archive_branch       # Run a specific test by name
-cargo clippy -- -D warnings          # Lint (CI enforces zero warnings)
+cargo clippy --all-targets -- -D warnings  # Lint, tests included (CI enforces zero warnings)
 cargo fmt                            # Format all code
 cargo fmt -- --check                 # Check formatting without modifying
+cargo llvm-cov --summary-only        # Line coverage (CI fails below the floor in ci.yml)
 ```
 
-CI runs: fmt check, clippy, test, release build — on Ubuntu, macOS and Windows — plus `cargo audit` and a gitleaks secret scan.
+CI runs: fmt check, clippy, test, release build (all `--locked`) on Ubuntu x86_64 and arm64, macOS (plus an x86_64 macOS cross-build) and Windows — every platform release ships to — plus a coverage floor, `cargo audit` and a gitleaks secret scan.
 
 Dependabot proposes GitHub Actions and Cargo updates; `.github/workflows/dependabot-automerge.yml` merges patches (except 0.0.x) and minors (except 0.x) once CI is green, so CI is the only gate those updates pass. Majors are ignored by Dependabot and tracked as `major-upgrade` issues by a weekly workflow (`.github/scripts/major-upgrade-issues.sh --dry-run` runs it locally).
 
@@ -23,7 +24,7 @@ Dependabot proposes GitHub Actions and Cargo updates; `.github/workflows/dependa
 
 **Before committing or after completing a set of changes**, always run:
 ```bash
-cargo fmt && cargo clippy -- -D warnings
+cargo fmt && cargo clippy --all-targets -- -D warnings
 ```
 This is mandatory — CI will reject unformatted code. Since there is no editor format-on-save in the Claude Code workflow, `cargo fmt` must be run explicitly before commits to avoid delayed CI failures.
 
@@ -62,3 +63,7 @@ Foundry is a CLI that manages AI agent workspaces using git worktrees and termin
 ### Testing
 
 Most modules have inline `#[cfg(test)]` unit tests. Integration tests in `tests/` create temporary git repos via `tempfile::TempDir`. The `init_test_repo()` helper (in git_test.rs and integration_test.rs) sets up a repo with an initial empty commit on `main`. Terminal and forge operations cannot be tested in CI (require a running terminal / `gh` auth).
+
+- **`tests/e2e_test.rs`** runs the built binary against a throwaway repo, with `FOUNDRY_HOME` pointing at a temp dir and `FOUNDRY_TERMINAL=bare` (the pane command runs in the foreground and returns). A change to a command's behavior belongs here; its `Sandbox` helper sets up repo, config and git identity.
+- **`tests/persisted_format_test.rs`** loads state, registry, trust, history and config files in `tests/fixtures/persisted`, written by foundry 0.6. Never regenerate them to make a test pass: a fixture that stops loading means existing users' files would too. Add a new fixture when a format gains fields.
+- **`cli.rs`'s tests** pin every command's arguments, and completions for every shell. Update them alongside any CLI change.
