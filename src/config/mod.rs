@@ -311,8 +311,15 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-/// Get the foundry base directory (~/.foundry/).
+/// Get the foundry base directory: `$FOUNDRY_HOME` if set, else `~/.foundry/`.
+///
+/// The override exists so the binary can run against a throwaway directory
+/// (the end-to-end tests do). `HOME` can't serve for that: `dirs::home_dir`
+/// ignores it on Windows.
 pub fn foundry_dir() -> Result<PathBuf> {
+    if let Some(dir) = std::env::var_os("FOUNDRY_HOME").filter(|d| !d.is_empty()) {
+        return Ok(PathBuf::from(dir));
+    }
     let home = dirs::home_dir().context("could not determine home directory")?;
     Ok(home.join(".foundry"))
 }

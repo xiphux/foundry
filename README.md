@@ -114,6 +114,8 @@ Foundry uses two levels of TOML configuration:
 - **Global config** at `~/.foundry/config.toml` — defaults for all projects
 - **Project config** at `.foundry.toml` in each repo root — project-specific overrides
 
+Everything foundry keeps under `~/.foundry` (config, project registry, workspace state, history, hooks) moves to another directory if you set `FOUNDRY_HOME` to it. `worktree_dir` still defaults to `~/.foundry/worktrees`; set it explicitly to move worktrees too.
+
 ### Global Config
 
 ```toml
