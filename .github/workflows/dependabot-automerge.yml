@@ -2,12 +2,30 @@
 #
 # Standalone + workflow_run on purpose: embedding this in the CI workflow made
 # that (reusable) workflow request contents/pull-requests write, which exceeds
-# what its callers (docker/deploy/publish) grant and invalidated the workflow.
-# Running AFTER CI completes keeps write-permissions out of the CI workflow.
-# It also runs from the trusted default branch, not PR code.
+# what its callers grant and invalidated the workflow. Running AFTER CI
+# completes keeps write-permissions out of the CI workflow. It also runs from
+# the trusted default branch, not PR code.
 #
-# Safe = same major version, excluding 0.x minor bumps (which can break, e.g.
-# esbuild). Genuine majors and 0.x-minors are left open for manual review.
+# What it reads: the `updated-dependencies` YAML block Dependabot writes into
+# every commit message, which names each package, its new version and its
+# semver update-type. The PR title is not parsed: a grouped PR's title
+# ("bump the clap group with 2 updates") carries no versions.
+#
+# Safe, per package — a PR merges only if EVERY package in it is:
+#   - patch: yes, unless the new version is 0.0.x (where any bump can break)
+#   - minor: yes, unless the new version is 0.x (where a minor is a breaking
+#     release — Cargo itself treats 0.4 -> 0.5 as incompatible) and the
+#     package is not in ALLOW_ZERO_MINOR, or the package is in HOLD_MINOR
+#   - major, or anything unrecognised: no
+# Held PRs stay open for manual review. That includes GitHub Actions majors,
+# which Dependabot proposes (actions release almost nothing but majors) and
+# this holds.
+#
+# Nothing deploys from main, so what merges here is first seen by users in
+# the next tagged release. The CI matrix covers every OS that release ships
+# to, and cooldown in dependabot.yml keeps brand-new releases out.
+#
+# Ported from football, whose history has the reasoning behind each guard.
 name: Dependabot auto-merge
 
 on:
@@ -26,8 +44,24 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.actor.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
+    # One at a time across the whole repo. A batch of these fires within
+    # seconds of itself, which is short enough that one job checks whether its
+    # PR is behind main before the previous one's merge lands, and then acts on
+    # an answer that was true when it was asked. Serializing is what makes the
+    # pre-check in the script authoritative rather than advisory.
+    #
+    # `cancel-in-progress: false` buys less than it looks like: it protects the
+    # RUNNING job, but a group holds only one running plus one pending, so a
+    # third arrival still evicts the one that was waiting. In a batch of three
+    # or more, a middle run can be cancelled and never merge its PR. That is
+    # fail-safe rather than wrong — nothing unsafe merges, the PR just stays
+    # open — and it clears itself the same way a PR held for being behind
+    # does: Dependabot's next scheduled run rebases it and CI fires a fresh run.
+    concurrency:
+      group: dependabot-automerge
+      cancel-in-progress: false
     steps:
-      - name: Merge if the update is semver-safe
+      - name: Merge if every update is semver-safe
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -35,29 +69,111 @@ jobs:
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
+          # Minors not safe for a reason CI cannot see. Glob patterns. Iterated
+          # with the ${a[@]+...} form so an empty list is not an unbound
+          # variable under `set -u` in older bash.
+          HOLD_MINOR=()
+          # 0.x crates whose minor releases CI can judge. Glob patterns.
+          ALLOW_ZERO_MINOR=()
+
           pr=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '.[0].number // empty')
           if [ -z "$pr" ]; then echo "No PR found for $SHA"; exit 0; fi
-          title=$(gh pr view "$pr" --repo "$REPO" --json title --jq '.title')
-          echo "PR #$pr: $title"
-          if [[ "$title" =~ from\ ([0-9]+(\.[0-9]+)*)\ to\ ([0-9]+(\.[0-9]+)*) ]]; then
-            from="${BASH_REMATCH[1]}"; to="${BASH_REMATCH[3]}"
-          else
-            echo "Not a single-dependency bump title - leaving for manual review"; exit 0
+          echo "PR #$pr: $(gh pr view "$pr" --repo "$REPO" --json title --jq '.title')"
+
+          # One "name|version|update-type" line per updated dependency.
+          # Delimited rather than space-separated so a missing field stays an
+          # EMPTY field instead of shifting the next one into its place.
+          entries=$(gh api "repos/$REPO/commits/$SHA" --jq '.commit.message' | awk '
+            function flush() { if (name != "") print name "|" ver "|" type; name = ver = type = "" }
+            /^updated-dependencies:/ { inblock = 1; next }
+            !inblock { next }
+            /^\.\.\./ { flush(); inblock = 0; next }
+            /^- dependency-name:/ { flush(); name = $3; gsub(/["\047]/, "", name) }
+            /^  dependency-version:/ { ver = $2; gsub(/["\047]/, "", ver) }
+            /^  update-type:/ { type = $2 }
+            END { flush() }')
+          if [ -z "$entries" ]; then
+            echo "No updated-dependencies metadata - leaving for manual review"; exit 0
           fi
-          IFS=. read -r fmaj fmin _ <<<"$from"
-          IFS=. read -r tmaj tmin _ <<<"$to"
-          fmaj=${fmaj:-0}; fmin=${fmin:-0}; tmaj=${tmaj:-0}; tmin=${tmin:-0}
-          safe=no
-          if [ "$fmaj" = "$tmaj" ]; then
-            if [ "$fmaj" = "0" ]; then
-              if [ "$fmin" = "$tmin" ]; then safe=yes; fi
-            else
-              safe=yes
-            fi
+
+          safe=yes
+          while IFS='|' read -r name ver type; do
+            verdict=ok
+            # Both semver arms decide from $ver, so an absent one has to hold
+            # rather than fall through to ok — every unknown fails closed, the
+            # way an unrecognised update-type already does.
+            case "$type" in
+              version-update:semver-patch)
+                case "$ver" in
+                  '') verdict="no dependency-version" ;;
+                  0.0.*) verdict="0.0.x" ;;
+                esac
+                ;;
+              version-update:semver-minor)
+                case "$ver" in
+                  '') verdict="no dependency-version" ;;
+                  0.*)
+                    verdict="0.x minor"
+                    for pattern in ${ALLOW_ZERO_MINOR[@]+"${ALLOW_ZERO_MINOR[@]}"}; do
+                      # shellcheck disable=SC2053 # glob match is intended
+                      if [[ "$name" == $pattern ]]; then verdict=ok; fi
+                    done
+                    ;;
+                  *)
+                    for pattern in ${HOLD_MINOR[@]+"${HOLD_MINOR[@]}"}; do
+                      # shellcheck disable=SC2053 # glob match is intended
+                      if [[ "$name" == $pattern ]]; then verdict="minor on hold list"; fi
+                    done
+                    ;;
+                esac
+                ;;
+              *)
+                verdict="${type:-unknown update type}"
+                ;;
+            esac
+            echo "  $name $ver ($type): $verdict"
+            [ "$verdict" = ok ] || safe=no
+          done <<<"$entries"
+
+          if [ "$safe" != yes ]; then
+            echo "Holding for manual review"
+            exit 0
           fi
-          if [ "$safe" = "yes" ]; then
-            echo "Safe bump ($from -> $to) - merging"
-            gh pr merge "$pr" --repo "$REPO" --merge --delete-branch
-          else
-            echo "Holding ($from -> $to: major or 0.x-minor) - manual review"
+
+          echo "All updates safe - merging"
+          # Two refusals are expected rather than failures, and both are asked
+          # about UP FRONT so the merge itself can stay unguarded. Guarding it
+          # would mean classifying gh's failure, and gh wraps a conflict and a
+          # branch-protection block in the same "is not mergeable:" sentence —
+          # so a pattern that held the first would silently hold the second,
+          # which is the case that must be loud. Everything else keeps
+          # `set -e`: a token that lost contents:write, a new protection rule
+          # and an API outage all still fail the run.
+
+          # Dependabot force-pushes open PRs when newer versions land, so the
+          # head can have moved past the commit CI passed and this metadata
+          # came from. --match-head-commit below closes the remaining window;
+          # if it ever fires, that IS a real race and red is the right answer.
+          head_now=$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq '.headRefOid')
+          if [ "$head_now" != "$SHA" ]; then
+            echo "Head is now $head_now, CI passed $SHA - leaving open"
+            exit 0
           fi
+
+          # The tree that lands must be the tree CI tested. Once main has
+          # moved, merging lands a combination no run ever saw — and two
+          # Cargo.lock edits can merge cleanly as text and still be wrong
+          # together. So hold unless the PR already contains main's tip. That
+          # also covers a conflict, since a conflicting PR is always behind.
+          #
+          # A held PR is rebased by Dependabot's next scheduled run (daily, see
+          # dependabot.yml), which reruns CI and brings it back here. This
+          # workflow can't ask for the rebase itself: Dependabot refuses
+          # `@dependabot rebase` from github-actions[bot].
+          behind=$(gh api "repos/$REPO/compare/main...$SHA" --jq '.behind_by')
+          if [ "$behind" != 0 ]; then
+            echo "Branch is $behind commit(s) behind main - leaving open until Dependabot rebases it"
+            exit 0
+          fi
+
+          gh pr merge "$pr" --repo "$REPO" --merge --delete-branch --match-head-commit "$SHA"
