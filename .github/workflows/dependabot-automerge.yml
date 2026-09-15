@@ -22,8 +22,9 @@
 # this holds.
 #
 # Nothing deploys from main, so what merges here is first seen by users in
-# the next tagged release. The CI matrix covers every OS that release ships
-# to, and cooldown in dependabot.yml keeps brand-new releases out.
+# the next tagged release. CI builds and tests on every OS that release ships
+# to, though not every architecture (release also targets aarch64 Linux and
+# x86_64 macOS), and cooldown in dependabot.yml keeps brand-new releases out.
 #
 # Ported from football, whose history has the reasoning behind each guard.
 name: Dependabot auto-merge
