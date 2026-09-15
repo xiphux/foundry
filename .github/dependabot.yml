@@ -11,9 +11,10 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      # Daily, not weekly: each run also rebases every open Dependabot PR,
-      # which is the only way a PR the auto-merge workflow held for being
-      # behind main gets rebased and re-tested.
+      # Daily, not weekly, so PRs the auto-merge workflow held for being
+      # behind main get the soonest chance of a rebase and re-test. Dependabot
+      # documents rebasing on conflicts; a PR that is only behind may need a
+      # manual `@dependabot rebase` (see workflows/dependabot-automerge.yml).
       interval: daily
     commit-message:
       prefix: ci
@@ -21,7 +22,7 @@ updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
-      # Daily for the same rebasing reason as above. Cooldown still sets how
+      # Daily for the same reason as above. Cooldown still sets how
       # often a given crate can actually change.
       interval: daily
     commit-message:

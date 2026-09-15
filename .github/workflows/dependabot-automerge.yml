@@ -56,8 +56,8 @@ jobs:
     # third arrival still evicts the one that was waiting. In a batch of three
     # or more, a middle run can be cancelled and never merge its PR. That is
     # fail-safe rather than wrong — nothing unsafe merges, the PR just stays
-    # open — and it clears itself the same way a PR held for being behind
-    # does: Dependabot's next scheduled run rebases it and CI fires a fresh run.
+    # open — and it is recovered the same way as a PR held for being behind
+    # (see the note at that check in the script).
     concurrency:
       group: dependabot-automerge
       cancel-in-progress: false
@@ -167,10 +167,12 @@ jobs:
           # together. So hold unless the PR already contains main's tip. That
           # also covers a conflict, since a conflicting PR is always behind.
           #
-          # A held PR is rebased by Dependabot's next scheduled run (daily, see
-          # dependabot.yml), which reruns CI and brings it back here. This
-          # workflow can't ask for the rebase itself: Dependabot refuses
-          # `@dependabot rebase` from github-actions[bot].
+          # A held PR comes back here once Dependabot rebases it and CI reruns.
+          # Dependabot documents rebasing for conflicts; whether a scheduled
+          # run (daily, see dependabot.yml) also rebases a PR that is merely
+          # behind is not documented, so if a held PR sits unrebased, comment
+          # `@dependabot rebase` on it. This workflow can't do that itself:
+          # Dependabot refuses the command from github-actions[bot].
           behind=$(gh api "repos/$REPO/compare/main...$SHA" --jq '.behind_by')
           if [ "$behind" != 0 ]; then
             echo "Branch is $behind commit(s) behind main - leaving open until Dependabot rebases it"
