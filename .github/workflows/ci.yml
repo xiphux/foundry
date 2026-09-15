@@ -64,10 +64,20 @@ jobs:
 
       # Keyed on the newest release, so a new cargo-audit (which can be needed
       # to parse newer advisories) replaces the cached binary instead of the
-      # first one ever installed being reused forever.
+      # first one ever installed being reused forever. Fails rather than
+      # proceed without a version: an empty one would make the key constant
+      # again, and pin whatever got cached under it.
       - name: Resolve cargo-audit version
         id: cargo-audit
-        run: echo "version=$(cargo search cargo-audit --limit 1 | sed -nE 's/^cargo-audit = "([^"]+)".*/\1/p')" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          version=$(curl -fsS --max-time 30 -A 'foundry CI (https://github.com/xiphux/foundry)' \
+            https://crates.io/api/v1/crates/cargo-audit | jq -r '.crate.max_stable_version // empty')
+          if [ -z "$version" ]; then
+            echo "::error::Could not resolve the latest cargo-audit version from crates.io"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Cache cargo-audit
         id: cargo-audit-cache
@@ -78,7 +88,7 @@ jobs:
 
       - name: Install cargo-audit
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-audit --locked --force ${{ steps.cargo-audit.outputs.version && format('--version {0}', steps.cargo-audit.outputs.version) || '' }}
+        run: cargo install cargo-audit --locked --force --version "${{ steps.cargo-audit.outputs.version }}"
 
       # Checks Cargo.lock against the RustSec advisory database. Runs as its
       # own job so a new advisory against a dependency does not read as a test
