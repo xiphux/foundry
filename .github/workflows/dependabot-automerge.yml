@@ -9,7 +9,7 @@
 # What it reads: the `updated-dependencies` YAML block Dependabot writes into
 # every commit message, which names each package, its new version and its
 # semver update-type. The PR title is not parsed: a grouped PR's title
-# ("bump the clap group with 2 updates") carries no versions.
+# ("bump the cargo-minor-patch group with 3 updates") carries no versions.
 #
 # Safe, per package — a PR merges only if EVERY package in it is:
 #   - patch: yes, unless the new version is 0.0.x (where any bump can break)

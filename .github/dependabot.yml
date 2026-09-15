@@ -44,7 +44,15 @@ updates:
     cooldown:
       default-days: 7
       semver-patch-days: 3
-    # No groups. A group is for crates where two separate PRs would each fail
-    # CI; clap and clap_complete do not qualify, since clap_complete's
-    # requirement on clap lets Dependabot move clap in the same lockfile
-    # update when it needs to.
+    # Every minor and patch in one PR. Each of these edits Cargo.lock, so of
+    # several separate PRs auto-merge can land only one per rebase cycle (the
+    # rest are behind main), re-running the full CI matrix on every one left
+    # each time. One PR is one CI run and one merge.
+    #
+    # The cost: auto-merge holds a PR if ANY update in it is unsafe (a 0.x
+    # minor, say), which parks the safe ones with it. Take the unsafe crate by
+    # hand, or exclude it here with `exclude-patterns`, and the rest follow.
+    groups:
+      cargo-minor-patch:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
