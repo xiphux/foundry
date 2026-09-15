@@ -13,8 +13,13 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      # A failure on one platform should not hide whether the others pass.
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Windows because it ships (x86_64-pc-windows-msvc, via Scoop) and
+        # Dependabot PRs auto-merge on a green run: without it, a dependency
+        # update that breaks the Windows build would first fail at release.
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
 
@@ -57,17 +62,51 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Keyed on the newest release, so a new cargo-audit (which can be needed
+      # to parse newer advisories) replaces the cached binary instead of the
+      # first one ever installed being reused forever.
+      - name: Resolve cargo-audit version
+        id: cargo-audit
+        run: echo "version=$(cargo search cargo-audit --limit 1 | sed -nE 's/^cargo-audit = "([^"]+)".*/\1/p')" >> "$GITHUB_OUTPUT"
+
       - name: Cache cargo-audit
+        id: cargo-audit-cache
         uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cargo-audit
-          key: ${{ runner.os }}-cargo-audit
+          key: ${{ runner.os }}-cargo-audit-${{ steps.cargo-audit.outputs.version }}
 
       - name: Install cargo-audit
-        run: which cargo-audit || cargo install cargo-audit --locked
+        if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --locked --force ${{ steps.cargo-audit.outputs.version && format('--version {0}', steps.cargo-audit.outputs.version) || '' }}
 
       # Checks Cargo.lock against the RustSec advisory database. Runs as its
       # own job so a new advisory against a dependency does not read as a test
-      # failure, and so it reports even when the build matrix is red.
+      # failure, and so it reports even when the build matrix is red. A new
+      # advisory against something already locked holds every Dependabot PR
+      # until it is dealt with, on purpose.
       - name: Audit dependencies
         run: cargo audit --deny warnings
+
+  # Backstop for GitHub's secret scanning and push protection, and the check
+  # that runs on the PR itself. Pinned by digest; bump the tag and digest
+  # together. --redact keeps a real hit out of the public job log.
+  # --log-opts=HEAD scans the history of the commit under test only: gitleaks
+  # defaults to `git log --all`, and fetch-depth 0 fetches every remote branch,
+  # so a finding on a stale, unrelated branch would otherwise fail every PR.
+  # Reviewed false positives go in .gitleaksignore (history) or as an inline
+  # `gitleaks:allow` comment (current tree).
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: gitleaks
+        run: >-
+          docker run --rm -v "$PWD:/repo" -w /repo
+          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git . --redact --no-banner --verbose --log-opts=HEAD
