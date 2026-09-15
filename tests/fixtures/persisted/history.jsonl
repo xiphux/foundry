@@ -1,0 +1,7 @@
+{"event":"started","project":"myapp","name":"login-form","branch":"xiphux/login-form","timestamp":"2026-09-14T21:30:05Z","from_issue":"42"}
+{"event":"pr_created","project":"myapp","name":"login-form","branch":"xiphux/login-form","timestamp":"2026-09-14T21:30:05Z","pr_number":128,"pr_url":"https://github.com/xiphux/myapp/pull/128"}
+{"event":"pr_merged","project":"myapp","name":"login-form","branch":"xiphux/login-form","timestamp":"2026-09-14T21:30:05Z","pr_number":128}
+{"event":"finished","project":"myapp","name":"login-form","branch":"xiphux/login-form","timestamp":"2026-09-14T21:30:05Z","commits":3,"merge_strategy":"ff-only"}
+{"event":"started","project":"tool","name":"fix-crash","branch":"fix-crash","timestamp":"2026-09-14T21:30:05Z"}
+{"event":"discarded","project":"tool","name":"fix-crash","branch":"fix-crash","timestamp":"2026-09-14T21:30:05Z","commits":1,"archived_as":"archive/fix-crash-20260914"}
+{"event":"restored","project":"tool","name":"fix-crash","branch":"fix-crash","timestamp":"2026-09-14T21:30:05Z","from_branch":"archive/fix-crash-20260914"}

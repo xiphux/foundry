@@ -1,0 +1,5 @@
+[projects.myapp]
+path = "/home/dev/src/myapp"
+
+[projects.tool]
+path = "/home/dev/src/tool"

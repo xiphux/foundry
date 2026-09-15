@@ -1,0 +1,35 @@
+[[workspaces]]
+project = "myapp"
+name = "login-form"
+branch = "xiphux/login-form"
+worktree_path = "/home/dev/.foundry/worktrees/myapp/login-form"
+source_path = "/home/dev/src/myapp"
+created_at = "2026-09-14T21:30:05Z"
+terminal_tab_id = "tab-3"
+pr_number = 128
+pr_url = "https://github.com/xiphux/myapp/pull/128"
+
+[workspaces.allocated_ports]
+API_PORT = 10043
+VITE_PORT = 10042
+
+[[workspaces]]
+project = "tool"
+name = "fix-crash"
+branch = "fix-crash"
+worktree_path = "/home/dev/.foundry/worktrees/tool/fix-crash"
+source_path = "/home/dev/src/tool"
+created_at = "2026-09-14T21:30:05Z"
+terminal_tab_id = ""
+
+[workspaces.allocated_ports]
+
+# Written before terminal_tab_id and allocated_ports existed: both must
+# default rather than fail the whole file.
+[[workspaces]]
+project = "tool"
+name = "old-entry"
+branch = "old-entry"
+worktree_path = "/home/dev/.foundry/worktrees/tool/old-entry"
+source_path = "/home/dev/src/tool"
+created_at = "2026-01-02T03:04:05Z"

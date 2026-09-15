@@ -1,0 +1,35 @@
+# Project config (.foundry.toml) using every key foundry reads.
+branch_prefix = "team"
+agent = "codex"
+archive_prefix = "old"
+merge_strategy = "ff-only"
+worktree_dir = "/home/dev/project-worktrees"
+auto_fetch = false
+fetch_remote = "origin"
+pr_remote = "fork"
+shell = "zsh"
+ports = ["VITE_PORT", "API_PORT"]
+context = "The dev server runs at http://localhost:{VITE_PORT}"
+
+[[scripts.setup]]
+name = "Copy env file"
+command = "cp {source}/.env {worktree}/.env"
+
+[[scripts.setup]]
+name = "Install dependencies"
+command = "npm install"
+working_dir = "{worktree}"
+deferred = true
+
+[[scripts.teardown]]
+name = "Stop containers"
+command = "docker compose down"
+working_dir = "{worktree}"
+
+[panes.server]
+command = "npm run dev"
+[panes.server.env]
+NODE_ENV = "development"
+
+[panes.git]
+deferred = true

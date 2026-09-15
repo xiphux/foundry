@@ -1,0 +1,38 @@
+# Global config using every key foundry reads.
+branch_prefix = "xiphux"
+agent = "claude"
+archive_prefix = "archive"
+merge_strategy = "merge"
+worktree_dir = "/home/dev/worktrees"
+port_range_start = 20000
+auto_fetch = true
+fetch_remote = "upstream"
+pr_remote = "origin"
+issue_prompt = "Fix #{issue_number}: {title}\n\n{body}"
+unrestricted_permissions = false
+editor = "zed"
+shell = "bash"
+
+[[panes]]
+name = "agent"
+agent = "claude"
+[panes.env]
+SOME_VAR = "value"
+
+[[panes]]
+name = "git"
+command = "lazygit"
+split_from = "agent"
+direction = "right"
+
+[[panes]]
+name = "shell"
+split_from = "git"
+direction = "down"
+deferred = true
+
+[[panes]]
+name = "server"
+split_from = "shell"
+direction = "right"
+optional = true
