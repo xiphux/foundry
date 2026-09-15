@@ -36,6 +36,10 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          # A PR that changes Cargo.lock (every Cargo Dependabot PR) misses the
+          # exact key; start from the newest cache for this OS instead of cold.
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Configure git
         run: |
