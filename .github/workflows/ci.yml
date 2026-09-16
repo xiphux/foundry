@@ -175,6 +175,30 @@ jobs:
       - name: Audit dependencies
         run: cargo audit --deny warnings
 
+      # The other half of dependency hygiene: a crate still declared after the
+      # code that used it went away. Nothing else notices — it builds, it
+      # locks, it passes clippy, and Dependabot keeps proposing updates for it
+      # (and auto-merging them) forever.
+      #
+      # In this job rather than its own: both read Cargo.toml/Cargo.lock rather
+      # than the build, and a second job would spend a runner start on a check
+      # that takes under a second. `!cancelled()` so an advisory does not hide
+      # an unused crate, or the reverse.
+      - name: Install cargo-machete
+        if: ${{ !cancelled() }}
+        uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
+        with:
+          tool: cargo-machete
+
+      # cargo-machete reads the sources rather than building them, so a crate
+      # reachable only through a macro expansion or a `cfg` this platform does
+      # not compile can read as unused. There is nothing in that position here
+      # today; when there is, it goes in `[package.metadata.cargo-machete]` in
+      # Cargo.toml with the reason beside it, not behind --skip-analysis.
+      - name: Check for unused dependencies
+        if: ${{ !cancelled() }}
+        run: cargo machete
+
   # Backstop for GitHub's secret scanning and push protection, and the check
   # that runs on the PR itself. Pinned by digest; bump the tag and digest
   # together. --redact keeps a real hit out of the public job log.
