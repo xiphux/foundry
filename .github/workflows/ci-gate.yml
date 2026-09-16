@@ -7,6 +7,12 @@ on:
         required: false
         type: string
 
+# Called from release.yml, which declares contents: write for the release
+# itself. This gate only builds and tests, so it takes the minimum instead
+# of inheriting that.
+permissions:
+  contents: read
+
 jobs:
   ci-gate:
     runs-on: ubuntu-latest

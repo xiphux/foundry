@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# Read-only by default, for every job here. Nothing in CI writes to the
+# repository: what merges a green Dependabot PR is dependabot-automerge.yml,
+# a separate workflow_run workflow that never checks out PR code (see its
+# header). A job that needs more has to say so itself.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
