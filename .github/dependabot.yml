@@ -22,6 +22,12 @@ updates:
     # actions. A version update over the limit is not opened until a slot
     # frees; security updates are never counted against it.
     open-pull-requests-limit: 10
+    # A hijacked action tag is usually caught and pulled within days, and
+    # these PRs merge unattended once CI is green. A week keeps a fresh
+    # compromise from reaching a pin automatically. Security updates ignore
+    # cooldown, so a real advisory still arrives at once.
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: cargo
     directory: /
