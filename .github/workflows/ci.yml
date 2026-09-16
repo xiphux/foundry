@@ -197,3 +197,60 @@ jobs:
           docker run --rm -v "$PWD:/repo" -w /repo
           ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
           git . --redact --no-banner --verbose --log-opts=HEAD
+
+  # The workflows themselves. actionlint catches mistakes GitHub only reports
+  # by failing a run — bad expressions, `needs` typos, unknown runner labels,
+  # shellcheck findings inside `run:` blocks. zizmor catches security ones —
+  # unpinned actions, template injection, permissions wider than a job needs,
+  # credentials left behind by a checkout. Both matter more here than the
+  # linting of any one script: these files hold the release tokens, and
+  # dependabot-automerge.yml merges other people's changes on a green run.
+  #
+  # Each tool's intentional exceptions live in its own config, with the
+  # reasoning next to them: .github/actionlint.yaml and .github/zizmor.yml.
+  #
+  # No Rust and no build, so it finishes in seconds and does not queue behind
+  # the matrix.
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The release binary from GitHub, checksum-pinned: this job gates what
+      # auto-merge may merge, so the tool that judges it is fetched by a hash
+      # rather than a tag someone else can move. Bump the version and the
+      # checksum together (the release publishes a checksums.txt).
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$tarball"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+
+      # `if: !cancelled()` so a finding from one tool still lets the other
+      # report, rather than fixing them one CI run at a time.
+      #
+      # Online audits use the job's read-only token to check that each SHA pin
+      # is a real commit of the repository named, and that it matches the
+      # `# vX.Y.Z` comment beside it. Annotations rather than a SARIF upload,
+      # which would need security-events: write.
+      #
+      # The action only runs zizmor versions in its own table (pulled by
+      # digest), so `version` has to be one this pinned release knows: bumping
+      # zizmor past it fails with "Unknown version" until the action is
+      # bumped too.
+      - name: zizmor
+        if: ${{ !cancelled() }}
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          version: 1.30.1
+          advanced-security: false
+          annotations: true
