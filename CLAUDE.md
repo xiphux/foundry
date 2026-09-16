@@ -14,9 +14,10 @@ cargo clippy --all-targets -- -D warnings  # Lint, tests included (CI enforces z
 cargo fmt                            # Format all code
 cargo fmt -- --check                 # Check formatting without modifying
 cargo llvm-cov --summary-only        # Line coverage (CI fails below the floor in ci.yml)
+cargo machete                        # Declared crates nothing uses (CI gates on it)
 ```
 
-CI runs: fmt check, clippy, test, release build (all `--locked`) on Ubuntu x86_64 and arm64, macOS (plus an x86_64 macOS cross-build) and Windows — every platform release ships to — plus a coverage floor, `cargo audit`, a gitleaks secret scan and a workflow lint.
+CI runs: fmt check, clippy, test, release build (all `--locked`) on Ubuntu x86_64 and arm64, macOS (plus an x86_64 macOS cross-build) and Windows — every platform release ships to — plus a coverage floor, `cargo audit`, `cargo machete`, a gitleaks secret scan and a workflow lint.
 
 The workflow lint is actionlint (workflow mistakes, including shellcheck over `run:` blocks) and zizmor (workflow security). Run them locally the way CI does:
 
@@ -26,6 +27,8 @@ docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/zizmorcore/zizmor:latest .
 ```
 
 Both are clean, and each exception is recorded with its reasoning in `.github/actionlint.yaml` or `.github/zizmor.yml` — nearly all of them dist-generated `release.yml` content, ignored line by line so the hand-maintained Scoop jobs in that file are still covered. Every action is pinned to a commit SHA with the version in a trailing comment, which is what Dependabot updates; `dtolnay/rust-toolchain` is pinned to its `v1` tag and passed `toolchain: stable` explicitly, because the rolling `stable` branch is what used to supply that default.
+
+`cargo machete` runs beside `cargo audit` in the same job: both read the manifest rather than the build. It parses sources rather than compiling them, so a crate reached only through a macro or a `cfg` this platform skips can read as unused — that goes in `[package.metadata.cargo-machete]` in Cargo.toml with its reason, not behind `--skip-analysis`. Nothing needs it today.
 
 Dependabot proposes GitHub Actions and Cargo updates; `.github/workflows/dependabot-automerge.yml` merges patches (except 0.0.x) and minors (except 0.x) once CI is green, so CI is the only gate those updates pass. Majors are ignored by Dependabot and tracked as `major-upgrade` issues by a weekly workflow (`.github/scripts/major-upgrade-issues.sh --dry-run` runs it locally).
 
