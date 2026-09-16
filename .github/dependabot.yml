@@ -18,6 +18,10 @@ updates:
       interval: daily
     commit-message:
       prefix: ci
+    # The default is 5 per entry, and the workflows use seven distinct
+    # actions. A version update over the limit is not opened until a slot
+    # frees; security updates are never counted against it.
+    open-pull-requests-limit: 10
 
   - package-ecosystem: cargo
     directory: /
@@ -27,6 +31,11 @@ updates:
       interval: daily
     commit-message:
       prefix: deps
+    # Above the default 5: eleven direct crates, released in cooldown
+    # batches. A version update over the limit is not opened until a slot
+    # frees, so the default quietly delays updates; security updates are
+    # exempt from it.
+    open-pull-requests-limit: 10
     # Majors are manual upgrades, done on purpose. Ignored rather than
     # proposed-and-held because Dependabot offers only a crate's newest
     # version: a pending major would replace the minor and patch updates
