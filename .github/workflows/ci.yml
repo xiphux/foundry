@@ -138,6 +138,15 @@ jobs:
             echo "::error::Could not resolve the latest cargo-audit version from crates.io"
             exit 1
           fi
+          # Shape-check what a third party just handed us, before it reaches a
+          # cache key and a cargo argument. A version is digits and dots with
+          # an optional pre-release/build suffix; anything else is a wrong or
+          # tampered-with response and should stop the run rather than travel
+          # any further.
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::crates.io returned an implausible cargo-audit version: $version"
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Cache cargo-audit
@@ -147,9 +156,16 @@ jobs:
           path: ~/.cargo/bin/cargo-audit
           key: ${{ runner.os }}-cargo-audit-${{ steps.cargo-audit.outputs.version }}
 
+      # The version goes through the environment rather than being expanded
+      # into the script: `${{ }}` is substituted as text before bash sees the
+      # line, so a value containing shell metacharacters would run as code.
+      # It comes from a crates.io response, which this workflow does not
+      # control.
       - name: Install cargo-audit
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-audit --locked --force --version "${{ steps.cargo-audit.outputs.version }}"
+        env:
+          CARGO_AUDIT_VERSION: ${{ steps.cargo-audit.outputs.version }}
+        run: cargo install cargo-audit --locked --force --version "$CARGO_AUDIT_VERSION"
 
       # Checks Cargo.lock against the RustSec advisory database. Runs as its
       # own job so a new advisory against a dependency does not read as a test
