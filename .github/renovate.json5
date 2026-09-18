@@ -100,26 +100,16 @@
 			automerge: false,
 		},
 
-		// One PR for the routine crate updates. Every crate update edits
-		// Cargo.lock, and this repository runs a four-way OS test matrix, so
-		// separate PRs mean the whole matrix re-runs for each one on every
-		// rebase cycle. One PR is one matrix run and one merge.
-		{
-			groupName: 'cargo minor and patch',
-			matchManagers: ['cargo'],
-			matchUpdateTypes: ['minor', 'patch'],
-		},
-		{
-			// ...but a held update leaves the group rather than parking the safe
-			// ones with it. Under Dependabot this was the group's known cost --
-			// "auto-merge holds a PR if ANY update in it is unsafe, which parks
-			// the safe ones" -- and the advice was to take the unsafe crate by
-			// hand. Renovate can simply keep it separate.
-			matchManagers: ['cargo'],
-			matchUpdateTypes: ['minor'],
-			matchCurrentVersion: '/^0\\./',
-			groupName: null,
-		},
+		// No group for the routine crate updates, matching every other
+		// repository here: one failing update would otherwise hold every other
+		// update in the batch for as long as it took to fix, which is the cost
+		// grouping was refused for elsewhere. Dependabot grouped them because
+		// its auto-merge could land only one PR per rebase cycle, and each
+		// cycle needed a human; renovate-nudge.yml removed that constraint.
+		//
+		// The cost is real and worth naming: every crate update edits
+		// Cargo.lock and re-runs a four-way OS matrix, so separate PRs mean
+		// more CI. Group them again if that bill ever outweighs the isolation.
 	],
 
 	// A vulnerable crate is proposed regardless of the cooldown above, the same
