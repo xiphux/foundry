@@ -68,10 +68,13 @@
 		},
 
 		// What auto-merges, and what does not. Carried over from the verdict in
-		// dependabot-automerge.yml: patch yes unless the crate is 0.0.x; minor
-		// yes unless the crate is 0.x; majors, prereleases and anything
-		// unrecognised never.
+		// dependabot-automerge.yml: patch yes; minor yes unless the crate is
+		// 0.x; majors, prereleases and anything unrecognised never.
 		{
+			// A 0.0.x patch rides along with the rest. Semver promises nothing
+			// there -- any release may break -- but CI is the gate that matters
+			// here, and it covers those packages like any other. Hold one by
+			// name if that ever stops being true.
 			matchUpdateTypes: ['patch', 'minor'],
 			automerge: true,
 		},
@@ -83,12 +86,6 @@
 			// as minor or major, since majors are held below too.
 			matchUpdateTypes: ['minor'],
 			matchCurrentVersion: '/^0\\./',
-			automerge: false,
-		},
-		{
-			// 0.0.x has no compatible range at all: every release is breaking.
-			matchUpdateTypes: ['patch'],
-			matchCurrentVersion: '/^0\\.0\\./',
 			automerge: false,
 		},
 		{
