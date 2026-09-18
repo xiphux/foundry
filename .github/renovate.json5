@@ -1,0 +1,134 @@
+{
+	// Renovate keeps the crates and action pins here current, in place of
+	// Dependabot's version updates. Dependabot's SECURITY updates stay on: they
+	// are a repository setting rather than a config file, so a vulnerable crate
+	// still arrives as a dependabot/** PR.
+	//
+	// Why the switch: Dependabot offers only a crate's newest version, so a
+	// pending major replaced that crate's minor and patch updates -- hence
+	// majors were ignored here, with major-upgrade-check.yml opening an issue
+	// for each instead. It also rebases a PR only when it CONFLICTS, never when
+	// it merely falls behind, so a batch stalled after its first merge and each
+	// remaining PR needed a human to ask for a rebase. Renovate raises a major
+	// and a minor together, and rebases whatever falls behind.
+	//
+	// .github/workflows/renovate-nudge.yml is the one workaround it needs: jobs
+	// are scheduled every four hours on this plan, and a merge Renovate makes
+	// enqueues no job of its own, so nothing would rebase the PRs each merge
+	// leaves behind.
+	$schema: 'https://docs.renovatebot.com/renovate-schema.json',
+
+	extends: ['config:recommended'],
+
+	// Rebase whenever a branch falls behind main, not only when it conflicts.
+	// This is the behaviour the switch was made for.
+	rebaseWhen: 'behind-base-branch',
+
+	// Hold back fresh releases: a hijacked crates.io publish is usually found
+	// and yanked within days, and most of these merge unattended. Three days
+	// for a patch, as the Dependabot cooldown had it.
+	minimumReleaseAge: '7 days',
+
+	dependencyDashboard: true,
+
+	// Eleven direct crates plus the action pins, released in cooldown batches.
+	prConcurrentLimit: 10,
+
+	automergeStrategy: 'merge',
+	// GitHub's own auto-merge, so a PR lands the moment its checks pass. This
+	// is a public repository, so branch protection with required checks is
+	// available and is what makes that meaningful; without required checks
+	// GitHub declines to arm it and Renovate merges during its own run instead.
+	platformAutomerge: true,
+
+	// `deps:` for crates and `ci:` for actions, as Dependabot wrote them.
+	commitMessagePrefix: 'deps:',
+
+	// The label Dependabot applied by default, kept so a saved PR filter still
+	// finds these.
+	labels: ['dependencies'],
+
+	// Cargo.toml is left alone wherever possible. Renovate's rangeStrategy
+	// defaults to `auto`, which for cargo means `update-lockfile` unless a
+	// "less than" constraint is present -- so a routine upgrade edits Cargo.lock
+	// and not the manifest. That suits a binary crate: the manifest states the
+	// minimum supported version, and the lockfile states what ships.
+
+	packageRules: [
+		{
+			matchManagers: ['github-actions'],
+			commitMessagePrefix: 'ci:',
+			// A hijacked action tag is usually caught and pulled within days; a
+			// week keeps a fresh compromise from reaching a pin automatically.
+			minimumReleaseAge: '7 days',
+		},
+		{
+			matchUpdateTypes: ['patch'],
+			minimumReleaseAge: '3 days',
+		},
+
+		// What auto-merges, and what does not. Carried over from the verdict in
+		// dependabot-automerge.yml: patch yes unless the crate is 0.0.x; minor
+		// yes unless the crate is 0.x; majors, prereleases and anything
+		// unrecognised never.
+		{
+			matchUpdateTypes: ['patch', 'minor'],
+			automerge: true,
+		},
+		{
+			// A 0.x crate's minor is its breaking release -- Cargo reads `0.11`
+			// as >=0.11.0 <0.12.0, so 0.11 -> 0.12 is incompatible even though
+			// semver calls it a minor. sha2 (0.11) and chrono (0.4) are both in
+			// that position today. Held whether Renovate classifies the update
+			// as minor or major, since majors are held below too.
+			matchUpdateTypes: ['minor'],
+			matchCurrentVersion: '/^0\\./',
+			automerge: false,
+		},
+		{
+			// 0.0.x has no compatible range at all: every release is breaking.
+			matchUpdateTypes: ['patch'],
+			matchCurrentVersion: '/^0\\.0\\./',
+			automerge: false,
+		},
+		{
+			// Majors arrive as their own pull requests now, alongside that
+			// crate's routine updates rather than in place of them, which is
+			// what major-upgrade-check.yml's issues stood in for.
+			matchUpdateTypes: ['major'],
+			automerge: false,
+		},
+		{
+			matchCurrentVersion: '/-/',
+			automerge: false,
+		},
+
+		// One PR for the routine crate updates. Every crate update edits
+		// Cargo.lock, and this repository runs a four-way OS test matrix, so
+		// separate PRs mean the whole matrix re-runs for each one on every
+		// rebase cycle. One PR is one matrix run and one merge.
+		{
+			groupName: 'cargo minor and patch',
+			matchManagers: ['cargo'],
+			matchUpdateTypes: ['minor', 'patch'],
+		},
+		{
+			// ...but a held update leaves the group rather than parking the safe
+			// ones with it. Under Dependabot this was the group's known cost --
+			// "auto-merge holds a PR if ANY update in it is unsafe, which parks
+			// the safe ones" -- and the advice was to take the unsafe crate by
+			// hand. Renovate can simply keep it separate.
+			matchManagers: ['cargo'],
+			matchUpdateTypes: ['minor'],
+			matchCurrentVersion: '/^0\\./',
+			groupName: null,
+		},
+	],
+
+	// A vulnerable crate is proposed regardless of the cooldown above, the same
+	// carve-out Dependabot's security updates have.
+	vulnerabilityAlerts: {
+		minimumReleaseAge: null,
+		automerge: false,
+	},
+}
