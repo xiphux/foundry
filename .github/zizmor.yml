@@ -83,6 +83,3 @@ rules:
   # Dependabot-authored head commit whose SHA is the one CI passed, and its
   # only write is `gh pr merge`. The header of that file explains why it
   # cannot live inside ci.yml instead.
-  dangerous-triggers:
-    ignore:
-      - dependabot-automerge.yml
