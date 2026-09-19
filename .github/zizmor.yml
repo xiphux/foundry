@@ -12,32 +12,37 @@
 # doing anyway, because swapping a tag for a SHA cannot change behaviour;
 # rewriting how `dist build` is invoked can.
 #
+# The numbers below shifted by 9 on 2026-09-20: custom-ci-gate (line 90)
+# gained a `permissions:` block granting `actions: read`, which ci-gate.yml's
+# own gate declares and which a caller must therefore grant. The findings are
+# dist's same expressions at new positions, re-read and unchanged in kind.
+#
 # Ignores are LINE-scoped on purpose, not whole-file. release.yml also holds
 # two hand-maintained jobs (publish-scoop-manifest and the Scoop step in
-# announce, from line ~332), which are ours to fix and are clean today. A
+# announce, from line ~341), which are ours to fix and are clean today. A
 # whole-file ignore would silence a future finding there. If dist ever
 # regenerates the file the line numbers shift, and a stale entry stops
 # matching — which makes the finding reappear rather than stay hidden.
 rules:
   # dist's own release logic, all of it reached only on a tag push (or the
   # `plan` job on a PR):
-  #   80, 284  — github.ref_name / needs.plan.outputs.tag, i.e. the tag being
+  #   80, 293  — github.ref_name / needs.plan.outputs.tag, i.e. the tag being
   #              released. Pushing a tag to this repository already requires
   #              write access, so this is not a boundary an outsider crosses.
-  #   136, 146 — matrix.install_dist.run and matrix.packages_install, both
+  #   145, 155 — matrix.install_dist.run and matrix.packages_install, both
   #              read out of the manifest `dist plan` builds from
   #              dist-workspace.toml, which lives in this repository.
-  #   150, 203, 253 — needs.plan.outputs.tag-flag and matrix.dist_args, same
+  #   159, 212, 262 — needs.plan.outputs.tag-flag and matrix.dist_args, same
   #              manifest, same provenance.
   template-injection:
     ignore:
       - release.yml:80
-      - release.yml:136
-      - release.yml:146
-      - release.yml:150
-      - release.yml:203
-      - release.yml:253
-      - release.yml:284
+      - release.yml:145
+      - release.yml:155
+      - release.yml:159
+      - release.yml:212
+      - release.yml:262
+      - release.yml:293
 
   # `contents: write` at the top of release.yml. dist generates it and the
   # workflow genuinely needs it: it creates the GitHub Release and uploads
@@ -53,7 +58,7 @@ rules:
   # literal reference here to pin; pinning would mean pinning inside dist.
   unpinned-images:
     ignore:
-      - release.yml:116
+      - release.yml:125
 
   # dist's generated `custom-ci-gate` job, which calls ./.github/workflows/
   # ci-gate.yml (the plan-jobs entry in dist-workspace.toml).
