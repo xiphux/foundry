@@ -17,7 +17,113 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Has this exact content already gone green on the pull request that merged
+  # it? If so every check below skips, because running them again would test
+  # the same bytes a second time.
+  #
+  # HEAD is the merge commit and its second parent is the branch that merged.
+  # Equal TREES mean byte-identical checkouts — a tree object hashes the
+  # complete recursive listing, every path, mode and blob — while saying
+  # nothing about lineage, message or commit hash. Equality also proves the
+  # branch was up to date when it merged: had main moved ahead, the merge
+  # would have folded those commits into the tree and the hashes would
+  # differ, so the case that must not inherit — a branch tested against an
+  # older main, merged onto a newer one, never tested in combination — is
+  # excluded by the comparison itself.
+  #
+  # Tree equality says the content was TESTED; the run lookup says it PASSED.
+  # Both must hold. A direct push to main is single-parent, matches nothing,
+  # and runs the full suite.
+  #
+  # Not on pull requests, deliberately: there the checkout is the merge ref,
+  # itself a merge commit whose second parent is the branch head, so the
+  # comparison would be against the very branch under test and the lookup
+  # would find that branch's own runs. A pull request must never certify
+  # itself. Because this job can therefore skip, every check carries
+  # `!cancelled()` — without it a skipped gate would skip the whole suite,
+  # since a plain expression does not override the success-gating a skipped
+  # dependency imposes.
+  #
+  # The release path has its own copy of this reasoning in ci-gate.yml, which
+  # covers the OTHER duplicate: a tag re-running what main already ran over
+  # the same commit.
+  #
+  # Fails closed throughout: a re-run, a non-merge commit, a missing parent,
+  # differing trees, an absent, running or failed run, or the step erroring
+  # all leave `passed` unset, and `passed=true` is written on the last line
+  # of the script and nowhere else.
+  gate:
+    name: Check for an earlier pass
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # For the run lookup below.
+      actions: read
+    outputs:
+      passed: ${{ steps.inherit.outputs.passed }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The merge commit and its parents is all this needs. If a fetch
+          # ever comes back without the second parent, `rev-parse` fails and
+          # the step falls through to running the checks.
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Inherit the merged branch's result
+        id: inherit
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # A re-run is somebody asking for these checks to actually run.
+          if [ "${GITHUB_RUN_ATTEMPT:-1}" != "1" ]; then
+            echo "Attempt ${GITHUB_RUN_ATTEMPT:-1}: re-checking rather than inheriting."
+            exit 0
+          fi
+
+          if ! pr_head=$(git rev-parse -q --verify 'HEAD^2'); then
+            echo "HEAD is not a merge commit; nothing to inherit."
+            exit 0
+          fi
+
+          head_tree=$(git rev-parse 'HEAD^{tree}')
+          pr_tree=$(git rev-parse "${pr_head}^{tree}")
+
+          if [ "${head_tree}" != "${pr_tree}" ]; then
+            echo "Tree ${head_tree} differs from ${pr_head}'s ${pr_tree}."
+            echo "The merge combined two lines nothing has tested together."
+            exit 0
+          fi
+
+          # A `pull_request` run reports the branch head as `head_sha`, even
+          # though it checks out the merge ref — which is what makes this
+          # findable. `last` takes the most recent, so a re-run supersedes
+          # the run it repeated.
+          conclusion=$(gh api \
+            "/repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${pr_head}&per_page=100" \
+            --jq '[.workflow_runs[]
+                   | select(.path == ".github/workflows/ci.yml"
+                            and .event == "pull_request")]
+                  | sort_by(.run_started_at) | last | .conclusion // empty')
+
+          if [ "${conclusion}" != "success" ]; then
+            echo "No successful ci.yml run for ${pr_head} (got: ${conclusion:-none})."
+            exit 0
+          fi
+
+          echo "Identical tree to ${pr_head}, whose CI passed. Inheriting it."
+          echo "passed=true" >> "${GITHUB_OUTPUT}"
+
   test:
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       # A failure on one platform should not hide whether the others pass.
@@ -86,6 +192,8 @@ jobs:
   # thin out underneath auto-merge. Raise the floor as coverage grows; it is
   # set a little under the measured figure so platform noise does not flake.
   coverage:
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,6 +220,8 @@ jobs:
         run: cargo llvm-cov --locked --summary-only --fail-under-lines 72
 
   audit:
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -209,6 +319,8 @@ jobs:
   # `gitleaks:allow` comment (current tree).
   secrets:
     name: Secret scan
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -237,6 +349,8 @@ jobs:
   # the matrix.
   workflow-lint:
     name: Workflow lint
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
