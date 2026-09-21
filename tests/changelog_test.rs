@@ -49,10 +49,39 @@ fn parse(text: &str) -> Vec<Section> {
     sections
 }
 
-/// `vX.Y.Z` → (X, Y, Z), ignoring any prerelease suffix.
-fn version_key(heading: &str) -> Option<(u64, u64, u64)> {
+/// One prerelease identifier, normalised so a mixed list orders correctly: a
+/// numeric identifier ranks below an alphanumeric one, numerics compare
+/// numerically, and the rest compare as text.
+type Identifier = (u8, u64, String);
+
+/// A sortable version. The fourth field carries semver's rule that a release
+/// outranks its own prereleases (1 beats 0); the fifth orders prereleases among
+/// themselves, where a longer identifier list wins an otherwise-tied compare.
+type VersionKey = (u64, u64, u64, u8, Vec<Identifier>);
+
+fn identifiers(prerelease: &str) -> Vec<Identifier> {
+    prerelease
+        .split('.')
+        .map(|part| match part.parse::<u64>() {
+            Ok(number) => (0, number, String::new()),
+            Err(_) => (1, 0, part.to_string()),
+        })
+        .collect()
+}
+
+/// `vX.Y.Z[-prerelease]` as a sortable key.
+///
+/// The prerelease suffix is KEPT, not discarded. Dropping it made `## v1.0.0`
+/// above `## v1.0.0-rc.1` compare equal, so a correctly ordered file failed
+/// `versions_run_newest_first_with_no_duplicates` — while
+/// `version_key_parses_releases_and_prereleases_only` asserted that
+/// prereleases are supported.
+fn version_key(heading: &str) -> Option<VersionKey> {
     let rest = heading.strip_prefix('v')?;
-    let core = rest.split('-').next()?;
+    let (core, prerelease) = match rest.split_once('-') {
+        Some((core, prerelease)) => (core, Some(prerelease)),
+        None => (rest, None),
+    };
     let mut parts = core.split('.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;
@@ -60,7 +89,12 @@ fn version_key(heading: &str) -> Option<(u64, u64, u64)> {
     if parts.next().is_some() {
         return None;
     }
-    Some((major, minor, patch))
+    match prerelease {
+        None => Some((major, minor, patch, 1, Vec::new())),
+        // `v1.0.0-` names no prerelease, so it is not a version.
+        Some("") => None,
+        Some(prerelease) => Some((major, minor, patch, 0, identifiers(prerelease))),
+    }
 }
 
 #[test]
@@ -99,7 +133,8 @@ fn unreleased_is_only_ever_the_top_section() {
 #[test]
 fn versions_run_newest_first_with_no_duplicates() {
     let sections = parse(&changelog());
-    let mut previous: Option<(u64, u64, u64)> = None;
+    // VersionKey holds a Vec, so this is cloned rather than copied.
+    let mut previous: Option<VersionKey> = None;
     let mut seen: Vec<String> = Vec::new();
 
     for section in &sections {
@@ -113,9 +148,9 @@ fn versions_run_newest_first_with_no_duplicates() {
         );
         seen.push(section.heading.clone());
 
-        if let Some(previous) = previous {
+        if let Some(previous) = &previous {
             assert!(
-                previous > key,
+                *previous > key,
                 "`## {}` is not below the version above it (newest first)",
                 section.heading
             );
@@ -187,10 +222,38 @@ fn parser_drops_the_preamble_above_the_first_heading() {
 
 #[test]
 fn version_key_parses_releases_and_prereleases_only() {
-    assert_eq!(version_key("v0.6.1"), Some((0, 6, 1)));
-    assert_eq!(version_key("v1.0.0-rc.1"), Some((1, 0, 0)));
+    assert!(version_key("v0.6.1").is_some());
+    assert!(version_key("v1.0.0-rc.1").is_some());
     assert_eq!(version_key("Unreleased"), None);
     assert_eq!(version_key("v0.6"), None);
     assert_eq!(version_key("v0.6.1.2"), None);
     assert_eq!(version_key("0.6.1"), None);
+    assert_eq!(version_key("v1.0.0-"), None);
+}
+
+#[test]
+fn a_release_outranks_its_own_prereleases() {
+    assert!(version_key("v1.0.0") > version_key("v1.0.0-rc.1"));
+    assert!(version_key("v1.0.0-rc.1") > version_key("v0.9.9"));
+}
+
+#[test]
+fn prerelease_identifiers_order_by_precedence_not_as_text() {
+    // rc.10 outranks rc.9 numerically; a text sort would disagree.
+    assert!(version_key("v1.0.0-rc.10") > version_key("v1.0.0-rc.9"));
+    // A numeric identifier ranks below an alphanumeric one.
+    assert!(version_key("v1.0.0-alpha") > version_key("v1.0.0-1"));
+    // All else equal, the longer identifier list wins.
+    assert!(version_key("v1.0.0-rc.1.1") > version_key("v1.0.0-rc.1"));
+}
+
+#[test]
+fn a_release_above_its_own_prereleases_is_correctly_ordered() {
+    // This shape used to be reported as out of order, with no way to satisfy
+    // the check except deleting the prerelease section.
+    let text = "# Changelog\n\n## v1.0.0\n\n- final\n\n## v1.0.0-rc.1\n\n- rc\n";
+    let sections = parse(text);
+    let newer = version_key(&sections[0].heading).unwrap();
+    let older = version_key(&sections[1].heading).unwrap();
+    assert!(newer > older);
 }
