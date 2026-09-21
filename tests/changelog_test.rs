@@ -562,7 +562,9 @@ fn a_failing_ci_gate_blocks_the_release() {
     // edit was not.
     let needs_gate = host
         .lines()
-        .any(|line| line.trim_start() == "- custom-ci-gate" && !line.trim_start().starts_with('#'));
+        // trim(), not trim_start(): `- custom-ci-gate  ` with trailing spaces
+        // is still valid YAML and still live, and would otherwise fail here.
+        .any(|line| line.trim() == "- custom-ci-gate");
     assert!(
         needs_gate,
         "release.yml's `host` job must `needs: custom-ci-gate` on a live line, \
