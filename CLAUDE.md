@@ -64,12 +64,36 @@ Monitoring`. That is the established style: of the 18 subheadings in the file,
 for, but don't assume the four-heading vocabulary the sibling repositories use
 — this file does not follow it.
 
-At release, `## Unreleased` is renamed to `## vX.Y.Z` in the
-`chore: bump version to X.Y.Z` commit, so the tag is cut on a changelog that
-already names its version. Don't name the version any earlier — whether a
-release ends up a patch or a minor depends on what lands before it. The test
-above asserts exactly this: the version in `Cargo.toml` must have a section, so
-a bump without a changelog entry fails CI before the tag exists.
+At release, a `## vX.Y.Z` heading is inserted directly BELOW `## Unreleased`,
+taking the entries that were under it, in the `chore: bump version to X.Y.Z`
+commit — so the tag is cut on a changelog that already names its version.
+`## Unreleased` stays, now empty, so there is always somewhere to add the next
+entry:
+
+```
+## Unreleased
+
+## v0.7.0
+
+### Fixed
+- the thing this release shipped
+
+## v0.6.1
+```
+
+That commit also carries `Cargo.lock`, which the version bump rewrites, since
+CI runs `cargo test --locked`.
+
+Don't name the version any earlier — whether a release ends up a patch or a
+minor depends on what lands before it. The test above asserts exactly this: the
+version in `Cargo.toml` must have a section, so a bump without a changelog
+entry fails CI before the tag exists. Its corollary is that a release with
+nothing under `## Unreleased` cannot be cut, because the new section would be
+empty. That is deliberate.
+
+`dist` selects the section matching the version being tagged and ignores
+`## Unreleased` entirely — verified against `dist plan`, including with the
+Unreleased section populated.
 
 ## Architecture
 

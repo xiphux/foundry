@@ -277,7 +277,8 @@ fn the_version_being_shipped_has_an_entry() {
         .unwrap_or_else(|| {
             panic!(
                 "Cargo.toml is at {version} but CHANGELOG.md has no `## {heading}` section. \
-             Rename `## Unreleased` to `## {heading}` in the version-bump commit — \
+             Add one below `## Unreleased` in the version-bump commit, holding \
+             the entries that were under it — \
              dist builds the release body from that section and will publish an \
              empty release without it."
             )
