@@ -498,3 +498,56 @@ fn a_leading_plus_is_not_a_version() {
     // Leading zeros stay accepted, because `\d+` matches `01` in both siblings.
     assert_eq!(version_key("v01.0.0"), Some((1, 0, 0)));
 }
+
+/// The `host:` job block of release.yml, which publishes the GitHub Release.
+fn host_job() -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/release.yml");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+
+    let mut block = String::new();
+    let mut inside = false;
+    for line in text.lines() {
+        let is_job_header =
+            line.starts_with("  ") && !line.starts_with("   ") && line.trim_end().ends_with(':');
+        if is_job_header {
+            if inside {
+                break;
+            }
+            inside = line.trim() == "host:";
+        }
+        if inside {
+            block.push_str(line);
+            block.push('\n');
+        }
+    }
+    assert!(!block.is_empty(), "release.yml has no `host:` job");
+    block
+}
+
+/// The changelog guard only matters if a failing `cargo test` actually stops a
+/// release. It does not by default: `host` is generated with no dependency on
+/// `custom-ci-gate`, and its `if:` accepts `skipped` for the build jobs — which
+/// is precisely what a FAILED gate produces, since a failed dependency skips its
+/// dependents. Any red check would then publish a GitHub Release with no
+/// binaries and 404 install links.
+///
+/// release.yml is dist-generated and marked do-not-edit, but
+/// `allow-dirty = ["ci"]` in dist-workspace.toml sanctions hand edits to it —
+/// and means `dist generate` will not warn when it reverts one. These two
+/// assertions are what notices.
+#[test]
+fn a_failing_ci_gate_blocks_the_release() {
+    let host = host_job();
+    assert!(
+        host.contains("- custom-ci-gate"),
+        "release.yml's `host` job must `needs: custom-ci-gate`, or a failing \
+         cargo test cannot stop the release. Block was:\n{host}"
+    );
+    assert!(
+        host.contains("needs.custom-ci-gate.result == 'success'"),
+        "release.yml's `host` job must require custom-ci-gate to have SUCCEEDED \
+         (not merely not-failed), since a failed dependency reports as skipped. \
+         Block was:\n{host}"
+    );
+}

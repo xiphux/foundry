@@ -229,10 +229,27 @@ jobs:
   host:
     needs:
       - plan
+      # HAND EDIT, sanctioned by `allow-dirty = ["ci"]` in dist-workspace.toml.
+      # Without this line `host` is not connected to the gate at all, and the
+      # `if:` below accepts `skipped` for the build jobs -- which is exactly
+      # what a FAILED custom-ci-gate produces, because a failed dependency
+      # skips its dependents. So any red check (clippy, fmt, a unit test, the
+      # changelog guard) skipped the builds and `host` published a real
+      # GitHub Release for the tag anyway: correct notes, zero binaries, and
+      # install commands whose download URLs 404.
+      #
+      # `== 'success'` rather than `!= 'failure'` so a cancelled or skipped
+      # gate blocks too. This works because ci-gate.yml's `gate` job always
+      # concludes, so custom-ci-gate resolves to success even when the checks
+      # are inherited -- the invariant that file already documents.
+      #
+      # tests/changelog_test.rs asserts these two lines are still here, since
+      # `dist generate` would otherwise revert them silently.
+      - custom-ci-gate
       - build-local-artifacts
       - build-global-artifacts
     # Only run if we're "publishing", and only if plan, local and global didn't fail (skipped is fine)
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.custom-ci-gate.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: "ubuntu-22.04"
