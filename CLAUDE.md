@@ -40,6 +40,33 @@ cargo fmt && cargo clippy --all-targets -- -D warnings
 ```
 This is mandatory — CI will reject unformatted code. Since there is no editor format-on-save in the Claude Code workflow, `cargo fmt` must be run explicitly before commits to avoid delayed CI failures.
 
+### CHANGELOG.md is part of the change, not part of the release
+
+A commit that adds, changes or fixes something a user can notice edits
+`## Unreleased` in the *same commit*. `dist` builds each GitHub release's body
+from the section matching the version being tagged, and it does **not** fail on
+a missing one — it publishes an empty release. `tests/changelog_test.rs` is the
+guard dist doesn't provide.
+
+What earns a line: commands and flags, behaviour changes, bug fixes, config
+keys, and anything that changes what happens on someone's machine. What does
+not: refactors, tests, deps, CI, docs, and internal work nobody can perceive.
+Nor **fixes to problems introduced earlier in the same unreleased version** — no
+release carried the bug, so to a user the fix is not a change. A feature built
+over ten commits gets *one* entry, written from the user's side, not ten.
+
+Keep entries to a line or two; `README.md` and `docs/` carry the detail.
+Subheadings are `### Added`, `### Changed`, `### Fixed`, `### Security` — the
+existing entries also use a few of their own where nothing else fits, which is
+fine.
+
+At release, `## Unreleased` is renamed to `## vX.Y.Z` in the
+`chore: bump version to X.Y.Z` commit, so the tag is cut on a changelog that
+already names its version. Don't name the version any earlier — whether a
+release ends up a patch or a minor depends on what lands before it. The test
+above asserts exactly this: the version in `Cargo.toml` must have a section, so
+a bump without a changelog entry fails CI before the tag exists.
+
 ## Architecture
 
 Foundry is a CLI that manages AI agent workspaces using git worktrees and terminal automation. It shells out to the `git` CLI (not libgit2) for all git operations.
