@@ -31,11 +31,58 @@ fn cargo_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// The code-fence marker a line opens or closes with, if any. CommonMark
+/// allows up to three spaces of indent and three or more backticks or tildes.
+fn fence_marker(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start_matches(' ');
+    if line.len() - trimmed.len() > 3 {
+        return None;
+    }
+    let character = trimmed.chars().next()?;
+    if character != '`' && character != '~' {
+        return None;
+    }
+    let length = trimmed.chars().take_while(|c| *c == character).count();
+    if length < 3 {
+        return None;
+    }
+    Some(&trimmed[..length])
+}
+
+/// Split the file into its `## ` sections, in file order.
+///
+/// Headings are not recognised inside a fenced code block. An entry showing a
+/// TOML or markdown sample can legitimately contain a line starting `## `, and
+/// treating it as a section boundary either invents a bogus version or — when
+/// the fenced line happens to look like one — silently truncates the real
+/// section's body at that point.
 fn parse(text: &str) -> Vec<Section> {
     let mut sections: Vec<Section> = Vec::new();
+    // The open fence's marker, or None outside one.
+    let mut fence: Option<String> = None;
+
     for line in text.lines() {
+        if let Some(marker) = fence_marker(line) {
+            match fence.as_deref() {
+                None => fence = Some(marker.to_string()),
+                // A closer must use the same character and be at least as long.
+                Some(open)
+                    if marker.starts_with(open.chars().next().unwrap_or('`'))
+                        && marker.len() >= open.len() =>
+                {
+                    fence = None;
+                }
+                Some(_) => {}
+            }
+            if let Some(current) = sections.last_mut() {
+                current.body.push_str(line);
+                current.body.push('\n');
+            }
+            continue;
+        }
+
         // `## ` but not `### `: a subheading is part of the body.
-        let is_heading = line.starts_with("## ") && !line.starts_with("### ");
+        let is_heading = fence.is_none() && line.starts_with("## ") && !line.starts_with("### ");
         if is_heading {
             sections.push(Section {
                 heading: line[3..].trim().to_string(),
@@ -210,6 +257,43 @@ fn parser_finds_sections_and_ignores_subheadings() {
     assert_eq!(headings, vec!["Unreleased", "v0.1.0"]);
     assert!(sections[0].body.contains("### Added"));
     assert!(sections[0].body.contains("- pending"));
+}
+
+#[test]
+fn a_heading_inside_a_fenced_block_is_not_a_section() {
+    // The dangerous shape: a fenced line that looks like a version. Before
+    // fence tracking this passed every structural check AND truncated
+    // v1.0.0's body at the fence.
+    let text = concat!(
+        "# Changelog\n\n",
+        "## v1.0.0\n\n",
+        "- shows a sample:\n\n",
+        "```toml\n",
+        "## v0.95.0\n",
+        "```\n\n",
+        "- and a trailing entry\n\n",
+        "## v0.9.0\n\n",
+        "- old\n"
+    );
+    let sections = parse(text);
+    let headings: Vec<&str> = sections.iter().map(|s| s.heading.as_str()).collect();
+
+    assert_eq!(headings, vec!["v1.0.0", "v0.9.0"]);
+    assert!(sections[0].body.contains("and a trailing entry"));
+}
+
+#[test]
+fn a_fence_closes_only_on_a_long_enough_marker_of_the_same_character() {
+    let text = "# Changelog\n\n## v1.0.0\n\n````\n```\n## v0.5.0\n````\n\n- after\n";
+    let sections = parse(text);
+    assert_eq!(sections.len(), 1);
+    assert!(sections[0].body.contains("- after"));
+}
+
+#[test]
+fn a_tilde_fence_is_tracked_too() {
+    let text = "# Changelog\n\n## v1.0.0\n\n~~~\n## v0.5.0\n~~~\n\n- after\n";
+    assert_eq!(parse(text).len(), 1);
 }
 
 #[test]
