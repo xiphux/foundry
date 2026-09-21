@@ -243,8 +243,11 @@ jobs:
       # concludes, so custom-ci-gate resolves to success even when the checks
       # are inherited -- the invariant that file already documents.
       #
-      # tests/changelog_test.rs asserts these two lines are still here, since
-      # `dist generate` would otherwise revert them silently.
+      # tests/changelog_test.rs asserts these two lines are still here.
+      # `allow-dirty` suppresses `dist generate --check` entirely, so a
+      # regeneration that dropped them would say nothing -- though nothing in
+      # this repo's history shows dist actually clobbering a hand edit, so the
+      # test guards a documented possibility rather than an observed one.
       - custom-ci-gate
       - build-local-artifacts
       - build-global-artifacts

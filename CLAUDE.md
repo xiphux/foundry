@@ -56,9 +56,13 @@ release carried the bug, so to a user the fix is not a change. A feature built
 over ten commits gets *one* entry, written from the user's side, not ten.
 
 Keep entries to a line or two; `README.md` and `docs/` carry the detail.
-Subheadings are `### Added`, `### Changed`, `### Fixed`, `### Security` — the
-existing entries also use a few of their own where nothing else fits, which is
-fine.
+Subheadings here are mostly descriptive and release-specific — `### New Agent
+Support`, `### Quality of Life`, `### Permission Model`, `### Status
+Monitoring`. That is the established style: of the 18 subheadings in the file,
+14 are of that kind, and `### Added` has never been used once.
+`### Changed` / `### Fixed` / `### Security` do appear and are fine to reach
+for, but don't assume the four-heading vocabulary the sibling repositories use
+— this file does not follow it.
 
 At release, `## Unreleased` is renamed to `## vX.Y.Z` in the
 `chore: bump version to X.Y.Z` commit, so the tag is cut on a changelog that
