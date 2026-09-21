@@ -46,6 +46,12 @@ fn fence_marker(line: &str) -> Option<&str> {
     if length < 3 {
         return None;
     }
+    // CommonMark: a BACKTICK fence's info string may not contain a backtick,
+    // so ```text with `code` is prose, not a fence opener. Without this,
+    // an_unclosed_fence_is_reported fires on a file GitHub renders correctly.
+    if character == '`' && trimmed[length..].contains('`') {
+        return None;
+    }
     Some(&trimmed[..length])
 }
 
@@ -58,7 +64,13 @@ fn fence_marker(line: &str) -> Option<&str> {
 /// text — the same file parsed differently by three implementations of one
 /// rule, which is the drift triplication invites.
 fn heading_of(line: &str) -> Option<String> {
-    let rest = line.strip_prefix("##")?;
+    // Up to three spaces of indent, matching fence_marker and CommonMark: an
+    // indented ATX heading is still a heading, and GitHub renders it as one.
+    let trimmed = line.trim_start_matches(' ');
+    if line.len() - trimmed.len() > 3 {
+        return None;
+    }
+    let rest = trimmed.strip_prefix("##")?;
     if !rest.starts_with(char::is_whitespace) {
         return None;
     }
@@ -119,6 +131,19 @@ fn parse(text: &str) -> Vec<Section> {
     sections
 }
 
+/// One version component.
+///
+/// `u64::from_str` accepts a leading `+`, which the JS and Python `\d+` do not,
+/// so `v+1.0.0` parsed as a version here and nowhere else. Leading zeros are
+/// deliberately still accepted: `\d+` matches `01` in both siblings, so
+/// rejecting them here would create the divergence it was meant to remove.
+fn parse_part(part: &str) -> Option<u64> {
+    if part.starts_with('+') {
+        return None;
+    }
+    part.parse().ok()
+}
+
 /// `vX.Y.Z` as a sortable key, or None if the heading is not a version.
 ///
 /// Prereleases are NOT supported, deliberately: this project has never shipped
@@ -130,9 +155,9 @@ fn parse(text: &str) -> Vec<Section> {
 fn version_key(heading: &str) -> Option<(u64, u64, u64)> {
     let rest = heading.strip_prefix('v')?;
     let mut parts = rest.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    let patch = parts.next()?.parse().ok()?;
+    let major = parse_part(parts.next()?)?;
+    let minor = parse_part(parts.next()?)?;
+    let patch = parse_part(parts.next()?)?;
     if parts.next().is_some() {
         return None;
     }
@@ -346,9 +371,18 @@ fn lost_heading_problems(text: &str) -> Vec<String> {
             }
             continue;
         }
-        let loose = line.starts_with("##")
-            && !line.starts_with("###")
-            && !line[2..].starts_with(char::is_whitespace);
+        let body = line.trim_start_matches(' ');
+        let indent = line.len() - body.len();
+        // `line.len() > 2` after trimming: a line that is exactly `##` has no
+        // title to lose, and the JS/Python `^ {0,3}##[^\s#]` needs a third
+        // character to test, so they stay quiet on it. Without this, foundry
+        // reported a problem its siblings did not -- drift in the very
+        // function that exists to catch drift.
+        let loose = indent <= 3
+            && body.starts_with("##")
+            && !body.starts_with("###")
+            && body.len() > 2
+            && !body[2..].starts_with(char::is_whitespace);
         if fence.is_none() && loose {
             problems.push(format!(
                 "line {number}: \"{}\" needs a space after \"##\" to be read as a heading",
@@ -419,4 +453,48 @@ fn a_tab_separates_the_marker_from_the_title() {
     let sections = parse(text);
     let headings: Vec<&str> = sections.iter().map(|s| s.heading.as_str()).collect();
     assert_eq!(headings, vec!["v1.0.0"]);
+}
+
+#[test]
+fn a_heading_indented_up_to_three_spaces_is_a_heading() {
+    // CommonMark and GitHub both treat this as a heading. Anchored at column 0
+    // it rendered as a section everywhere a reader looked while the parser read
+    // it as body text.
+    let text = "# Changelog\n\n## v1.1.0\n\n- new\n\n  ## v1.0.0\n\n- old\n";
+    let sections = parse(text);
+    let headings: Vec<&str> = sections.iter().map(|s| s.heading.as_str()).collect();
+    assert_eq!(headings, vec!["v1.1.0", "v1.0.0"]);
+    assert_eq!(lost_heading_problems(text), Vec::<String>::new());
+}
+
+#[test]
+fn a_four_space_indented_line_is_not_a_heading() {
+    // Four spaces is an indented code block, which is why the limit is three.
+    let text = "# Changelog\n\n## v1.0.0\n\n    ## v0.9.0\n\n- a\n";
+    let sections = parse(text);
+    assert_eq!(sections.len(), 1);
+}
+
+#[test]
+fn a_backtick_info_string_containing_a_backtick_is_not_a_fence() {
+    // CommonMark forbids it, so GitHub renders this as prose. Treating it as a
+    // fence reported an unclosed fence on a file that is fine.
+    let text = "# Changelog\n\n## v1.1.0\n\n```text with `code` inside\n\n- an entry\n";
+    assert_eq!(lost_heading_problems(text), Vec::<String>::new());
+}
+
+#[test]
+fn a_line_that_is_only_hashes_is_not_reported() {
+    // The JS and Python `^ {0,3}##[^\s#]` need a third character to test, so
+    // they stay quiet here; this used to be the one place foundry disagreed.
+    let text = "# Changelog\n\n## v1.0.0\n\n##\n\n- a\n";
+    assert_eq!(lost_heading_problems(text), Vec::<String>::new());
+}
+
+#[test]
+fn a_leading_plus_is_not_a_version() {
+    // `u64::from_str` accepts it; the sibling regexes do not.
+    assert_eq!(version_key("v+1.0.0"), None);
+    // Leading zeros stay accepted, because `\d+` matches `01` in both siblings.
+    assert_eq!(version_key("v01.0.0"), Some((1, 0, 0)));
 }
