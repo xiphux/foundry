@@ -49,6 +49,26 @@ fn fence_marker(line: &str) -> Option<&str> {
     Some(&trimmed[..length])
 }
 
+/// The title of a `## ` heading line, if it is one.
+///
+/// Matches the JS and Python ports rather than a plain `starts_with("## ")`:
+/// any whitespace separates the marker from the title (a tab counts), the
+/// title must be non-empty, and `### ` is a subheading. A bare `## ` line was
+/// previously read here as a heading with an empty title and there as body
+/// text — the same file parsed differently by three implementations of one
+/// rule, which is the drift triplication invites.
+fn heading_of(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("##")?;
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let title = rest.trim();
+    if title.is_empty() {
+        return None;
+    }
+    Some(title.to_string())
+}
+
 /// Split the file into its `## ` sections, in file order.
 ///
 /// Headings are not recognised inside a fenced code block. An entry showing a
@@ -81,11 +101,14 @@ fn parse(text: &str) -> Vec<Section> {
             continue;
         }
 
-        // `## ` but not `### `: a subheading is part of the body.
-        let is_heading = fence.is_none() && line.starts_with("## ") && !line.starts_with("### ");
-        if is_heading {
+        let heading = if fence.is_none() {
+            heading_of(line)
+        } else {
+            None
+        };
+        if let Some(heading) = heading {
             sections.push(Section {
-                heading: line[3..].trim().to_string(),
+                heading,
                 body: String::new(),
             });
         } else if let Some(current) = sections.last_mut() {
@@ -290,4 +313,110 @@ fn a_prerelease_is_not_a_version_here() {
     // suffix means ordering it, and nothing here has ever produced one.
     assert_eq!(version_key("v1.0.0-rc.1"), None);
     assert_eq!(version_key("v1.0.0-"), None);
+}
+
+/// Problems that make `parse` SILENTLY LOSE sections, which the checks above
+/// cannot see — they only ever examine the sections that survived.
+///
+/// A code fence opened and never closed swallows every heading beneath it, and
+/// a heading typed `##v0.6.1` never matches and joins the section above. Either
+/// way the file reads as one enormous section, every structural check passes,
+/// and dist builds the release body from a section holding the whole
+/// back-catalogue.
+fn lost_heading_problems(text: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mut fence: Option<String> = None;
+    let mut opened_at = 0;
+
+    for (index, line) in text.lines().enumerate() {
+        let number = index + 1;
+        if let Some(marker) = fence_marker(line) {
+            match fence.as_deref() {
+                None => {
+                    fence = Some(marker.to_string());
+                    opened_at = number;
+                }
+                Some(open)
+                    if marker.starts_with(open.chars().next().unwrap_or('`'))
+                        && marker.len() >= open.len() =>
+                {
+                    fence = None;
+                }
+                Some(_) => {}
+            }
+            continue;
+        }
+        let loose = line.starts_with("##")
+            && !line.starts_with("###")
+            && !line[2..].starts_with(char::is_whitespace);
+        if fence.is_none() && loose {
+            problems.push(format!(
+                "line {number}: \"{}\" needs a space after \"##\" to be read as a heading",
+                line.trim()
+            ));
+        }
+    }
+
+    if fence.is_some() {
+        problems.push(format!(
+            "the code fence opened on line {opened_at} is never closed, so every heading below it was read as body text"
+        ));
+    }
+    problems
+}
+
+#[test]
+fn the_committed_changelog_loses_no_headings() {
+    assert_eq!(lost_heading_problems(&changelog()), Vec::<String>::new());
+}
+
+#[test]
+fn an_unclosed_fence_is_reported() {
+    // Without this the parse yields ONE section holding the whole
+    // back-catalogue and every other check in this file still passes.
+    let text = concat!(
+        "# Changelog\n\n",
+        "## v1.1.0\n\n",
+        "- shows a sample:\n\n",
+        "```toml\n",
+        "key = 1\n\n",
+        "## v1.0.0\n\n",
+        "- old\n"
+    );
+    assert_eq!(parse(text).len(), 1);
+    let problems = lost_heading_problems(text);
+    assert_eq!(problems.len(), 1);
+    assert!(problems[0].contains("never closed"), "{problems:?}");
+}
+
+#[test]
+fn a_heading_with_no_space_after_the_hashes_is_reported() {
+    let text = "# Changelog\n\n## v1.1.0\n\n- new\n\n##v1.0.0\n\n- old\n";
+    assert_eq!(parse(text).len(), 1);
+    let problems = lost_heading_problems(text);
+    assert_eq!(problems.len(), 1);
+    assert!(problems[0].contains("needs a space"), "{problems:?}");
+}
+
+#[test]
+fn a_balanced_fence_is_not_reported() {
+    let text = "# Changelog\n\n## v1.0.0\n\n```\nx\n```\n\n- a\n";
+    assert_eq!(lost_heading_problems(text), Vec::<String>::new());
+}
+
+#[test]
+fn a_bare_hash_marker_is_not_a_heading() {
+    // Matches the JS and Python ports, which require a non-empty title.
+    let text = "# Changelog\n\n## v1.0.0\n\n## \n\n- a\n";
+    let sections = parse(text);
+    let headings: Vec<&str> = sections.iter().map(|s| s.heading.as_str()).collect();
+    assert_eq!(headings, vec!["v1.0.0"]);
+}
+
+#[test]
+fn a_tab_separates_the_marker_from_the_title() {
+    let text = "# Changelog\n\n##\tv1.0.0\n\n- a\n";
+    let sections = parse(text);
+    let headings: Vec<&str> = sections.iter().map(|s| s.heading.as_str()).collect();
+    assert_eq!(headings, vec!["v1.0.0"]);
 }
