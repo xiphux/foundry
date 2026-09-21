@@ -39,7 +39,7 @@ fn cargo_version() -> String {
 
 /// The code-fence marker a line opens or closes with, if any. CommonMark
 /// allows up to three spaces of indent and three or more backticks or tildes.
-fn fence_marker(line: &str) -> Option<&str> {
+fn fence_marker(line: &str) -> Option<(&str, &str)> {
     let trimmed = line.trim_start_matches(' ');
     if line.len() - trimmed.len() > 3 {
         return None;
@@ -52,13 +52,38 @@ fn fence_marker(line: &str) -> Option<&str> {
     if length < 3 {
         return None;
     }
+    let info = &trimmed[length..];
     // CommonMark: a BACKTICK fence's info string may not contain a backtick,
     // so ```text with `code` is prose, not a fence opener. Without this,
     // an_unclosed_fence_is_reported fires on a file GitHub renders correctly.
-    if character == '`' && trimmed[length..].contains('`') {
+    if character == '`' && info.contains('`') {
         return None;
     }
-    Some(&trimmed[..length])
+    Some((&trimmed[..length], info))
+}
+
+/// The fence state after `line`, and whether the line was a fence line.
+///
+/// Both scans over the file go through this, so they cannot disagree about
+/// what is inside a fence — which would make the lost-heading report describe
+/// a different document from the one `parse` returned.
+fn next_fence(fence: Option<String>, line: &str) -> (Option<String>, bool) {
+    let Some((marker, info)) = fence_marker(line) else {
+        return (fence, false);
+    };
+    match fence {
+        None => (Some(marker.to_string()), true),
+        Some(open) => {
+            // A closer must use the same character, be at least as long, and
+            // carry nothing but whitespace after it: CommonMark allows an info
+            // string only on the opener, so ```bash inside an open block is
+            // content, not a closer.
+            let closes = marker.starts_with(open.chars().next().unwrap_or('`'))
+                && marker.len() >= open.len()
+                && info.trim().is_empty();
+            (if closes { None } else { Some(open) }, true)
+        }
+    }
 }
 
 /// The title of a `## ` heading line, if it is one.
@@ -100,18 +125,9 @@ fn parse(text: &str) -> Vec<Section> {
     let mut fence: Option<String> = None;
 
     for line in text.lines() {
-        if let Some(marker) = fence_marker(line) {
-            match fence.as_deref() {
-                None => fence = Some(marker.to_string()),
-                // A closer must use the same character and be at least as long.
-                Some(open)
-                    if marker.starts_with(open.chars().next().unwrap_or('`'))
-                        && marker.len() >= open.len() =>
-                {
-                    fence = None;
-                }
-                Some(_) => {}
-            }
+        let (next, is_fence_line) = next_fence(fence, line);
+        fence = next;
+        if is_fence_line {
             if let Some(current) = sections.last_mut() {
                 current.body.push_str(line);
                 current.body.push('\n');
@@ -361,19 +377,12 @@ fn lost_heading_problems(text: &str) -> Vec<String> {
 
     for (index, line) in text.lines().enumerate() {
         let number = index + 1;
-        if let Some(marker) = fence_marker(line) {
-            match fence.as_deref() {
-                None => {
-                    fence = Some(marker.to_string());
-                    opened_at = number;
-                }
-                Some(open)
-                    if marker.starts_with(open.chars().next().unwrap_or('`'))
-                        && marker.len() >= open.len() =>
-                {
-                    fence = None;
-                }
-                Some(_) => {}
+        let was_open = fence.is_some();
+        let (next, is_fence_line) = next_fence(fence, line);
+        fence = next;
+        if is_fence_line {
+            if !was_open && fence.is_some() {
+                opened_at = number;
             }
             continue;
         }
@@ -545,15 +554,49 @@ fn host_job() -> String {
 #[test]
 fn a_failing_ci_gate_blocks_the_release() {
     let host = host_job();
+
+    // On a LIVE line, not anywhere in the block: `host.contains(...)` alone is
+    // satisfied by `#      - custom-ci-gate`, which would keep this green while
+    // disconnecting the gate. `dist generate` would delete the line rather than
+    // comment it, so the machine regression was covered either way — a hand
+    // edit was not.
+    let needs_gate = host
+        .lines()
+        .any(|line| line.trim_start() == "- custom-ci-gate" && !line.trim_start().starts_with('#'));
     assert!(
-        host.contains("- custom-ci-gate"),
-        "release.yml's `host` job must `needs: custom-ci-gate`, or a failing \
-         cargo test cannot stop the release. Block was:\n{host}"
+        needs_gate,
+        "release.yml's `host` job must `needs: custom-ci-gate` on a live line, \
+         or a failing cargo test cannot stop the release. Block was:\n{host}"
     );
+
+    let requires_success = host.lines().any(|line| {
+        line.contains("needs.custom-ci-gate.result == 'success'")
+            && !line.trim_start().starts_with('#')
+    });
     assert!(
-        host.contains("needs.custom-ci-gate.result == 'success'"),
+        requires_success,
         "release.yml's `host` job must require custom-ci-gate to have SUCCEEDED \
          (not merely not-failed), since a failed dependency reports as skipped. \
          Block was:\n{host}"
     );
+}
+
+#[test]
+fn a_closing_fence_may_not_carry_an_info_string() {
+    // CommonMark allows an info string only on the opener, so ```bash inside an
+    // open block is content. Treating it as a closer made the `## ` line after
+    // it a section heading, splitting the body at a line GitHub renders as code.
+    let text = concat!(
+        "# Changelog\n\n",
+        "## v1.0.0\n\n",
+        "```\n",
+        "code\n",
+        "```bash\n",
+        "## v0.5.0\n",
+        "```\n\n",
+        "- a\n"
+    );
+    let sections = parse(text);
+    assert_eq!(sections.len(), 1);
+    assert_eq!(sections[0].heading, "v1.0.0");
 }
