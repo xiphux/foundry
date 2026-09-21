@@ -3,8 +3,14 @@
 //!
 //! `dist` builds each GitHub release's body from the section matching the
 //! version being tagged. It does not fail when that section is missing — it
-//! just publishes an empty release, which is how sibling repositories ended up
-//! with a hundred blank ones. These tests are the guard dist doesn't provide.
+//! logs, skips the changelog, and publishes a release carrying only install
+//! instructions and a download table. These tests are the guard dist doesn't
+//! provide.
+//!
+//! (The sibling repositories' hundred blank releases came from a different
+//! mechanism entirely — GitHub's pull-request-only note generator, on repos
+//! that had no CHANGELOG.md at the time. Same symptom, unrelated cause; the
+//! two were conflated here.)
 //!
 //! The version check works because of when foundry bumps: `Cargo.toml` moves to
 //! the new version in its own commit (`chore: bump version to 0.6.1`) and the
