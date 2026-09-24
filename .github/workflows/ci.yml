@@ -188,6 +188,43 @@ jobs:
           rustup target add x86_64-apple-darwin
           cargo build --locked --target x86_64-apple-darwin
 
+  # A stable check name for "did the platform matrix pass?", which is what a
+  # required status check needs and what `test` cannot provide. GitHub names a
+  # matrix job's check runs after its values — `test (ubuntu-latest)`,
+  # `test (ubuntu-24.04-arm)`, and so on — while a required check names one
+  # fixed string, configured in the repository settings where nothing links it
+  # back to this file. So the day the matrix moves, and `ubuntu-24.04-arm`
+  # says it eventually will, the old names stop being reported and the
+  # required check waits for them forever: the pull request making the change
+  # cannot merge, and neither can any after it. Requiring `test-result`
+  # instead leaves the platform list free to move.
+  #
+  # It is NOT a second opinion on the tests. It reads `needs.test.result` and
+  # nothing else, so it cannot disagree with the matrix about whether it
+  # passed, and it fails closed — anything that is not `success` or `skipped`
+  # exits 1, an empty result included. `fail-fast: false` above means a red
+  # platform still leaves the others reporting, and `needs.test.result` is
+  # `failure` if any leg failed, so one bad platform is still caught here.
+  #
+  # `skipped` passes because `gate` is allowed to stand the checks down when
+  # this exact content already went green; that judgement belongs to `gate`,
+  # and this job only reports what happened.
+  test-result:
+    needs: [gate, test]
+    if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every platform passed, or the gate stood them down
+        env:
+          RESULT: ${{ needs.test.result }}
+        run: |
+          set -euo pipefail
+          case "${RESULT}" in
+            success | skipped) echo "test: ${RESULT}" ;;
+            *) echo "test: ${RESULT}" >&2; exit 1 ;;
+          esac
+
   # Fails if line coverage drops below the floor, so tests cannot quietly
   # thin out underneath auto-merge. Raise the floor as coverage grows; it is
   # set a little under the measured figure so platform noise does not flake.
