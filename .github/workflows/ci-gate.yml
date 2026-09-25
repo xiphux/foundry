@@ -92,14 +92,11 @@ jobs:
         with:
           toolchain: stable
           components: clippy
+      # rust-cache for the reason ci.yml's test job gives: a hand-rolled key
+      # without the Rust version goes stale every stable release and, having
+      # "hit", never saves the rebuilt target/.
       - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Configure git
         run: |
           git config --global user.email "ci@foundry.dev"

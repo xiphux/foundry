@@ -147,21 +147,19 @@ jobs:
           toolchain: stable
           components: clippy
 
+      # Swatinem/rust-cache rather than a hand-rolled actions/cache. That key
+      # was OS + arch + Cargo.lock and left out the Rust version: with
+      # `toolchain: stable` moving every six weeks, the restored target/ had
+      # been built by a compiler this run no longer uses, so cargo rebuilt it
+      # all — and because the key had not changed, actions/cache reported a
+      # hit and never saved the rebuilt target/, until Cargo.lock next moved.
+      # rust-cache keys on the rustc version as well as the OS, the CPU
+      # architecture (both Linux legs report runner.os "Linux") and the
+      # lockfiles; falls back to the newest cache for this platform and
+      # compiler when Cargo.lock changes; and caches dependency artifacts
+      # rather than this crate's own, which every run rebuilds anyway.
       - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          # runner.arch too: both Linux legs report runner.os "Linux".
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          # A PR that changes Cargo.lock (every Cargo Dependabot PR) misses the
-          # exact key; start from the newest cache for this platform instead
-          # of cold.
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cargo-
-
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Configure git
         run: |
           git config --global user.email "ci@foundry.dev"
