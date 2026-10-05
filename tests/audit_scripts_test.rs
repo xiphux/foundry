@@ -107,7 +107,19 @@ jq --arg w "$workflow" --arg b "$branch" --arg s "$status" \
                 r#"echo "$*" >> "$FAKE_CARGO_LOG"
 [ -n "${FAKE_CARGO_GARBAGE:-}" ] && { echo "error: couldn't fetch advisory database"; exit 1; }
 [ -n "${FAKE_CARGO_STDERR:-}" ] && echo "$FAKE_CARGO_STDERR" >&2
-while [ $# -gt 0 ]; do [ "$1" = --file ] && { cat "$2"; exit 1; }; shift; done
+while [ $# -gt 0 ]; do
+  if [ "$1" = --file ]; then
+    # The canary: a yank check that works reports libc 0.2.165.
+    case $2 in */canary.lock)
+      [ -n "${FAKE_CANARY_BROKEN:-}" ] && yanked='' ||
+        yanked='{"kind":"yanked","advisory":null,"package":{"name":"libc","version":"0.2.165"}}'
+      echo "{\"vulnerabilities\":{\"found\":false,\"count\":0,\"list\":[]},\"warnings\":{\"yanked\":[$yanked]}}"
+      exit 1 ;;
+    esac
+    cat "$2"; exit 1
+  fi
+  shift
+done
 exit 2"#,
             );
             let scratch_path = scratch.path().to_path_buf();
@@ -389,7 +401,7 @@ exit 2"#,
     }
 
     #[test]
-    fn counts_an_advisory_as_new_once_it_reaches_another_copy_of_the_crate() {
+    fn counts_a_copy_older_than_any_the_baseline_had_as_new() {
         let f = Fixture::new();
         let repo = f.repo("r");
         repo.commit(&report(&["RUSTSEC-2021-0003 smallvec@1.6.0"], &[]), "base");
@@ -401,14 +413,53 @@ exit 2"#,
                 ],
                 &[],
             ),
-            "a second vulnerable copy beside the first",
+            "an older vulnerable copy beside the first",
         );
         let (ok, out, _) = f.audit(&repo, &[]);
         assert!(!ok, "{out}");
         assert_has(
             &out,
-            "it now reaches more copies of smallvec than the baseline did",
+            "smallvec 0.6.13: advisory RUSTSEC-2021-0003 -- already on the baseline, but this copy is older than any the baseline had (1.6.0)",
         );
+    }
+
+    #[test]
+    fn counts_an_advisory_as_new_once_it_reaches_another_crate() {
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        repo.commit(&report(&["RUSTSEC-2026-0009 one@1.0.0"], &[]), "base");
+        repo.commit(
+            &report(
+                &["RUSTSEC-2026-0009 one@1.0.0", "RUSTSEC-2026-0009 two@1.0.0"],
+                &[],
+            ),
+            "reaches a second crate",
+        );
+        let (ok, out, _) = f.audit(&repo, &[]);
+        assert!(!ok, "{out}");
+        assert_has(&out, "it now reaches two, which it did not there");
+    }
+
+    #[test]
+    fn does_not_count_a_partial_fix_which_leaves_the_old_copy_for_the_rest_as_new() {
+        // One dependent moving to a newer, still-affected version while
+        // another stays: in either version line, it is not a downgrade.
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        let had = ["RUSTSEC-1 pkg@2.1.4", "RUSTSEC-1 pkg@5.0.9"];
+        repo.commit(&report(&had, &[]), "base");
+        repo.commit(
+            &report(&[had[0], had[1], "RUSTSEC-1 pkg@5.0.10"], &[]),
+            "some move to 5.0.10",
+        );
+        let (ok, out, _) = f.audit(&repo, &[]);
+        assert!(ok, "{out}");
+        repo.commit(
+            &report(&[had[0], "RUSTSEC-1 pkg@2.1.5", had[1]], &[]),
+            "some move to 2.1.5",
+        );
+        let (ok, out, _) = f.audit(&repo, &[]);
+        assert!(ok, "{out}");
     }
 
     #[test]
@@ -426,6 +477,22 @@ exit 2"#,
         assert_has(
             &out,
             "::warning title=Existing advisory::vulnerability RUSTSEC-2021-0003",
+        );
+    }
+
+    #[test]
+    fn fails_when_the_yank_check_is_lost_without_a_word() {
+        // An index cargo audit cannot open is reported nowhere under --json:
+        // only the canary going unreported shows it.
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        repo.commit(&clean(), "base");
+        repo.commit(&clean(), "tip");
+        let (ok, out, _) = f.audit(&repo, &[("FAKE_CANARY_BROKEN", "1")]);
+        assert!(!ok, "{out}");
+        assert_has(
+            &out,
+            "::error title=Audit failed::cargo audit did not report libc 0.2.165 as yanked",
         );
     }
 
@@ -450,7 +517,10 @@ exit 2"#,
     }
 
     #[test]
-    fn audits_the_baseline_with_the_database_just_fetched() {
+    fn audits_both_locks_and_the_canary_with_a_fresh_database() {
+        // --no-fetch would confine the baseline's yank check to the index
+        // entries HEAD's audit cached, so every crate the change removed
+        // would fail to look up.
         let f = Fixture::new();
         let repo = f.repo("r");
         repo.commit(&clean(), "base");
@@ -458,13 +528,14 @@ exit 2"#,
         let (ok, out, log) = f.audit(&repo, &[]);
         assert!(ok, "{out}");
         let calls: Vec<&str> = log.lines().collect();
-        assert_eq!(calls.len(), 2, "{log}");
+        assert_eq!(calls.len(), 3, "{log}");
         assert!(
             calls[0].starts_with("audit --json --file Cargo.lock"),
             "{log}"
         );
-        assert!(!calls[0].contains("--no-fetch"), "{log}");
-        assert!(calls[1].contains("--no-fetch"), "{log}");
+        assert!(calls[1].ends_with("/canary.lock"), "{log}");
+        assert!(calls[2].ends_with("/base.lock"), "{log}");
+        assert!(!log.contains("--no-fetch"), "{log}");
     }
 
     #[test]
@@ -948,9 +1019,10 @@ fn the_audit_compares_against_the_baseline_ci_found() {
             "{step}"
         );
         // Only workflows whose runs include the audit: ci.yml, which runs on
-        // pushes to main. (ci-gate.yml runs only on tags, which the baseline
-        // never looks for.) One that went green without auditing would make
-        // every commit it passed a baseline.
+        // pushes to main. (ci-gate.yml is called by release.yml, on tags and
+        // pull requests, neither of which the baseline looks for.) One that
+        // went green without auditing would make every commit it passed a
+        // baseline.
         let workflows = step
             .lines()
             .find_map(|l| l.strip_prefix("AUDIT_WORKFLOWS: "))

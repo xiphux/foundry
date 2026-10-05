@@ -63,9 +63,11 @@ jobs:
             exit 0
           fi
 
-          # ci.yml runs on pushes to main, so the run that checked this
-          # commit is one of its own — this workflow has no earlier run to
-          # find, being called only from a tag.
+          # ci.yml runs on pushes to main and on pull requests, so the run
+          # that checked this commit is one of its own — this workflow has no
+          # earlier run of its own to find. It is called from a tag, and from
+          # a pull request, where GITHUB_SHA is the merge commit ci.yml's
+          # pull_request run tested too.
           conclusion=$(gh api \
             "/repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${GITHUB_SHA}&per_page=100" \
             --jq '[.workflow_runs[]
@@ -112,13 +114,19 @@ jobs:
 
   # The dependency audit, on every release and never inherited -- the one
   # check that a pass on this exact commit does not settle, since advisories
-  # are published while the commit stands still, and a release ships what is
-  # locked now. It is ci.yml's audit (see the job there): the lock at the
-  # tag against the last commit a successful ci.yml run passed on the default
-  # branch, other than this one (scripts/audit-baseline.sh), so a finding
-  # published since main last went green fails the release rather than
-  # shipping. A red audit fails custom-ci-gate, which release.yml's builds
-  # and `host` both need.
+  # are published while the commit stands still. It is ci.yml's audit (see
+  # the job there): on a tag, the lock against the last commit a successful
+  # ci.yml run passed on the default branch, other than this one
+  # (scripts/audit-baseline.sh). So a finding published since then against
+  # what the last change added -- which no earlier audit could have seen --
+  # fails the release; one against something locked before that only warns,
+  # as it does on main. A release is held to main's standard, not a
+  # stricter one. A red audit fails custom-ci-gate, which release.yml's
+  # builds and `host` both need.
+  #
+  # release.yml also calls this workflow on every pull request, so a pull
+  # request is audited here as well as in ci.yml: the same comparison, run
+  # twice.
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 15

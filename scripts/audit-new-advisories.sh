@@ -24,21 +24,32 @@
 # -- as `--deny warnings` treated them, keyed by advisory id (a yanked version,
 # which has none, by crate and version). Findings already on the baseline are
 # printed as warnings and do not fail the run -- unless HEAD has the advisory
-# in more copies of a crate than the baseline did, a second vulnerable
-# version locked beside the first, which counts as new. Copies are counted,
-# not matched by version, so moving the one copy to another affected version
-# is not new: that is the update a fix arrives through. Dependabot alerts and Renovate
-# raise vulnerabilities that have a fix; nothing else revisits unmaintained or
+# in a crate it did not reach on the baseline, or in a version of the crate
+# older than every version the baseline had: a fixed copy swapped for an
+# older vulnerable one that something else brought in. Fixes move versions
+# up, so moving a copy to a newer, still-affected version is not new, nor is
+# one dependent moving while another stays (a partial fix); a newer
+# vulnerable copy brought in by a new dependency is the case this lets
+# through. Dependabot alerts and Renovate raise vulnerabilities that have a
+# fix; nothing else revisits unmaintained or
 # unsound crates already locked, so read those warnings. Both locks are
 # audited with this checkout's settings, so an `ignore` added to audit.toml
 # applies to both sides -- and removing one that is still needed only warns.
 #
-# The yanked check reads the crates.io index. If the index cannot be reached,
-# cargo audit says so on stderr -- "couldn't check if the package is yanked"
-# -- and reports no yanked crates rather than failing, as `--deny warnings`
-# did too. A report with that hole in it proves nothing about yanks, so that
-# message fails the run here. The audit job builds nothing, so the index is
-# usually fetched fresh, and an outage there would otherwise pass silently.
+# The yanked check reads the crates.io index, and loses it two ways without
+# failing, as `--deny warnings` did too. A crate it cannot look up is
+# reported on stderr -- "couldn't check if the package is yanked" -- and
+# skipped; that message fails the run here. And an index it cannot open at
+# all is reported nowhere under --json, and the whole check is skipped; so a
+# canary lock holding a version known to be yanked is audited too, and the
+# run fails unless that yank is reported. The audit job builds nothing, so
+# the index is usually fetched fresh, and an outage there would otherwise
+# pass silently.
+#
+# Both locks are audited with a fresh advisory database. --no-fetch on the
+# baseline's would save the fetch, but in cargo-audit 0.22 it also confines
+# the yank check to the index entries already cached -- HEAD's crates only
+# -- so every crate the change removed would fail to look up.
 #
 # Arguments are passed to both `cargo audit` runs.
 set -euo pipefail
@@ -83,6 +94,20 @@ findings() {
 
 findings Cargo.lock "$workdir/head.tsv" "$@"
 
+# The canary: libc 0.2.165 is yanked, so a working yank check reports it.
+cat > "$workdir/canary.lock" << 'LOCK'
+version = 4
+
+[[package]]
+name = "libc"
+version = "0.2.165"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+LOCK
+cargo audit --json --file "$workdir/canary.lock" "$@" > "$workdir/canary.json" 2> /dev/null || true
+jq -e '[.warnings.yanked[]? | select(.package.name == "libc" and .package.version == "0.2.165")] | length > 0' \
+  "$workdir/canary.json" > /dev/null 2>&1 ||
+  fail "cargo audit did not report libc 0.2.165 as yanked, so its yank check is not working and its report proves nothing about yanks"
+
 if [ -n "${AUDIT_BASE+set}" ]; then
   base=$AUDIT_BASE
 elif [ "${GITHUB_ACTIONS:-}" = true ]; then
@@ -105,28 +130,53 @@ if [ -n "$base" ]; then
     fail "the baseline commit $base is not in this clone"
   git show "$base:Cargo.lock" > "$workdir/base.lock" ||
     fail "Cargo.lock is not in the baseline commit $base"
-  # The advisory database was just fetched for HEAD; use the same one.
-  no_fetch=--no-fetch
-  for arg in "$@"; do [ "$arg" = --no-fetch ] && no_fetch=""; done
-  findings "$workdir/base.lock" "$workdir/base.tsv" ${no_fetch:+"$no_fetch"} "$@"
+  findings "$workdir/base.lock" "$workdir/base.tsv" "$@"
   note=" against ${base:0:12}"
 else
   : > "$workdir/base.tsv"
   note=" (no baseline commit: every finding counts as new)"
 fi
 
-# Each finding is new if the baseline did not have its key, or had it in
-# fewer copies (versions) of the crate than HEAD does; otherwise existing.
+# Each finding is new if the baseline did not have its key, or had it but
+# not in this crate, or only in versions all newer than this one; otherwise
+# existing. (No apostrophes in the program: it is single-quoted.)
 awk -F'\t' -v OFS='\t' '
+  # Whether version a precedes version b. One that is not semver counts as
+  # older: it cannot be shown to be the newer copy a fix arrives as.
+  function older(a, b,   x, y, ap, bp, i) {
+    sub(/\+.*/, "", a); sub(/\+.*/, "", b)
+    ap = ""; bp = ""
+    if (index(a, "-")) { ap = substr(a, index(a, "-") + 1); a = substr(a, 1, index(a, "-") - 1) }
+    if (index(b, "-")) { bp = substr(b, index(b, "-") + 1); b = substr(b, 1, index(b, "-") - 1) }
+    if (split(a, x, ".") != 3 || split(b, y, ".") != 3) return 1
+    for (i = 1; i <= 3; i++) {
+      if (x[i] !~ /^[0-9]+$/ || y[i] !~ /^[0-9]+$/) return 1
+      if (x[i] + 0 != y[i] + 0) return x[i] + 0 < y[i] + 0
+    }
+    if (ap == "" || bp == "") return ap != "" && bp == ""
+    return ap < bp
+  }
+  function older_than_all(v, list,   vs, n, i) {
+    n = split(list, vs, " ")
+    for (i = 1; i <= n; i++) if (!older(v, vs[i])) return 0
+    return 1
+  }
   # FILENAME rather than FNR == NR, which reads the findings of HEAD as
   # those of the baseline when the baseline has none.
-  FILENAME == ARGV[1] { base[$1] = 1; copies[$1 SUBSEP $2]++; next }
-  { head[$1 SUBSEP $2]++; key[FNR] = $1; crate[FNR] = $2; text[FNR] = $4; n = FNR }
+  FILENAME == ARGV[1] {
+    base[$1] = 1; seen[$1 SUBSEP $2] = 1; had[$1 SUBSEP $2 SUBSEP $3] = 1
+    versions[$1 SUBSEP $2] = versions[$1 SUBSEP $2] " " $3
+    next
+  }
+  { key[FNR] = $1; crate[FNR] = $2; version[FNR] = $3; text[FNR] = $4; n = FNR }
   END {
     for (i = 1; i <= n; i++) {
+      kc = key[i] SUBSEP crate[i]
       if (!(key[i] in base)) print "new", text[i]
-      else if (head[key[i] SUBSEP crate[i]] > copies[key[i] SUBSEP crate[i]])
-        print "new", text[i] " -- it now reaches more copies of " crate[i] " than the baseline did"
+      else if (!(kc in seen))
+        print "new", text[i] " -- already on the baseline, but it now reaches " crate[i] ", which it did not there"
+      else if (!((kc SUBSEP version[i]) in had) && older_than_all(version[i], versions[kc]))
+        print "new", text[i] " -- already on the baseline, but this copy is older than any the baseline had (" substr(versions[kc], 2) ")"
       else print "existing", text[i]
     }
   }
