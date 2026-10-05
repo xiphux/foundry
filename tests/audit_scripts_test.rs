@@ -6,20 +6,25 @@
 //! target branch's tip; both let a finding through, and both are pinned here.
 //!
 //! The scripts are driven end to end against throwaway repositories, with
-//! fakes first on PATH: `gh` serves canned run lists per branch, and `cargo
-//! audit --json --file <lock>` prints the lock itself -- each commit's
-//! Cargo.lock here *is* the report its audit would produce, so the baseline's
-//! copy reports its own. They are bash scripts that only ever run on Linux
-//! CI, so these cases are Unix-only; the wiring checks at the bottom run
-//! everywhere.
+//! fakes first on PATH. `gh` serves a list of workflow runs the way the API
+//! does -- filtered by workflow, branch and `status` -- through the script's
+//! own `--jq` program with the real jq, so the filters that keep a failed
+//! run or a pull request's run from becoming a baseline are exercised rather
+//! than assumed. `cargo audit --json --file <lock>` prints the lock itself --
+//! each commit's Cargo.lock here *is* the report its audit would produce, so
+//! the baseline's copy reports its own. Every child gets an environment with
+//! no GITHUB_*, GIT_* or AUDIT_* variables and no global git config, so the
+//! CI runner these tests run on cannot change what they find. They are bash
+//! scripts that only ever run on Linux CI, so these cases are Unix-only; the
+//! wiring checks at the bottom run everywhere.
 //!
-//! Separately, ci.yml has to give the baseline step the full history,
-//! `actions: read`, and workflows that exist, and hand the audit what it
-//! found. None of those fails visibly when missing -- a dropped AUDIT_BASE
-//! quietly falls back to comparing against HEAD's parent -- so they are
-//! pinned too.
+//! Separately, ci.yml and ci-gate.yml have to give the baseline step the full
+//! history, `actions: read`, and workflows that run the audit, hand the audit
+//! what it found, and never let `gate` skip it. None of those fails visibly
+//! when wrong -- a dropped AUDIT_BASE quietly falls back to comparing against
+//! HEAD's parent -- so they are pinned too.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -33,8 +38,8 @@ fn read(relative: &str) -> String {
 #[cfg(unix)]
 mod scripts {
     use super::*;
-    use std::collections::HashMap;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
     use std::process::{Command, Output};
     use tempfile::TempDir;
 
@@ -42,6 +47,24 @@ mod scripts {
         _scratch: TempDir,
         bin: PathBuf,
         scratch: PathBuf,
+    }
+
+    /// A workflow run as the API lists it. Newest first unless `at` says when.
+    #[derive(Default)]
+    struct Run<'a> {
+        sha: &'a str,
+        branch: Option<&'a str>,
+        workflow: Option<&'a str>,
+        event: Option<&'a str>,
+        conclusion: Option<&'a str>,
+        at: Option<&'a str>,
+    }
+
+    fn run(sha: &str) -> Run<'_> {
+        Run {
+            sha,
+            ..Run::default()
+        }
     }
 
     impl Fixture {
@@ -54,20 +77,36 @@ mod scripts {
                 std::fs::write(&path, format!("#!/usr/bin/env bash\n{body}\n")).unwrap();
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
             };
-            // gh api ... -f branch=<b> ...: the lines in $FAKE_RUNS/<b>, as
-            // the real call's --jq would print them.
+            // gh api -X GET repos/<repo>/actions/workflows/<file>/runs
+            // -f branch=<b> [-f status=<s>] ... --jq <program>: the runs in
+            // $FAKE_RUNS/runs.json for that workflow and branch -- and
+            // conclusion, if asked -- as {workflow_runs: [...]}, through
+            // <program>.
             fake(
                 "gh",
                 r#"[ -n "${FAKE_GH_FAIL:-}" ] && { echo "gh: HTTP 500" >&2; exit 1; }
-for arg; do case $arg in branch=*) b=${arg#branch=};; esac; done
-cat "$FAKE_RUNS/$b" 2>/dev/null || true"#,
+workflow="" branch="" status="" program=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    */actions/workflows/*/runs) workflow=${1%/runs}; workflow=${workflow##*/} ;;
+    -f) case $2 in branch=*) branch=${2#branch=} ;; status=*) status=${2#status=} ;; esac; shift ;;
+    --jq) program=$2; shift ;;
+  esac
+  shift
+done
+jq --arg w "$workflow" --arg b "$branch" --arg s "$status" \
+  '{workflow_runs: [.[] | select(.workflow == $w and .head_branch == $b and ($s == "" or .conclusion == $s))]}' \
+  "$FAKE_RUNS/runs.json" | jq -r "$program""#,
             );
             // cargo audit --json --file <lock> ...: the lock is the report.
-            // Each call's arguments are logged, one line per call.
+            // Each call's arguments are logged, one line per call;
+            // FAKE_CARGO_STDERR is printed to stderr, as cargo audit reports
+            // what it could not check.
             fake(
                 "cargo",
                 r#"echo "$*" >> "$FAKE_CARGO_LOG"
 [ -n "${FAKE_CARGO_GARBAGE:-}" ] && { echo "error: couldn't fetch advisory database"; exit 1; }
+[ -n "${FAKE_CARGO_STDERR:-}" ] && echo "$FAKE_CARGO_STDERR" >&2
 while [ $# -gt 0 ]; do [ "$1" = --file ] && { cat "$2"; exit 1; }; shift; done
 exit 2"#,
             );
@@ -79,14 +118,32 @@ exit 2"#,
             }
         }
 
-        fn path(&self) -> String {
-            format!("{}:{}", self.bin.display(), std::env::var("PATH").unwrap())
+        /// A command with a scrubbed environment and the fakes on PATH.
+        fn command(&self, program: &str) -> Command {
+            let mut command = Command::new(program);
+            for (key, _) in std::env::vars_os() {
+                let key = key.to_string_lossy();
+                if ["GITHUB_", "GIT_", "AUDIT_"]
+                    .iter()
+                    .any(|p| key.starts_with(p))
+                {
+                    command.env_remove(&*key);
+                }
+            }
+            command
+                .env(
+                    "PATH",
+                    format!("{}:{}", self.bin.display(), std::env::var("PATH").unwrap()),
+                )
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1");
+            command
         }
 
-        fn repo(&self, name: &str) -> Repo {
+        fn repo(&self, name: &str) -> Repo<'_> {
             let dir = self.scratch.join(name);
             std::fs::create_dir(&dir).unwrap();
-            let repo = Repo { dir };
+            let repo = Repo { dir, fixture: self };
             repo.git(&["init", "-q", "-b", "main"]);
             repo.git(&["config", "user.email", "test@example.com"]);
             repo.git(&["config", "user.name", "test"]);
@@ -94,25 +151,22 @@ exit 2"#,
             repo
         }
 
-        /// Runs audit-new-advisories.sh; `AUDIT_BASE` is left unset unless
-        /// `env` sets it.
+        /// Runs audit-new-advisories.sh; `AUDIT_BASE` is unset unless `env`
+        /// sets it. Returns success, the output, and cargo's logged calls.
         fn audit(&self, repo: &Repo, env: &[(&str, &str)]) -> (bool, String, String) {
             let log = self.scratch.join(format!(
                 "cargo-{}.log",
                 repo.dir.file_name().unwrap().to_string_lossy()
             ));
             let _ = std::fs::remove_file(&log);
-            let mut command = Command::new("bash");
-            command
+            let output = self
+                .command("bash")
                 .arg(root().join("scripts/audit-new-advisories.sh"))
                 .current_dir(&repo.dir)
-                .env("PATH", self.path())
                 .env("FAKE_CARGO_LOG", &log)
-                .env_remove("AUDIT_BASE");
-            for (key, value) in env {
-                command.env(key, value);
-            }
-            let output = command.output().unwrap();
+                .envs(env.iter().copied())
+                .output()
+                .unwrap();
             (
                 output.status.success(),
                 text(&output),
@@ -120,54 +174,52 @@ exit 2"#,
             )
         }
 
-        /// Runs audit-baseline.sh as CI would. `runs` maps a branch to the
-        /// head SHAs of its successful runs, newest first. Returns the exit
-        /// status, the output, and the `sha=` it wrote, if any.
+        /// Runs audit-baseline.sh as CI would. Returns the exit status, the
+        /// output, and the `sha=` it wrote, if any.
         fn baseline(
             &self,
             repo: &Repo,
-            runs: &[(&str, &[&str])],
+            runs: &[Run],
             env: &[(&str, &str)],
         ) -> (bool, String, Option<String>) {
             let runs_dir = tempfile::tempdir_in(&self.scratch).unwrap().keep();
-            for (branch, shas) in runs {
-                let lines: Vec<String> = shas
-                    .iter()
-                    .enumerate()
-                    .map(|(i, sha)| {
-                        format!(
-                            "2026-01-{:02}T00:00:00Z {sha} https://example.test/run/{i}",
-                            28 - i
-                        )
-                    })
-                    .collect();
-                std::fs::write(runs_dir.join(branch), lines.join("\n") + "\n").unwrap();
-            }
+            let api: Vec<String> = runs
+                .iter()
+                .enumerate()
+                .map(|(i, run)| {
+                    let at = run
+                        .at
+                        .map_or_else(|| format!("2026-01-{:02}T00:00:00Z", 28 - i), str::to_string);
+                    format!(
+                        r#"{{"workflow":"{}","head_branch":"{}","head_sha":"{}","event":"{}","status":"completed","conclusion":"{}","created_at":"{at}","html_url":"https://example.test/run/{i}"}}"#,
+                        run.workflow.unwrap_or("ci.yml"),
+                        run.branch.unwrap_or("main"),
+                        run.sha,
+                        run.event.unwrap_or("push"),
+                        run.conclusion.unwrap_or("success"),
+                    )
+                })
+                .collect();
+            std::fs::write(runs_dir.join("runs.json"), format!("[{}]", api.join(","))).unwrap();
             let output_file = runs_dir.join("github-output");
             std::fs::write(&output_file, "").unwrap();
-            let mut vars: HashMap<&str, String> = [
-                ("GITHUB_ACTIONS", "true"),
-                ("GITHUB_REPOSITORY", "owner/repo"),
-                ("GITHUB_EVENT_NAME", "push"),
-                ("GITHUB_REF_NAME", "main"),
-                ("GITHUB_REF_TYPE", "branch"),
-                ("GH_TOKEN", "token"),
-                ("AUDIT_WORKFLOWS", "ci.yml"),
-                ("AUDIT_DEFAULT_BRANCH", "main"),
-            ]
-            .into_iter()
-            .map(|(k, v)| (k, v.to_string()))
-            .collect();
-            for (key, value) in env {
-                vars.insert(key, value.to_string());
-            }
-            let output = Command::new("bash")
+            let output = self
+                .command("bash")
                 .arg(root().join("scripts/audit-baseline.sh"))
                 .current_dir(&repo.dir)
-                .env("PATH", self.path())
                 .env("GITHUB_OUTPUT", &output_file)
                 .env("FAKE_RUNS", &runs_dir)
-                .envs(vars)
+                .envs([
+                    ("GITHUB_ACTIONS", "true"),
+                    ("GITHUB_REPOSITORY", "owner/repo"),
+                    ("GITHUB_EVENT_NAME", "push"),
+                    ("GITHUB_REF_NAME", "main"),
+                    ("GITHUB_REF_TYPE", "branch"),
+                    ("GH_TOKEN", "token"),
+                    ("AUDIT_WORKFLOWS", "ci.yml"),
+                    ("AUDIT_DEFAULT_BRANCH", "main"),
+                ])
+                .envs(env.iter().copied())
                 .output()
                 .unwrap();
             let written = std::fs::read_to_string(&output_file).unwrap();
@@ -179,13 +231,16 @@ exit 2"#,
         }
     }
 
-    struct Repo {
+    struct Repo<'a> {
         dir: PathBuf,
+        fixture: &'a Fixture,
     }
 
-    impl Repo {
+    impl Repo<'_> {
         fn git(&self, args: &[&str]) -> String {
-            let output = Command::new("git")
+            let output = self
+                .fixture
+                .command("git")
                 .args(args)
                 .current_dir(&self.dir)
                 .output()
@@ -211,12 +266,20 @@ exit 2"#,
         )
     }
 
-    /// A `cargo audit --json` report: vulnerabilities by advisory id, and
-    /// warnings as (kind, crate, advisory id or none for a yank).
+    /// A `cargo audit --json` report. Each vulnerability is an advisory id,
+    /// optionally followed by the crate it is in -- `"RUSTSEC-1 pkg@1.0.0"`,
+    /// pkg 1.0.0 when left out. Warnings are (kind, crate[@version], advisory
+    /// id or none for a yank).
     fn report(vulnerabilities: &[&str], warnings: &[(&str, &str, Option<&str>)]) -> String {
         let list: Vec<String> = vulnerabilities
             .iter()
-            .map(|id| format!(r#"{{"advisory":{{"id":"{id}","title":"advisory {id}"}},"package":{{"name":"pkg","version":"1.0.0"}}}}"#))
+            .map(|v| {
+                let (id, krate) = v.split_once(' ').unwrap_or((v, "pkg@1.0.0"));
+                let (name, version) = krate.split_once('@').unwrap();
+                format!(
+                    r#"{{"advisory":{{"id":"{id}","title":"advisory {id}"}},"package":{{"name":"{name}","version":"{version}"}}}}"#
+                )
+            })
             .collect();
         let mut kinds: Vec<String> = Vec::new();
         for kind in ["unmaintained", "unsound", "yanked"] {
@@ -224,9 +287,13 @@ exit 2"#,
                 .iter()
                 .filter(|(k, _, _)| *k == kind)
                 .map(|(k, name, advisory)| {
-                    let advisory = advisory.map_or("null".to_string(), |id| format!(r#"{{"id":"{id}","title":"advisory {id}"}}"#));
+                    let advisory = advisory.map_or("null".to_string(), |id| {
+                        format!(r#"{{"id":"{id}","title":"advisory {id}"}}"#)
+                    });
                     let (name, version) = name.split_once('@').unwrap_or((name, "1.0.0"));
-                    format!(r#"{{"kind":"{k}","advisory":{advisory},"package":{{"name":"{name}","version":"{version}"}}}}"#)
+                    format!(
+                        r#"{{"kind":"{k}","advisory":{advisory},"package":{{"name":"{name}","version":"{version}"}}}}"#
+                    )
                 })
                 .collect();
             if !entries.is_empty() {
@@ -246,6 +313,11 @@ exit 2"#,
         report(&[], &[])
     }
 
+    #[track_caller]
+    fn assert_has(out: &str, text: &str) {
+        assert!(out.contains(text), "expected {text:?} in:\n{out}");
+    }
+
     // ---- audit-new-advisories.sh ----
 
     #[test]
@@ -256,9 +328,9 @@ exit 2"#,
         repo.commit(&report(&["RUSTSEC-2026-0001"], &[]), "adds one");
         let (ok, out, _) = f.audit(&repo, &[]);
         assert!(!ok, "{out}");
-        assert!(
-            out.contains("::error title=New advisory::vulnerability RUSTSEC-2026-0001"),
-            "{out}"
+        assert_has(
+            &out,
+            "::error title=New advisory::vulnerability RUSTSEC-2026-0001",
         );
     }
 
@@ -274,13 +346,13 @@ exit 2"#,
         repo.commit(&had, "unrelated");
         let (ok, out, _) = f.audit(&repo, &[]);
         assert!(ok, "{out}");
-        assert!(
-            out.contains("::warning title=Existing advisory::vulnerability RUSTSEC-2026-0001"),
-            "{out}"
+        assert_has(
+            &out,
+            "::warning title=Existing advisory::vulnerability RUSTSEC-2026-0001",
         );
-        assert!(
-            out.contains("::warning title=Existing advisory::unmaintained RUSTSEC-2026-0002"),
-            "{out}"
+        assert_has(
+            &out,
+            "::warning title=Existing advisory::unmaintained RUSTSEC-2026-0002",
         );
     }
 
@@ -295,9 +367,9 @@ exit 2"#,
         );
         let (ok, out, _) = f.audit(&repo, &[]);
         assert!(!ok, "{out}");
-        assert!(
-            out.contains("::error title=New advisory::unsound RUSTSEC-2026-0003"),
-            "{out}"
+        assert_has(
+            &out,
+            "::error title=New advisory::unsound RUSTSEC-2026-0003",
         );
     }
 
@@ -313,9 +385,67 @@ exit 2"#,
         );
         let (ok, out, _) = f.audit(&repo, &[]);
         assert!(!ok, "{out}");
-        assert!(
-            out.contains("::error title=New advisory::yanked pkg 1.0.1"),
-            "{out}"
+        assert_has(&out, "::error title=New advisory::yanked pkg 1.0.1");
+    }
+
+    #[test]
+    fn counts_an_advisory_as_new_once_it_reaches_another_copy_of_the_crate() {
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        repo.commit(&report(&["RUSTSEC-2021-0003 smallvec@1.6.0"], &[]), "base");
+        repo.commit(
+            &report(
+                &[
+                    "RUSTSEC-2021-0003 smallvec@1.6.0",
+                    "RUSTSEC-2021-0003 smallvec@0.6.13",
+                ],
+                &[],
+            ),
+            "a second vulnerable copy beside the first",
+        );
+        let (ok, out, _) = f.audit(&repo, &[]);
+        assert!(!ok, "{out}");
+        assert_has(
+            &out,
+            "it now reaches more copies of smallvec than the baseline did",
+        );
+    }
+
+    #[test]
+    fn does_not_count_moving_the_one_copy_to_another_affected_version_as_new() {
+        // The update a fix arrives through: failing it would block the fix.
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        repo.commit(&report(&["RUSTSEC-2021-0003 smallvec@1.6.0"], &[]), "base");
+        repo.commit(
+            &report(&["RUSTSEC-2021-0003 smallvec@1.6.1"], &[]),
+            "patch bump, still affected",
+        );
+        let (ok, out, _) = f.audit(&repo, &[]);
+        assert!(ok, "{out}");
+        assert_has(
+            &out,
+            "::warning title=Existing advisory::vulnerability RUSTSEC-2021-0003",
+        );
+    }
+
+    #[test]
+    fn fails_when_cargo_audit_could_not_check_for_yanks() {
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        repo.commit(&clean(), "base");
+        repo.commit(&clean(), "tip");
+        let (ok, out, _) = f.audit(
+            &repo,
+            &[(
+                "FAKE_CARGO_STDERR",
+                "error: couldn't check if the package is yanked: not found: No such crate in crates.io index: libc",
+            )],
+        );
+        assert!(!ok, "{out}");
+        assert_has(
+            &out,
+            "::error title=Audit failed::cargo audit could not check Cargo.lock for yanked crates",
         );
     }
 
@@ -329,6 +459,10 @@ exit 2"#,
         assert!(ok, "{out}");
         let calls: Vec<&str> = log.lines().collect();
         assert_eq!(calls.len(), 2, "{log}");
+        assert!(
+            calls[0].starts_with("audit --json --file Cargo.lock"),
+            "{log}"
+        );
         assert!(!calls[0].contains("--no-fetch"), "{log}");
         assert!(calls[1].contains("--no-fetch"), "{log}");
     }
@@ -342,7 +476,12 @@ exit 2"#,
         repo.commit(&report(&["RUSTSEC-2026-0001"], &[]), "unrelated tip");
         // Against the parent this would only warn: the multi-commit push.
         assert!(f.audit(&repo, &[]).0);
-        assert!(!f.audit(&repo, &[("AUDIT_BASE", &green)]).0);
+        let (ok, out, _) = f.audit(&repo, &[("AUDIT_BASE", &green)]);
+        assert!(!ok, "{out}");
+        assert_has(
+            &out,
+            "::error title=New advisory::vulnerability RUSTSEC-2026-0001",
+        );
     }
 
     #[test]
@@ -353,7 +492,22 @@ exit 2"#,
         repo.commit(&report(&["RUSTSEC-2026-0001"], &[]), "tip");
         let (ok, out, _) = f.audit(&repo, &[("AUDIT_BASE", "")]);
         assert!(!ok, "{out}");
-        assert!(out.contains("every finding counts as new"), "{out}");
+        assert_has(&out, "every finding counts as new");
+        assert_has(
+            &out,
+            "::error title=New advisory::vulnerability RUSTSEC-2026-0001",
+        );
+    }
+
+    #[test]
+    fn refuses_to_fall_back_to_the_parent_in_ci() {
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        repo.commit(&clean(), "base");
+        repo.commit(&clean(), "tip");
+        let (ok, out, _) = f.audit(&repo, &[("GITHUB_ACTIONS", "true")]);
+        assert!(!ok, "{out}");
+        assert_has(&out, "::error title=Audit failed::AUDIT_BASE is not set");
     }
 
     #[test]
@@ -364,7 +518,10 @@ exit 2"#,
         repo.commit(&clean(), "tip");
         let (ok, out, _) = f.audit(&repo, &[("AUDIT_BASE", "deadbeef")]);
         assert!(!ok, "{out}");
-        assert!(out.contains("::error title=Audit failed::"), "{out}");
+        assert_has(
+            &out,
+            "::error title=Audit failed::the baseline commit deadbeef is not in this clone",
+        );
     }
 
     #[test]
@@ -375,10 +532,16 @@ exit 2"#,
         repo.commit(&clean(), "tip");
         let (ok, out, _) = f.audit(&repo, &[("FAKE_CARGO_GARBAGE", "1")]);
         assert!(!ok, "{out}");
-        assert!(out.contains("produced no report"), "{out}");
+        assert_has(&out, "produced no report");
     }
 
     // ---- audit-baseline.sh ----
+
+    const PULL_REQUEST: [(&str, &str); 3] = [
+        ("GITHUB_EVENT_NAME", "pull_request"),
+        ("GITHUB_BASE_REF", "main"),
+        ("GITHUB_REF_NAME", "1/merge"),
+    ];
 
     #[test]
     fn prints_the_first_parent_outside_actions() {
@@ -386,10 +549,10 @@ exit 2"#,
         let repo = f.repo("r");
         let first = repo.commit(&clean(), "one");
         repo.commit(&clean(), "two");
-        let output = Command::new("bash")
+        let output = f
+            .command("bash")
             .arg(root().join("scripts/audit-baseline.sh"))
             .current_dir(&repo.dir)
-            .env("GITHUB_ACTIONS", "")
             .output()
             .unwrap();
         assert!(output.status.success(), "{}", text(&output));
@@ -403,9 +566,70 @@ exit 2"#,
         let green = repo.commit(&clean(), "green");
         repo.commit(&clean(), "unverified 1");
         repo.commit(&clean(), "unverified 2");
-        let (ok, out, sha) = f.baseline(&repo, &[("main", &[&green])], &[]);
+        let (ok, out, sha) = f.baseline(&repo, &[run(&green)], &[]);
         assert!(ok, "{out}");
         assert_eq!(sha.as_deref(), Some(green.as_str()));
+    }
+
+    #[test]
+    fn skips_a_run_that_failed_however_recent() {
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        let green = repo.commit(&clean(), "green");
+        let red = repo.commit(&report(&["RUSTSEC-2026-0001"], &[]), "red direct push");
+        repo.commit(&report(&["RUSTSEC-2026-0001"], &[]), "tip");
+        let runs = [
+            Run {
+                conclusion: Some("failure"),
+                ..run(&red)
+            },
+            run(&green),
+        ];
+        let (_, out, sha) = f.baseline(&repo, &runs, &[]);
+        assert_eq!(sha.as_deref(), Some(green.as_str()), "{out}");
+    }
+
+    #[test]
+    fn skips_a_pull_requests_run_even_on_a_branch_of_the_same_name() {
+        // A fork's branch can be called main; its run tested a merge commit,
+        // not the head it reports.
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        let green = repo.commit(&clean(), "green");
+        let pr = repo.commit(&clean(), "a pull request head, later merged");
+        repo.commit(&clean(), "tip");
+        let runs = [
+            Run {
+                event: Some("pull_request"),
+                ..run(&pr)
+            },
+            run(&green),
+        ];
+        let (_, out, sha) = f.baseline(&repo, &runs, &[]);
+        assert_eq!(sha.as_deref(), Some(green.as_str()), "{out}");
+    }
+
+    #[test]
+    fn takes_the_newest_green_run_across_every_listed_workflow() {
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        let older = repo.commit(&clean(), "green in ci.yml");
+        let newer = repo.commit(&clean(), "green in another workflow");
+        repo.commit(&clean(), "tip");
+        let runs = [
+            Run {
+                workflow: Some("ci.yml"),
+                at: Some("2026-02-01T00:00:00Z"),
+                ..run(&older)
+            },
+            Run {
+                workflow: Some("other.yml"),
+                at: Some("2026-02-02T00:00:00Z"),
+                ..run(&newer)
+            },
+        ];
+        let (_, out, sha) = f.baseline(&repo, &runs, &[("AUDIT_WORKFLOWS", "ci.yml,other.yml")]);
+        assert_eq!(sha.as_deref(), Some(newer.as_str()), "{out}");
     }
 
     #[test]
@@ -414,7 +638,7 @@ exit 2"#,
         let repo = f.repo("r");
         let earlier = repo.commit(&clean(), "earlier green");
         let head = repo.commit(&clean(), "re-run of a green head");
-        let (_, out, sha) = f.baseline(&repo, &[("main", &[&head, &earlier])], &[]);
+        let (_, out, sha) = f.baseline(&repo, &[run(&head), run(&earlier)], &[]);
         assert_eq!(sha.as_deref(), Some(earlier.as_str()), "{out}");
     }
 
@@ -428,7 +652,7 @@ exit 2"#,
         repo.git(&["checkout", "-q", "main"]);
         repo.commit(&clean(), "tip");
         let gone = "f".repeat(40);
-        let (_, out, sha) = f.baseline(&repo, &[("main", &[&gone, &elsewhere, &green])], &[]);
+        let (_, out, sha) = f.baseline(&repo, &[run(&gone), run(&elsewhere), run(&green)], &[]);
         assert_eq!(sha.as_deref(), Some(green.as_str()), "{out}");
     }
 
@@ -445,15 +669,77 @@ exit 2"#,
         repo.commit(&report(&["RUSTSEC-2026-0001"], &[]), "pr change");
         repo.git(&["checkout", "-q", "main"]);
         repo.git(&["merge", "-q", "--no-ff", "-m", "merge ref", "pr"]);
-        let pr = [
-            ("GITHUB_EVENT_NAME", "pull_request"),
-            ("GITHUB_BASE_REF", "main"),
-            ("GITHUB_REF_NAME", "1/merge"),
-        ];
-        let (_, out, sha) = f.baseline(&repo, &[("main", &[&green])], &pr);
+        let (_, out, sha) = f.baseline(&repo, &[run(&green)], &PULL_REQUEST);
         assert_eq!(sha.as_deref(), Some(green.as_str()), "{out}");
         // And the audit then fails the PR on what the red push brought in.
-        assert!(!f.audit(&repo, &[("AUDIT_BASE", &green)]).0);
+        let (ok, out, _) = f.audit(&repo, &[("AUDIT_BASE", &green)]);
+        assert!(!ok, "{out}");
+        assert_has(
+            &out,
+            "::error title=New advisory::vulnerability RUSTSEC-2026-0001",
+        );
+    }
+
+    #[test]
+    fn on_a_pull_request_reads_ancestry_from_the_merges_first_parent() {
+        // main was force-pushed back past a green commit the PR still
+        // contains: that commit is in the merge, but no longer on the branch
+        // it targets.
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        let kept = repo.commit(&clean(), "green, still on main");
+        let dropped = repo.commit(&clean(), "green, later dropped from main");
+        repo.git(&["checkout", "-q", "-b", "pr"]);
+        repo.commit(&clean(), "pr change");
+        repo.git(&["checkout", "-q", "main"]);
+        repo.git(&["reset", "-q", "--hard", &kept]);
+        repo.git(&["merge", "-q", "--no-ff", "-m", "merge ref", "pr"]);
+        let (_, out, sha) = f.baseline(&repo, &[run(&dropped), run(&kept)], &PULL_REQUEST);
+        assert_eq!(sha.as_deref(), Some(kept.as_str()), "{out}");
+    }
+
+    #[test]
+    fn on_a_pull_request_into_another_branch_uses_that_branch() {
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        let on_main = repo.commit(&clean(), "green main");
+        repo.git(&["checkout", "-q", "-b", "release"]);
+        let on_release = repo.commit(&clean(), "green release");
+        repo.git(&["checkout", "-q", "-b", "pr"]);
+        repo.commit(&clean(), "pr change");
+        repo.git(&["checkout", "-q", "release"]);
+        repo.git(&["merge", "-q", "--no-ff", "-m", "merge ref", "pr"]);
+        let runs = [
+            Run {
+                branch: Some("release"),
+                ..run(&on_release)
+            },
+            run(&on_main),
+        ];
+        let mut env = PULL_REQUEST.to_vec();
+        env.push(("GITHUB_BASE_REF", "release"));
+        let (_, out, sha) = f.baseline(&repo, &runs, &env);
+        assert_eq!(sha.as_deref(), Some(on_release.as_str()), "{out}");
+    }
+
+    #[test]
+    fn for_a_tag_uses_the_default_branch_and_not_the_tagged_commit() {
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        let green = repo.commit(&clean(), "green main");
+        let decoy = repo.commit(&clean(), "green on a branch named like the tag");
+        let tagged = repo.commit(&clean(), "tagged, and green on main");
+        let runs = [
+            run(&tagged),
+            Run {
+                branch: Some("v1.0.0"),
+                ..run(&decoy)
+            },
+            run(&green),
+        ];
+        let env = [("GITHUB_REF_TYPE", "tag"), ("GITHUB_REF_NAME", "v1.0.0")];
+        let (_, out, sha) = f.baseline(&repo, &runs, &env);
+        assert_eq!(sha.as_deref(), Some(green.as_str()), "{out}");
     }
 
     #[test]
@@ -464,15 +750,12 @@ exit 2"#,
         repo.git(&["checkout", "-q", "-b", "feature"]);
         repo.commit(&clean(), "feature work");
         let feature = [("GITHUB_REF_NAME", "feature")];
-        let (_, out, sha) = f.baseline(&repo, &[("main", &[&green])], &feature);
+        let (_, out, sha) = f.baseline(&repo, &[run(&green)], &feature);
         assert_eq!(sha.as_deref(), Some(green.as_str()), "{out}");
         let (ok, out, sha) = f.baseline(&repo, &[], &feature);
         assert!(ok, "{out}");
         assert_eq!(sha.as_deref(), Some(""));
-        assert!(
-            out.contains("every high or critical advisory counts as new"),
-            "{out}"
-        );
+        assert_has(&out, "everything the audit finds counts as new");
     }
 
     #[test]
@@ -481,7 +764,7 @@ exit 2"#,
         let repo = f.repo("r");
         let green = repo.commit(&clean(), "green");
         repo.commit(&clean(), "tip");
-        let (ok, out, sha) = f.baseline(&repo, &[("main", &[&green])], &[("FAKE_GH_FAIL", "1")]);
+        let (ok, out, sha) = f.baseline(&repo, &[run(&green)], &[("FAKE_GH_FAIL", "1")]);
         assert!(!ok, "{out}");
         assert_eq!(sha, None);
     }
@@ -493,30 +776,56 @@ exit 2"#,
         repo.commit(&clean(), "one");
         repo.commit(&clean(), "two");
         let shallow = f.scratch.join("shallow");
-        let status = Command::new("git")
+        let status = f
+            .command("git")
             .args(["clone", "-q", "--depth", "1"])
             .arg(format!("file://{}", repo.dir.display()))
             .arg(&shallow)
             .status()
             .unwrap();
         assert!(status.success());
-        let (ok, out, _) = f.baseline(&Repo { dir: shallow }, &[], &[]);
+        let clone = Repo {
+            dir: shallow,
+            fixture: &f,
+        };
+        let (ok, out, sha) = f.baseline(&clone, &[], &[]);
         assert!(!ok, "{out}");
+        assert_has(&out, "shallow");
+        assert_eq!(sha, None);
     }
 }
 
-// ---- ci.yml wiring ----
+// ---- workflow wiring ----
 
-/// The `audit` job's block of ci.yml: from its key to the next job's.
-fn audit_job() -> String {
-    let ci = read(".github/workflows/ci.yml");
-    let mut lines = ci.lines().skip_while(|line| *line != "  audit:");
-    let mut job = vec![lines.next().expect("ci.yml has no `audit` job")];
+/// A job's block of a workflow: from its key to the next job's.
+fn job(workflow: &str, name: &str) -> String {
+    let text = read(&format!(".github/workflows/{workflow}"));
+    let key = format!("  {name}:");
+    let mut lines = text.lines().skip_while(|line| *line != key);
+    let mut job = vec![
+        lines
+            .next()
+            .unwrap_or_else(|| panic!("{workflow} has no `{name}` job")),
+    ];
     job.extend(lines.take_while(|line| {
         let indent = line.len() - line.trim_start().len();
         line.trim().is_empty() || line.trim_start().starts_with('#') || indent > 2
     }));
     job.join("\n")
+}
+
+/// The job's own keys, before its steps: `    key: value` lines.
+fn job_keys(job: &str) -> Vec<String> {
+    job.lines()
+        .skip(1)
+        .take_while(|line| *line != "    steps:")
+        .filter(|line| {
+            line.starts_with("    ")
+                && !line.starts_with("     ")
+                && !line.trim_start().starts_with('#')
+        })
+        .map(|line| line.trim().to_string())
+        .collect()
 }
 
 /// The steps of a job block, each as its text from its `- ` to the next.
@@ -529,77 +838,129 @@ fn steps(job: &str) -> Vec<String> {
         if let Some(step) = steps.last_mut()
             && !line.trim_start().starts_with('#')
         {
-            step.push_str(line.trim());
+            // Without the `- `, so a step's first key reads like its others.
+            step.push_str(line.trim().trim_start_matches("- "));
             step.push('\n');
         }
     }
     steps
 }
 
+/// Every audit job: ci.yml's, on pushes and pull requests, and ci-gate.yml's,
+/// on releases.
+const AUDIT_JOBS: [&str; 2] = ["ci.yml", "ci-gate.yml"];
+
+#[test]
+fn the_audit_job_never_skips_and_never_fails_quietly() {
+    for workflow in AUDIT_JOBS {
+        let job = job(workflow, "audit");
+        for key in job_keys(&job) {
+            for forbidden in ["if:", "needs:", "continue-on-error:"] {
+                assert!(
+                    !key.starts_with(forbidden),
+                    "{workflow}'s audit job has `{key}`"
+                );
+            }
+        }
+        for step in steps(&job)
+            .iter()
+            .filter(|s| s.contains("\nrun: scripts/audit-"))
+        {
+            assert!(
+                !step.contains("\nif:") && !step.contains("\ncontinue-on-error:"),
+                "{workflow}: {step}"
+            );
+        }
+    }
+}
+
 #[test]
 fn the_audit_job_checks_out_the_full_history() {
-    let job = audit_job();
-    let checkout = steps(&job)
-        .into_iter()
-        .find(|s| s.contains("uses: actions/checkout@"))
-        .expect("no checkout");
-    assert!(checkout.contains("\nfetch-depth: 0\n"), "{checkout}");
+    for workflow in AUDIT_JOBS {
+        let job = job(workflow, "audit");
+        let checkout = steps(&job)
+            .into_iter()
+            .find(|s| s.contains("uses: actions/checkout@"))
+            .unwrap_or_else(|| panic!("{workflow}: no checkout"));
+        assert!(
+            checkout.contains("\nfetch-depth: 0\n"),
+            "{workflow}: {checkout}"
+        );
+    }
 }
 
 #[test]
 fn the_audit_job_may_look_up_earlier_runs() {
-    let job = audit_job();
-    let permissions: Vec<&str> = job
-        .lines()
-        .skip_while(|l| *l != "    permissions:")
-        .skip(1)
-        .take_while(|l| l.starts_with("      ") && !l.starts_with("      - "))
-        .map(str::trim)
-        .filter(|l| !l.starts_with('#'))
-        .collect();
-    assert!(permissions.contains(&"actions: read"), "{permissions:?}");
+    for workflow in AUDIT_JOBS {
+        let job = job(workflow, "audit");
+        let permissions: Vec<&str> = job
+            .lines()
+            .skip_while(|l| *l != "    permissions:")
+            .skip(1)
+            .take_while(|l| l.starts_with("      ") && !l.starts_with("      - "))
+            .map(str::trim)
+            .filter(|l| !l.starts_with('#'))
+            .collect();
+        assert!(
+            permissions.contains(&"actions: read"),
+            "{workflow}: {permissions:?}"
+        );
+    }
+}
+
+#[test]
+fn release_yml_grants_the_release_audit_its_lookup() {
+    let job = job("release.yml", "custom-ci-gate");
+    assert!(
+        job.contains("\n    uses: ./.github/workflows/ci-gate.yml\n"),
+        "{job}"
+    );
+    assert!(job.contains("\n      actions: read\n"), "{job}");
 }
 
 #[test]
 fn the_audit_compares_against_the_baseline_ci_found() {
-    let steps = steps(&audit_job());
-    let baseline = steps
-        .iter()
-        .position(|s| s.contains("\nid: audit-baseline\n"))
-        .expect("no audit-baseline step");
-    let audit = steps
-        .iter()
-        .position(|s| s.contains("\nrun: scripts/audit-new-advisories.sh\n"))
-        .expect("no audit step");
-    assert!(
-        baseline < audit,
-        "the baseline must be found before the audit runs"
-    );
-
-    let step = &steps[baseline];
-    assert!(
-        step.contains("\nrun: scripts/audit-baseline.sh\n"),
-        "{step}"
-    );
-    assert!(step.contains("\nGH_TOKEN: ${{ github.token }}\n"), "{step}");
-    assert!(
-        step.contains("\nAUDIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}\n"),
-        "{step}"
-    );
-    let workflows = step
-        .lines()
-        .find_map(|l| l.strip_prefix("AUDIT_WORKFLOWS: "))
-        .expect("no AUDIT_WORKFLOWS");
-    for workflow in workflows.split(',') {
+    for workflow in AUDIT_JOBS {
+        let steps = steps(&job(workflow, "audit"));
+        let baseline = steps
+            .iter()
+            .position(|s| s.contains("\nid: audit-baseline\n"))
+            .unwrap_or_else(|| panic!("{workflow}: no audit-baseline step"));
+        let audit = steps
+            .iter()
+            .position(|s| s.contains("\nrun: scripts/audit-new-advisories.sh\n"))
+            .unwrap_or_else(|| panic!("{workflow}: no audit step"));
         assert!(
-            root().join(".github/workflows").join(workflow).is_file(),
-            "{workflow} does not exist"
+            baseline < audit,
+            "{workflow}: the baseline must be found before the audit runs"
+        );
+
+        let step = &steps[baseline];
+        assert!(
+            step.contains("\nrun: scripts/audit-baseline.sh\n"),
+            "{step}"
+        );
+        assert!(step.contains("\nGH_TOKEN: ${{ github.token }}\n"), "{step}");
+        assert!(
+            step.contains(
+                "\nAUDIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}\n"
+            ),
+            "{step}"
+        );
+        // Only workflows whose runs include the audit: ci.yml, which runs on
+        // pushes to main. (ci-gate.yml runs only on tags, which the baseline
+        // never looks for.) One that went green without auditing would make
+        // every commit it passed a baseline.
+        let workflows = step
+            .lines()
+            .find_map(|l| l.strip_prefix("AUDIT_WORKFLOWS: "))
+            .expect("no AUDIT_WORKFLOWS");
+        assert_eq!(workflows, "ci.yml", "{workflow}");
+
+        assert!(
+            steps[audit].contains("\nAUDIT_BASE: ${{ steps.audit-baseline.outputs.sha }}\n"),
+            "{workflow}: the audit must be handed the baseline: {}",
+            steps[audit]
         );
     }
-
-    assert!(
-        steps[audit].contains("\nAUDIT_BASE: ${{ steps.audit-baseline.outputs.sha }}\n"),
-        "the audit must be handed the baseline: {}",
-        steps[audit]
-    );
 }

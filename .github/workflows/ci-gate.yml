@@ -8,9 +8,10 @@ on:
         type: string
 
 # Called from release.yml, which declares contents: write for the release
-# itself. This gate only builds and tests, so it takes the minimum instead
-# of inheriting that. `gate` asks for `actions: read` on its own, to look up
-# whether this commit has already been checked.
+# itself. This gate only builds, tests and audits, so it takes the minimum
+# instead of inheriting that. `gate` and `audit` ask for `actions: read` on
+# their own, to look up earlier runs: `gate` whether this commit has already
+# been checked, `audit` the baseline to compare against.
 permissions:
   contents: read
 
@@ -108,3 +109,107 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Run tests
         run: cargo test --locked
+
+  # The dependency audit, on every release and never inherited -- the one
+  # check that a pass on this exact commit does not settle, since advisories
+  # are published while the commit stands still, and a release ships what is
+  # locked now. It is ci.yml's audit (see the job there): the lock at the
+  # tag against the last commit a successful ci.yml run passed on the default
+  # branch, other than this one (scripts/audit-baseline.sh), so a finding
+  # published since main last went green fails the release rather than
+  # shipping. A red audit fails custom-ci-gate, which release.yml's builds
+  # and `host` both need.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # scripts/audit-baseline.sh looks up the last successful run.
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Full history: the audit compares against the last commit CI passed
+          # on this branch, which can be any number of commits back.
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+
+      # Keyed on the newest release, so a new cargo-audit (which can be needed
+      # to parse newer advisories) replaces the cached binary instead of the
+      # first one ever installed being reused forever. Fails rather than
+      # proceed without a version: an empty one would make the key constant
+      # again, and pin whatever got cached under it.
+      - name: Resolve cargo-audit version
+        id: cargo-audit
+        run: |
+          set -euo pipefail
+          version=$(curl -fsS --max-time 30 -A 'foundry CI (https://github.com/xiphux/foundry)' \
+            https://crates.io/api/v1/crates/cargo-audit | jq -r '.crate.max_stable_version // empty')
+          if [ -z "$version" ]; then
+            echo "::error::Could not resolve the latest cargo-audit version from crates.io"
+            exit 1
+          fi
+          # Shape-check what a third party just handed us, before it reaches a
+          # cache key and a cargo argument. A version is digits and dots with
+          # an optional pre-release/build suffix; anything else is a wrong or
+          # tampered-with response and should stop the run rather than travel
+          # any further.
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::crates.io returned an implausible cargo-audit version: $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache cargo-audit
+        id: cargo-audit-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: ${{ runner.os }}-cargo-audit-${{ steps.cargo-audit.outputs.version }}
+
+      # The version goes through the environment rather than being expanded
+      # into the script: `${{ }}` is substituted as text before bash sees the
+      # line, so a value containing shell metacharacters would run as code.
+      # It comes from a crates.io response, which this workflow does not
+      # control.
+      - name: Install cargo-audit
+        if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
+        env:
+          CARGO_AUDIT_VERSION: ${{ steps.cargo-audit.outputs.version }}
+        run: cargo install cargo-audit --locked --force --version "$CARGO_AUDIT_VERSION"
+
+      # What the audit compares against: the last commit CI passed on the
+      # target branch -- on a pull request too, not the branch's current tip,
+      # which can be a push that failed. See scripts/audit-baseline.sh.
+      - name: Find the audit baseline
+        id: audit-baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_WORKFLOWS: ci.yml
+          AUDIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: scripts/audit-baseline.sh
+
+      # Checks Cargo.lock against the RustSec advisory database. Runs as its
+      # own job so a new advisory against a dependency does not read as a test
+      # failure, and so it reports even when the build matrix is red.
+      #
+      # A vulnerability or warning (unmaintained, unsound, yanked) this change
+      # ADDS fails the run, so an auto-merged update cannot bring one in
+      # unnoticed. One already on the base -- published against something
+      # already locked, often before any fix exists -- is printed as a warning
+      # instead: failing on those held every PR, related or not, and
+      # deadlocked two PRs that each fixed one, since each still carried the
+      # other's. scripts/audit-new-advisories.sh audits the lock at HEAD and
+      # at a baseline and compares: the last commit CI passed on the target
+      # branch, on a pull request as well as a push, so neither a push of
+      # several commits nor a PR onto a tip that failed can slip one in
+      # (scripts/audit-baseline.sh; hence `fetch-depth: 0` above).
+      - name: Audit dependencies
+        env:
+          AUDIT_BASE: ${{ steps.audit-baseline.outputs.sha }}
+        run: scripts/audit-new-advisories.sh

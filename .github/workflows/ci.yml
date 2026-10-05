@@ -256,9 +256,15 @@ jobs:
       - name: Check coverage
         run: cargo llvm-cov --locked --summary-only --fail-under-lines 72
 
+  # Unlike every other check here, this never defers to `gate`. An inherited
+  # pass vouches for content, and the audit's answer changes while the
+  # content stands still, as advisories are published. The pull request's run
+  # also audited GitHub's merge with main as it was then; a direct push
+  # reverting a fix in between leaves the merge's tree identical to the
+  # branch's and the finding back in it, and that merge would become the
+  # audit's next baseline (scripts/audit-baseline.sh) without ever having been
+  # audited. It builds nothing, so it is cheap to run every time.
   audit:
-    needs: gate
-    if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
