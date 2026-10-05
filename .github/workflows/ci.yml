@@ -265,6 +265,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The parent commit too: the audit compares against it.
+          fetch-depth: 2
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
@@ -317,11 +319,18 @@ jobs:
 
       # Checks Cargo.lock against the RustSec advisory database. Runs as its
       # own job so a new advisory against a dependency does not read as a test
-      # failure, and so it reports even when the build matrix is red. A new
-      # advisory against something already locked holds every Dependabot PR
-      # until it is dealt with, on purpose.
+      # failure, and so it reports even when the build matrix is red.
+      #
+      # A vulnerability or warning (unmaintained, unsound, yanked) this change
+      # ADDS fails the run, so an auto-merged update cannot bring one in
+      # unnoticed. One already on the base -- published against something
+      # already locked, often before any fix exists -- is printed as a warning
+      # instead: failing on those held every PR, related or not, and
+      # deadlocked two PRs that each fixed one, since each still carried the
+      # other's. scripts/audit-new-advisories.sh audits the lock at HEAD and
+      # at its first parent and compares, hence `fetch-depth: 2` above.
       - name: Audit dependencies
-        run: cargo audit --deny warnings
+        run: scripts/audit-new-advisories.sh
 
       # The other half of dependency hygiene: a crate still declared after the
       # code that used it went away. Nothing else notices — it builds, it
