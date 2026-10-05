@@ -11,10 +11,10 @@
 #
 # It audits Cargo.lock at HEAD and at a baseline commit and fails only on
 # findings HEAD has that the baseline does not. The baseline is $AUDIT_BASE,
-# which CI sets from scripts/audit-baseline.sh: on a pull request, the merge
-# commit's first parent (the target branch); on a push, the last commit a
-# successful CI run passed on that branch, so a push of several commits, or a
-# run that failed and was followed by another, cannot pass a finding nothing
+# which CI sets from scripts/audit-baseline.sh: the last commit a successful
+# CI run passed on the target branch, on a pull request as well as a push, so
+# a push of several commits, a run that failed and was followed by another, or
+# a pull request onto a tip that failed, cannot pass a finding nothing
 # compared against a state without it. Unset (a local run), the baseline is
 # HEAD's first parent; set but empty, there is none and every finding counts
 # as new.

@@ -322,19 +322,16 @@ jobs:
           CARGO_AUDIT_VERSION: ${{ steps.cargo-audit.outputs.version }}
         run: cargo install cargo-audit --locked --force --version "$CARGO_AUDIT_VERSION"
 
-      # What the audit compares against: on a pull request the target branch,
-      # on a push the last commit CI passed on this branch. See
-      # scripts/audit-baseline.sh.
+      # What the audit compares against: the last commit CI passed on the
+      # target branch -- on a pull request too, not the branch's current tip,
+      # which can be a push that failed. See scripts/audit-baseline.sh.
       - name: Find the audit baseline
         id: audit-baseline
         env:
           GH_TOKEN: ${{ github.token }}
           AUDIT_WORKFLOWS: ci.yml
-          AUDIT_BEFORE: ${{ github.event.before }}
           AUDIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          sha=$(scripts/audit-baseline.sh)
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+        run: scripts/audit-baseline.sh
 
       # Checks Cargo.lock against the RustSec advisory database. Runs as its
       # own job so a new advisory against a dependency does not read as a test
@@ -347,10 +344,10 @@ jobs:
       # instead: failing on those held every PR, related or not, and
       # deadlocked two PRs that each fixed one, since each still carried the
       # other's. scripts/audit-new-advisories.sh audits the lock at HEAD and
-      # at a baseline and compares: the target branch on a pull request, and
-      # on a push the last commit CI passed on that branch, so a push of
-      # several commits cannot slip one in (scripts/audit-baseline.sh; hence
-      # `fetch-depth: 0` above).
+      # at a baseline and compares: the last commit CI passed on the target
+      # branch, on a pull request as well as a push, so neither a push of
+      # several commits nor a PR onto a tip that failed can slip one in
+      # (scripts/audit-baseline.sh; hence `fetch-depth: 0` above).
       - name: Audit dependencies
         env:
           AUDIT_BASE: ${{ steps.audit-baseline.outputs.sha }}
