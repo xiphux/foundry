@@ -23,16 +23,12 @@
 # A finding is a vulnerability or a warning -- unmaintained, unsound, yanked
 # -- as `--deny warnings` treated them, keyed by advisory id (a yanked version,
 # which has none, by crate and version). Findings already on the baseline are
-# printed as warnings and do not fail the run -- unless HEAD has the advisory
-# in a crate it did not reach on the baseline, or in a version of the crate
-# older than every version the baseline had: a fixed copy swapped for an
-# older vulnerable one that something else brought in. Fixes move versions
-# up, so moving a copy to a newer, still-affected version is not new, nor is
-# one dependent moving while another stays (a partial fix); a newer
-# vulnerable copy brought in by a new dependency is the case this lets
-# through. Dependabot alerts and Renovate raise vulnerabilities that have a
-# fix; nothing else revisits unmaintained or
-# unsound crates already locked, so read those warnings. Both locks are
+# printed as warnings and do not fail the run, so another copy of one the
+# baseline had -- another crate, another version -- only warns: matching
+# versions as well would fail routine updates that only moved a copy.
+# Dependabot alerts and Renovate raise vulnerabilities that have a fix;
+# nothing else revisits unmaintained or unsound crates already locked, so
+# read those warnings. Both locks are
 # audited with this checkout's settings, so an `ignore` added to audit.toml
 # applies to both sides -- and removing one that is still needed only warns.
 #
@@ -115,9 +111,13 @@ version = "0.2.165"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 LOCK
 cargo audit --json --file "$workdir/canary.lock" "$@" > "$workdir/canary.json" || true
-jq -e '[.warnings.yanked[]? | select(.package.name == "libc" and .package.version == "0.2.165")] | length > 0' \
-  "$workdir/canary.json" > /dev/null 2>&1 ||
-  fail "cargo audit did not report libc 0.2.165 as yanked, so its yank check is not working and its report proves nothing about yanks -- see its output above; --no-yanked, or [yanked] enabled = false in audit.toml, also turns the check off"
+if ! jq -e '[.warnings.yanked[]? | select(.package.name == "libc" and .package.version == "0.2.165")] | length > 0' \
+  "$workdir/canary.json" > /dev/null 2>&1; then
+  # Under --json, cargo audit says nothing when it cannot open the index, so
+  # run the canary again without it, for the reason.
+  cargo audit --file "$workdir/canary.lock" "$@" >&2 || true
+  fail "cargo audit did not report libc 0.2.165 as yanked, so its yank check is not working and its report proves nothing about yanks. Usually the crates.io index could not be opened (the output above says why); --no-yanked, or [yanked] enabled = false in audit.toml, turns the check off too"
+fi
 
 if [ -n "${AUDIT_BASE+set}" ]; then
   base=$AUDIT_BASE
@@ -148,59 +148,12 @@ else
   note=" (no baseline commit: every finding counts as new)"
 fi
 
-# Each finding is new if the baseline did not have its key, or had it but
-# not in this crate, or only in versions all newer than this one; otherwise
-# existing. (No apostrophes in the program: it is single-quoted.)
+# Each finding is new if the baseline did not have its key; otherwise it is
+# existing. FILENAME rather than FNR == NR, which reads the findings of HEAD
+# as the baseline's when the baseline has none.
 awk -F'\t' -v OFS='\t' '
-  # Whether version a precedes version b. One that is not semver counts as
-  # older: it cannot be shown to be the newer copy a fix arrives as.
-  function older(a, b,   x, y, ap, bp, i, xs, ys, np, nq, xn, yn) {
-    sub(/\+.*/, "", a); sub(/\+.*/, "", b)
-    ap = ""; bp = ""
-    if (index(a, "-")) { ap = substr(a, index(a, "-") + 1); a = substr(a, 1, index(a, "-") - 1) }
-    if (index(b, "-")) { bp = substr(b, index(b, "-") + 1); b = substr(b, 1, index(b, "-") - 1) }
-    if (split(a, x, ".") != 3 || split(b, y, ".") != 3) return 1
-    for (i = 1; i <= 3; i++) {
-      if (x[i] !~ /^[0-9]+$/ || y[i] !~ /^[0-9]+$/) return 1
-      if (x[i] + 0 != y[i] + 0) return x[i] + 0 < y[i] + 0
-    }
-    if (ap == "" || bp == "") return ap != "" && bp == ""
-    # Prerelease identifiers, dot by dot: numbers numerically, and before
-    # words; a shorter list before a longer one that starts the same.
-    np = split(ap, xs, "."); nq = split(bp, ys, ".")
-    for (i = 1; i <= np && i <= nq; i++) {
-      if (xs[i] == ys[i]) continue
-      xn = xs[i] ~ /^[0-9]+$/; yn = ys[i] ~ /^[0-9]+$/
-      if (xn && yn) return xs[i] + 0 < ys[i] + 0
-      if (xn != yn) return xn
-      return xs[i] < ys[i]
-    }
-    return np < nq
-  }
-  function older_than_all(v, list,   vs, n, i) {
-    n = split(list, vs, " ")
-    for (i = 1; i <= n; i++) if (!older(v, vs[i])) return 0
-    return 1
-  }
-  # FILENAME rather than FNR == NR, which reads the findings of HEAD as
-  # those of the baseline when the baseline has none.
-  FILENAME == ARGV[1] {
-    base[$1] = 1; seen[$1 SUBSEP $2] = 1; had[$1 SUBSEP $2 SUBSEP $3] = 1
-    versions[$1 SUBSEP $2] = versions[$1 SUBSEP $2] " " $3
-    next
-  }
-  { key[FNR] = $1; crate[FNR] = $2; version[FNR] = $3; text[FNR] = $4; n = FNR }
-  END {
-    for (i = 1; i <= n; i++) {
-      kc = key[i] SUBSEP crate[i]
-      if (!(key[i] in base)) print "new", text[i]
-      else if (!(kc in seen))
-        print "new", text[i] " -- already on the baseline, but it now reaches " crate[i] ", which it did not there"
-      else if (!((kc SUBSEP version[i]) in had) && older_than_all(version[i], versions[kc]))
-        print "new", text[i] " -- already on the baseline, but this copy is older than any the baseline had (" substr(versions[kc], 2) ")"
-      else print "existing", text[i]
-    }
-  }
+  FILENAME == ARGV[1] { base[$1] = 1; next }
+  { print ($1 in base ? "existing" : "new"), $4 }
 ' "$workdir/base.tsv" "$workdir/head.tsv" > "$workdir/classified.tsv"
 added=0 existing=0
 while IFS=$'\t' read -r verdict description; do

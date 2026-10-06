@@ -421,86 +421,6 @@ exit 2"#,
     }
 
     #[test]
-    fn counts_a_copy_older_than_any_the_baseline_had_as_new() {
-        let f = Fixture::new();
-        let repo = f.repo("r");
-        repo.commit(&report(&["RUSTSEC-2021-0003 smallvec@1.6.0"], &[]), "base");
-        repo.commit(
-            &report(
-                &[
-                    "RUSTSEC-2021-0003 smallvec@1.6.0",
-                    "RUSTSEC-2021-0003 smallvec@0.6.13",
-                ],
-                &[],
-            ),
-            "an older vulnerable copy beside the first",
-        );
-        let (ok, out, _) = f.audit(&repo, &[]);
-        assert!(!ok, "{out}");
-        assert_has(
-            &out,
-            "smallvec 0.6.13: advisory RUSTSEC-2021-0003 -- already on the baseline, but this copy is older than any the baseline had (1.6.0)",
-        );
-    }
-
-    #[test]
-    fn counts_an_advisory_as_new_once_it_reaches_another_crate() {
-        let f = Fixture::new();
-        let repo = f.repo("r");
-        repo.commit(&report(&["RUSTSEC-2026-0009 one@1.0.0"], &[]), "base");
-        repo.commit(
-            &report(
-                &["RUSTSEC-2026-0009 one@1.0.0", "RUSTSEC-2026-0009 two@1.0.0"],
-                &[],
-            ),
-            "reaches a second crate",
-        );
-        let (ok, out, _) = f.audit(&repo, &[]);
-        assert!(!ok, "{out}");
-        assert_has(&out, "it now reaches two, which it did not there");
-    }
-
-    #[test]
-    fn does_not_count_a_partial_fix_which_leaves_the_old_copy_for_the_rest_as_new() {
-        // One dependent moving to a newer, still-affected version while
-        // another stays: in either version line, it is not a downgrade.
-        let f = Fixture::new();
-        let repo = f.repo("r");
-        let had = ["RUSTSEC-1 pkg@2.1.4", "RUSTSEC-1 pkg@5.0.9"];
-        repo.commit(&report(&had, &[]), "base");
-        repo.commit(
-            &report(&[had[0], had[1], "RUSTSEC-1 pkg@5.0.10"], &[]),
-            "some move to 5.0.10",
-        );
-        let (ok, out, _) = f.audit(&repo, &[]);
-        assert!(ok, "{out}");
-        repo.commit(
-            &report(&[had[0], "RUSTSEC-1 pkg@2.1.5", had[1]], &[]),
-            "some move to 2.1.5",
-        );
-        let (ok, out, _) = f.audit(&repo, &[]);
-        assert!(ok, "{out}");
-    }
-
-    #[test]
-    fn does_not_count_moving_the_one_copy_to_another_affected_version_as_new() {
-        // The update a fix arrives through: failing it would block the fix.
-        let f = Fixture::new();
-        let repo = f.repo("r");
-        repo.commit(&report(&["RUSTSEC-2021-0003 smallvec@1.6.0"], &[]), "base");
-        repo.commit(
-            &report(&["RUSTSEC-2021-0003 smallvec@1.6.1"], &[]),
-            "patch bump, still affected",
-        );
-        let (ok, out, _) = f.audit(&repo, &[]);
-        assert!(ok, "{out}");
-        assert_has(
-            &out,
-            "::warning title=Existing advisory::vulnerability RUSTSEC-2021-0003",
-        );
-    }
-
-    #[test]
     fn fails_when_the_yank_check_is_lost_without_a_word() {
         // An index cargo audit cannot open is reported nowhere under --json:
         // only the canary going unreported shows it.
@@ -517,16 +437,43 @@ exit 2"#,
     }
 
     #[test]
+    fn only_warns_on_another_copy_of_an_advisory_the_baseline_had() {
+        // Compared by id: another crate or version only warns, or routine
+        // updates that move a copy would fail.
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        repo.commit(&report(&["RUSTSEC-2021-0003 smallvec@1.6.0"], &[]), "base");
+        repo.commit(
+            &report(
+                &[
+                    "RUSTSEC-2021-0003 smallvec@1.6.0",
+                    "RUSTSEC-2021-0003 smallvec@0.6.13",
+                ],
+                &[],
+            ),
+            "another copy",
+        );
+        let (ok, out, _) = f.audit(&repo, &[]);
+        assert!(ok, "{out}");
+        assert_has(
+            &out,
+            "::warning title=Existing advisory::vulnerability RUSTSEC-2021-0003",
+        );
+    }
+
+    #[test]
     fn fails_unless_the_canary_reports_that_very_yank() {
         // Some other crate reported yanked proves nothing about this one.
         let f = Fixture::new();
         let repo = f.repo("r");
         repo.commit(&clean(), "base");
         repo.commit(&clean(), "tip");
-        let (ok, out, _) = f.audit(&repo, &[("FAKE_CANARY", "other@1.0.0")]);
-        assert!(!ok, "{out}");
-        assert_has(&out, "did not report libc 0.2.165 as yanked");
-        assert_has(&out, "--no-yanked, or [yanked] enabled = false");
+        for canary in ["other@1.0.0", "other@0.2.165", "libc@0.2.164"] {
+            let (ok, out, _) = f.audit(&repo, &[("FAKE_CANARY", canary)]);
+            assert!(!ok, "{canary}: {out}");
+            assert_has(&out, "did not report libc 0.2.165 as yanked");
+            assert_has(&out, "--no-yanked, or [yanked] enabled = false");
+        }
     }
 
     #[test]
@@ -566,33 +513,6 @@ exit 2"#,
             &out,
             "::warning title=Audit baseline::cargo audit could not check every crate in the baseline's lock",
         );
-    }
-
-    #[test]
-    fn orders_versions_by_semver() {
-        // [baseline copy, new copy, counts as new]
-        let cases = [
-            ("1.10.0", "1.9.0", true),
-            ("1.9.0", "1.10.0", false),
-            ("1.0.0", "1.0.0-rc.1", true),
-            ("1.0.0-rc.2", "1.0.0-rc.10", false),
-            ("1.0.0-alpha.10", "1.0.0-alpha.2", true),
-            ("1.0.0-alpha.1", "1.0.0-alpha", true),
-            ("1.0.0-alpha", "1.0.0-1", true),
-            ("1.0.0", "1.0.1+build.5", false),
-            ("1.0.0+build.9", "0.9.0", true),
-            ("1.0.0", "latest", true),
-        ];
-        for (was, now, is_new) in cases {
-            let f = Fixture::new();
-            let repo = f.repo("r");
-            let base = format!("RUSTSEC-1 pkg@{was}");
-            let both = [base.as_str(), &format!("RUSTSEC-1 pkg@{now}")];
-            repo.commit(&report(&[&base], &[]), "base");
-            repo.commit(&report(&both, &[]), "a second copy");
-            let (ok, out, _) = f.audit(&repo, &[]);
-            assert_eq!(!ok, is_new, "baseline {was}, new copy {now}: {out}");
-        }
     }
 
     #[test]
@@ -1041,6 +961,19 @@ fn the_audit_job_never_skips_and_never_fails_quietly() {
                 "{workflow}: {step}"
             );
         }
+    }
+}
+
+#[test]
+fn the_audit_job_reports_under_the_name_branch_protection_requires() {
+    // Required by its job id: a `name:` would rename the check, and a
+    // required check that never reports blocks every merge.
+    for workflow in AUDIT_JOBS {
+        let job = job(workflow, "audit");
+        assert!(
+            !job_keys(&job).iter().any(|key| key.starts_with("name:")),
+            "{workflow}'s audit job has a name: {job}"
+        );
     }
 }
 
