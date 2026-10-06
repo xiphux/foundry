@@ -91,11 +91,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # rustup is preinstalled on the runner; see ci.yml's test job for why
+      # this is a step of our own rather than dtolnay/rust-toolchain.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
-        with:
-          toolchain: stable
-          components: clippy
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update --component clippy
+          rustup default stable
+          echo CARGO_INCREMENTAL=0 >> "$GITHUB_ENV"
       # rust-cache for the reason ci.yml's test job gives: a hand-rolled key
       # without the Rust version goes stale every stable release and, having
       # "hit", never saves the rebuilt target/.
@@ -142,10 +145,14 @@ jobs:
           # on this branch, which can be any number of commits back.
           fetch-depth: 0
 
+      # rustup is preinstalled on the runner; see ci.yml's test job for why
+      # this is a step of our own rather than dtolnay/rust-toolchain.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
-        with:
-          toolchain: stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          echo CARGO_INCREMENTAL=0 >> "$GITHUB_ENV"
 
       # Keyed on the newest release, so a new cargo-audit (which can be needed
       # to parse newer advisories) replaces the cached binary instead of the
