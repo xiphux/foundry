@@ -101,18 +101,27 @@ jq --arg w "$workflow" --arg b "$branch" --arg s "$status" \
             // cargo audit --json --file <lock> ...: the lock is the report.
             // Each call's arguments are logged, one line per call;
             // FAKE_CARGO_STDERR is printed to stderr, as cargo audit reports
-            // what it could not check.
+            // what it could not check -- for every lock, or only for one
+            // whose path ends in FAKE_CARGO_STDERR_FOR. FAKE_CANARY sets
+            // what the canary reports yanked: libc 0.2.165 by default,
+            // `none`, or another crate.
             fake(
                 "cargo",
                 r#"echo "$*" >> "$FAKE_CARGO_LOG"
 [ -n "${FAKE_CARGO_GARBAGE:-}" ] && { echo "error: couldn't fetch advisory database"; exit 1; }
-[ -n "${FAKE_CARGO_STDERR:-}" ] && echo "$FAKE_CARGO_STDERR" >&2
+file=""; prev=""; for a; do [ "$prev" = --file ] && file=$a; prev=$a; done
+if [ -n "${FAKE_CARGO_STDERR:-}" ]; then
+  case $file in *"${FAKE_CARGO_STDERR_FOR:-}") echo "$FAKE_CARGO_STDERR" >&2 ;; esac
+fi
 while [ $# -gt 0 ]; do
   if [ "$1" = --file ]; then
     # The canary: a yank check that works reports libc 0.2.165.
     case $2 in */canary.lock)
-      [ -n "${FAKE_CANARY_BROKEN:-}" ] && yanked='' ||
-        yanked='{"kind":"yanked","advisory":null,"package":{"name":"libc","version":"0.2.165"}}'
+      c=${FAKE_CANARY:-libc@0.2.165}
+      case $c in
+        none) yanked='' ;;
+        *) yanked="{\"kind\":\"yanked\",\"advisory\":null,\"package\":{\"name\":\"${c%@*}\",\"version\":\"${c#*@}\"}}" ;;
+      esac
       echo "{\"vulnerabilities\":{\"found\":false,\"count\":0,\"list\":[]},\"warnings\":{\"yanked\":[$yanked]}}"
       exit 1 ;;
     esac
@@ -166,6 +175,16 @@ exit 2"#,
         /// Runs audit-new-advisories.sh; `AUDIT_BASE` is unset unless `env`
         /// sets it. Returns success, the output, and cargo's logged calls.
         fn audit(&self, repo: &Repo, env: &[(&str, &str)]) -> (bool, String, String) {
+            self.audit_with(repo, env, &[])
+        }
+
+        /// Runs audit-new-advisories.sh with arguments.
+        fn audit_with(
+            &self,
+            repo: &Repo,
+            env: &[(&str, &str)],
+            args: &[&str],
+        ) -> (bool, String, String) {
             let log = self.scratch.join(format!(
                 "cargo-{}.log",
                 repo.dir.file_name().unwrap().to_string_lossy()
@@ -174,6 +193,7 @@ exit 2"#,
             let output = self
                 .command("bash")
                 .arg(root().join("scripts/audit-new-advisories.sh"))
+                .args(args)
                 .current_dir(&repo.dir)
                 .env("FAKE_CARGO_LOG", &log)
                 .envs(env.iter().copied())
@@ -488,12 +508,91 @@ exit 2"#,
         let repo = f.repo("r");
         repo.commit(&clean(), "base");
         repo.commit(&clean(), "tip");
-        let (ok, out, _) = f.audit(&repo, &[("FAKE_CANARY_BROKEN", "1")]);
+        let (ok, out, _) = f.audit(&repo, &[("FAKE_CANARY", "none")]);
         assert!(!ok, "{out}");
         assert_has(
             &out,
             "::error title=Audit failed::cargo audit did not report libc 0.2.165 as yanked",
         );
+    }
+
+    #[test]
+    fn fails_unless_the_canary_reports_that_very_yank() {
+        // Some other crate reported yanked proves nothing about this one.
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        repo.commit(&clean(), "base");
+        repo.commit(&clean(), "tip");
+        let (ok, out, _) = f.audit(&repo, &[("FAKE_CANARY", "other@1.0.0")]);
+        assert!(!ok, "{out}");
+        assert_has(&out, "did not report libc 0.2.165 as yanked");
+        assert_has(&out, "--no-yanked, or [yanked] enabled = false");
+    }
+
+    #[test]
+    fn passes_its_arguments_to_every_run() {
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        repo.commit(&clean(), "base");
+        repo.commit(&clean(), "tip");
+        let (ok, out, log) = f.audit_with(&repo, &[], &["--ignore", "RUSTSEC-0000-0000"]);
+        assert!(ok, "{out}");
+        assert_eq!(log.lines().count(), 3, "{log}");
+        for call in log.lines() {
+            assert!(call.ends_with("--ignore RUSTSEC-0000-0000"), "{log}");
+        }
+    }
+
+    #[test]
+    fn only_warns_when_the_baseline_has_a_crate_it_cannot_look_up() {
+        // A crate crates.io has since deleted: failing on it would fail the
+        // change that removes it, and every one after.
+        let f = Fixture::new();
+        let repo = f.repo("r");
+        repo.commit(&clean(), "base");
+        repo.commit(&clean(), "tip");
+        let (ok, out, _) = f.audit(
+            &repo,
+            &[
+                (
+                    "FAKE_CARGO_STDERR",
+                    "error: couldn't check if the package is yanked: not found: No such crate in crates.io index: gone",
+                ),
+                ("FAKE_CARGO_STDERR_FOR", "/base.lock"),
+            ],
+        );
+        assert!(ok, "{out}");
+        assert_has(
+            &out,
+            "::warning title=Audit baseline::cargo audit could not check every crate in the baseline's lock",
+        );
+    }
+
+    #[test]
+    fn orders_versions_by_semver() {
+        // [baseline copy, new copy, counts as new]
+        let cases = [
+            ("1.10.0", "1.9.0", true),
+            ("1.9.0", "1.10.0", false),
+            ("1.0.0", "1.0.0-rc.1", true),
+            ("1.0.0-rc.2", "1.0.0-rc.10", false),
+            ("1.0.0-alpha.10", "1.0.0-alpha.2", true),
+            ("1.0.0-alpha.1", "1.0.0-alpha", true),
+            ("1.0.0-alpha", "1.0.0-1", true),
+            ("1.0.0", "1.0.1+build.5", false),
+            ("1.0.0+build.9", "0.9.0", true),
+            ("1.0.0", "latest", true),
+        ];
+        for (was, now, is_new) in cases {
+            let f = Fixture::new();
+            let repo = f.repo("r");
+            let base = format!("RUSTSEC-1 pkg@{was}");
+            let both = [base.as_str(), &format!("RUSTSEC-1 pkg@{now}")];
+            repo.commit(&report(&[&base], &[]), "base");
+            repo.commit(&report(&both, &[]), "a second copy");
+            let (ok, out, _) = f.audit(&repo, &[]);
+            assert_eq!(!ok, is_new, "baseline {was}, new copy {now}: {out}");
+        }
     }
 
     #[test]

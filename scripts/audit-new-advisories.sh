@@ -39,7 +39,8 @@
 # The yanked check reads the crates.io index, and loses it two ways without
 # failing, as `--deny warnings` did too. A crate it cannot look up is
 # reported on stderr -- "couldn't check if the package is yanked" -- and
-# skipped; that message fails the run here. And an index it cannot open at
+# skipped; that message fails the run here, on HEAD's lock (on the
+# baseline's it warns: see findings below). And an index it cannot open at
 # all is reported nowhere under --json, and the whole check is skipped; so a
 # canary lock holding a version known to be yanked is audited too, and the
 # run fails unless that yank is reported. The audit job builds nothing, so
@@ -51,7 +52,8 @@
 # the yank check to the index entries already cached -- HEAD's crates only
 # -- so every crate the change removed would fail to look up.
 #
-# Arguments are passed to both `cargo audit` runs.
+# Arguments are passed to each `cargo audit` run: HEAD's, the canary's and
+# the baseline's.
 set -euo pipefail
 
 workdir=$(mktemp -d)
@@ -64,12 +66,13 @@ fail() {
   exit 1
 }
 
-# Writes one line per finding to $2 -- key <TAB> crate <TAB> version <TAB>
-# description -- for the lock at $1. The rest of the arguments go to cargo
-# audit.
+# Writes one line per finding to $3 -- key <TAB> crate <TAB> version <TAB>
+# description -- for the lock at $2. $1 is `strict` or `lenient`: how a
+# crate whose yank status could not be looked up is taken. The rest of the
+# arguments go to cargo audit.
 findings() {
-  local lockfile=$1 out=$2 report=$workdir/report.json errors=$workdir/stderr
-  shift 2
+  local mode=$1 lockfile=$2 out=$3 report=$workdir/report.json errors=$workdir/stderr
+  shift 3
   # cargo audit exits non-zero when it finds anything, so the status says
   # nothing; only output that is not a report -- the advisory database
   # unreachable, a lock it cannot parse -- is an error. Its stderr is kept
@@ -78,8 +81,16 @@ findings() {
   cat "$errors" >&2
   jq -e '.vulnerabilities and has("warnings")' "$report" > /dev/null 2>&1 ||
     fail "cargo audit produced no report for $lockfile"
+  # On HEAD's lock, a crate whose yank status is unknown fails the run. On
+  # the baseline's it is only a warning: a crate crates.io has since deleted
+  # -- a malware takedown -- cannot be looked up, and failing on it would
+  # fail the very change that removes it, and every change after, since the
+  # baseline could never move past it. A baseline missing some of its yanks
+  # can only make more of HEAD's findings count as new, never fewer.
   if grep -q "couldn't check if the package is yanked" "$errors"; then
-    fail "cargo audit could not check $lockfile for yanked crates (see above)"
+    [ "$mode" = strict ] &&
+      fail "cargo audit could not check $lockfile for yanked crates (see above)"
+    echo "::warning title=Audit baseline::cargo audit could not check every crate in the baseline's lock for yanks (see above); its yanked crates may count as new here"
   fi
   jq -r '
     def described: "\(.package.name) \(.package.version)" +
@@ -92,7 +103,7 @@ findings() {
   ' "$report" | sort -u > "$out"
 }
 
-findings Cargo.lock "$workdir/head.tsv" "$@"
+findings strict Cargo.lock "$workdir/head.tsv" "$@"
 
 # The canary: libc 0.2.165 is yanked, so a working yank check reports it.
 cat > "$workdir/canary.lock" << 'LOCK'
@@ -103,10 +114,10 @@ name = "libc"
 version = "0.2.165"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 LOCK
-cargo audit --json --file "$workdir/canary.lock" "$@" > "$workdir/canary.json" 2> /dev/null || true
+cargo audit --json --file "$workdir/canary.lock" "$@" > "$workdir/canary.json" || true
 jq -e '[.warnings.yanked[]? | select(.package.name == "libc" and .package.version == "0.2.165")] | length > 0' \
   "$workdir/canary.json" > /dev/null 2>&1 ||
-  fail "cargo audit did not report libc 0.2.165 as yanked, so its yank check is not working and its report proves nothing about yanks"
+  fail "cargo audit did not report libc 0.2.165 as yanked, so its yank check is not working and its report proves nothing about yanks -- see its output above; --no-yanked, or [yanked] enabled = false in audit.toml, also turns the check off"
 
 if [ -n "${AUDIT_BASE+set}" ]; then
   base=$AUDIT_BASE
@@ -130,7 +141,7 @@ if [ -n "$base" ]; then
     fail "the baseline commit $base is not in this clone"
   git show "$base:Cargo.lock" > "$workdir/base.lock" ||
     fail "Cargo.lock is not in the baseline commit $base"
-  findings "$workdir/base.lock" "$workdir/base.tsv" "$@"
+  findings lenient "$workdir/base.lock" "$workdir/base.tsv" "$@"
   note=" against ${base:0:12}"
 else
   : > "$workdir/base.tsv"
@@ -143,7 +154,7 @@ fi
 awk -F'\t' -v OFS='\t' '
   # Whether version a precedes version b. One that is not semver counts as
   # older: it cannot be shown to be the newer copy a fix arrives as.
-  function older(a, b,   x, y, ap, bp, i) {
+  function older(a, b,   x, y, ap, bp, i, xs, ys, np, nq, xn, yn) {
     sub(/\+.*/, "", a); sub(/\+.*/, "", b)
     ap = ""; bp = ""
     if (index(a, "-")) { ap = substr(a, index(a, "-") + 1); a = substr(a, 1, index(a, "-") - 1) }
@@ -154,7 +165,17 @@ awk -F'\t' -v OFS='\t' '
       if (x[i] + 0 != y[i] + 0) return x[i] + 0 < y[i] + 0
     }
     if (ap == "" || bp == "") return ap != "" && bp == ""
-    return ap < bp
+    # Prerelease identifiers, dot by dot: numbers numerically, and before
+    # words; a shorter list before a longer one that starts the same.
+    np = split(ap, xs, "."); nq = split(bp, ys, ".")
+    for (i = 1; i <= np && i <= nq; i++) {
+      if (xs[i] == ys[i]) continue
+      xn = xs[i] ~ /^[0-9]+$/; yn = ys[i] ~ /^[0-9]+$/
+      if (xn && yn) return xs[i] + 0 < ys[i] + 0
+      if (xn != yn) return xn
+      return xs[i] < ys[i]
+    }
+    return np < nq
   }
   function older_than_all(v, list,   vs, n, i) {
     n = split(list, vs, " ")
