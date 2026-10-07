@@ -12,10 +12,8 @@
 	// remaining PR needed a human to ask for a rebase. Renovate raises a major
 	// and a minor together, and rebases whatever falls behind.
 	//
-	// .github/workflows/renovate-nudge.yml is the one workaround it needs: jobs
-	// are scheduled every four hours on this plan, and a merge Renovate makes
-	// enqueues no job of its own, so nothing would rebase the PRs each merge
-	// leaves behind.
+	// Updates arrive on a weekly timetable rather than as they are released:
+	// see `schedule` below and the groups in packageRules.
 	$schema: 'https://docs.renovatebot.com/renovate-schema.json',
 
 	extends: ['config:recommended'],
@@ -41,6 +39,41 @@
 	// it. Majors are what to watch, since one nobody merges holds its slot
 	// indefinitely.
 	prConcurrentLimit: 5,
+
+	// The weekly timetable, and the slot for anything the groups in
+	// packageRules do not claim: Sunday, 00:00-05:59 UTC. Each group has a day
+	// of its own --
+	//
+	//   Mon  lock file maintenance     Thu  test and build
+	//   Tue  aws                       Fri  production dependencies
+	//   Wed  lint and format           Sat  github actions
+	//   Sun  everything else: majors, 0.x packages, pnpm, images
+	//
+	// -- the same days in every repository that has the group. This is where
+	// the CI minutes go: before it, every release that cleared the cooldown
+	// was a pull request of its own, and the AWS SDK, which publishes almost
+	// daily, opened ten to twelve in 19 days in each repository using it.
+	// Replayed against ten days of real updates, this timetable raises about
+	// 60% fewer pull requests, and every one saved is a CI run (and, where
+	// the default branch deploys, a deploy).
+	//
+	// A day per group rather than one weekly slot for all of them, because of
+	// the up-to-date rule in branch protection: open together, every merge
+	// would put the others behind and re-run their CI, so six pull requests
+	// would cost 6+5+4+3+2+1 runs. Spread out, one is usually open at a time.
+	//
+	// Six hours, because Mend's free plan runs Renovate about every four, so a
+	// slot always holds a run. Wider would let more runs fall in it, and each
+	// can open another pull request for releases that aged in the meantime.
+	// Outside its slot a branch is still rebased and updated
+	// (`updateNotScheduled`), so nothing already open waits for next week. To
+	// take something early, tick it under "Awaiting Schedule" on the
+	// dependency dashboard.
+	//
+	// Nothing hurries Renovate between its runs any more. A workflow used to
+	// wake it after every merge so the next pull request rebased in minutes
+	// rather than hours; with one or two open a week, hours are fine.
+	schedule: ['* 0-5 * * 0'],
 
 	automergeStrategy: 'merge',
 	// GitHub's own auto-merge, so a PR lands the moment its checks pass. This
@@ -121,16 +154,105 @@
 			automerge: false,
 		},
 
-		// No group for the routine crate updates, matching every other
-		// repository here: one failing update would otherwise hold every other
-		// update in the batch for as long as it took to fix, which is the cost
-		// grouping was refused for elsewhere. Dependabot grouped them because
-		// its auto-merge could land only one PR per rebase cycle, and each
-		// cycle needed a human; renovate-nudge.yml removed that constraint.
+		// The groups, each in its slot in the timetable (see `schedule`). Later
+		// rules win, so the ones matching by name take packages out of the two
+		// that match by dependency type. Lists are the same in every repository,
+		// names it does not use included, so a package lands in the same group
+		// wherever it turns up.
 		//
-		// The cost is real and worth naming: every crate update edits
-		// Cargo.lock and re-runs a four-way OS matrix, so separate PRs mean
-		// more CI. Group them again if that bill ever outweighs the isolation.
+		// Every group leaves out 0.x packages (the negated matchCurrentVersion).
+		// A 0.x minor does not auto-merge (see above), and a group auto-merges
+		// only if every update in it does, so one would hold its whole group
+		// open; left out, a 0.x package raises its own pull request on Sunday.
+		//
+		// The cost of batching: an update that fails CI holds the rest of its
+		// group until it is fixed, or excluded by a rule of its own. Majors are
+		// never grouped, and a security fix ignores all of this -- Renovate
+		// applies `vulnerabilityAlerts` after these rules, and with `force`.
+		{
+			groupName: 'production dependencies',
+			// npm and Cargo; pep621.
+			matchDepTypes: ['dependencies', 'project.dependencies'],
+			matchUpdateTypes: ['minor', 'patch'],
+			matchCurrentVersion: '!/^v?0\\./',
+			schedule: ['* 0-5 * * 5'],
+		},
+		{
+			groupName: 'test and build',
+			// npm; Cargo; pep621's [dependency-groups], extras and build backend.
+			matchDepTypes: [
+				'devDependencies',
+				'dev-dependencies',
+				'build-dependencies',
+				'dependency-groups',
+				'project.optional-dependencies',
+				'build-system.requires',
+			],
+			matchUpdateTypes: ['minor', 'patch'],
+			matchCurrentVersion: '!/^v?0\\./',
+			schedule: ['* 0-5 * * 4'],
+		},
+		{
+			groupName: 'lint and format',
+			matchPackageNames: [
+				'eslint',
+				'eslint-*',
+				'@eslint/**',
+				'@*/eslint-*',
+				'typescript-eslint',
+				'@typescript-eslint/**',
+				'globals',
+				'prettier',
+				'prettier-*',
+				'knip',
+				'lint-staged',
+				'husky',
+				'publint',
+				'ruff',
+				'deptry',
+				'pre-commit',
+				'pre-commit/pre-commit-hooks',
+			],
+			matchUpdateTypes: ['minor', 'patch'],
+			matchCurrentVersion: '!/^v?0\\./',
+			schedule: ['* 0-5 * * 3'],
+		},
+		{
+			groupName: 'aws',
+			matchPackageNames: [
+				'@aws-sdk/**',
+				'aws-cdk',
+				'aws-cdk-lib',
+				'cdk-nag',
+				'aws-xray-sdk-core',
+				'@types/aws-lambda',
+				'aws-ses-v2-local',
+				'amazon/dynamodb-local',
+				'boto3',
+				'botocore',
+			],
+			matchUpdateTypes: ['minor', 'patch'],
+			matchCurrentVersion: '!/^v?0\\./',
+			schedule: ['* 0-5 * * 2'],
+		},
+		{
+			groupName: 'github actions',
+			matchManagers: ['github-actions'],
+			matchUpdateTypes: ['minor', 'patch', 'digest'],
+			matchCurrentVersion: '!/^v?0\\./',
+			schedule: ['* 0-5 * * 6'],
+		},
+		{
+			// zizmor-action runs only zizmor versions it knows, and the version it
+			// runs (its `version:` input, tracked as the zizmor image) is in the
+			// group above. The action is 0.x, so the exclusion would send it to
+			// Sunday, a day after a version it may not know yet, so it is kept
+			// with the group.
+			groupName: 'github actions',
+			matchPackageNames: ['zizmorcore/zizmor-action'],
+			matchUpdateTypes: ['minor', 'patch', 'digest'],
+			schedule: ['* 0-5 * * 6'],
+		},
 	],
 
 	// Renovate's own vulnerability source, from osv.dev, rather than the
