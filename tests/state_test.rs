@@ -421,3 +421,22 @@ fn test_recorded_workspace_resolves_without_the_directory() {
     // Still refuses a workspace it is not tracking at all.
     assert!(foundry::workflow::resolve_recorded_workspace(&state, "myapp", "unknown").is_err());
 }
+
+/// The recorded path goes through a symlink (as a `worktree_dir` under one
+/// does); the cwd it is matched against is the resolved one the kernel reports.
+#[cfg(unix)]
+#[test]
+fn test_find_by_worktree_path_sees_through_a_symlink() {
+    let dir = TempDir::new().unwrap();
+    let real = dir.path().join("real");
+    std::fs::create_dir_all(real.join("feat/src")).unwrap();
+    std::os::unix::fs::symlink(&real, dir.path().join("link")).unwrap();
+
+    let mut state =
+        foundry::state::WorkspaceState::load_from(&dir.path().join("state.toml")).unwrap();
+    state.add(workspace_at("myapp", "feat", &dir.path().join("link/feat")));
+
+    let cwd = real.join("feat/src").canonicalize().unwrap();
+    let found = state.find_by_worktree_path(&cwd.to_string_lossy());
+    assert_eq!(found.map(|w| w.name.as_str()), Some("feat"));
+}

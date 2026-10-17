@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Commands run without a workspace name inside a workspace (`finish`, `discard`, `pr`, `diff` and the rest) find it when `worktree_dir` goes through a symlink — a symlinked home or volume, or macOS's `/var`. They compared the spelled path against the resolved current directory and reported "could not infer workspace".
 - `foundry start --project <name> --issue <n>` fetches the issue from that project's repository. gh was run in whatever directory foundry was started from, so outside a repo it failed, and inside a different one it fetched that repository's issue `<n>`.
 - `foundry open --all` no longer pauses half a second after each workspace that was already open. The pause lets Ghostty, iTerm2 and Windows Terminal finish creating a tab, and is now skipped when the workspace was only brought forward.
 - `foundry status --watch` no longer blanks between refreshes. It cleared the screen and drew the header before probing each workspace, so the rows vanished for as long as the git calls took; each frame is now drawn in one go once everything has been probed, and refreshes come every 2 seconds rather than 2 seconds plus probe time.

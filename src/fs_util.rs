@@ -117,10 +117,58 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
+/// Whether `inner` lies inside `outer`, comparing what the two paths resolve to.
+///
+/// The spelling cannot be trusted here, because the two sides are built
+/// differently by construction: `current_dir` returns what the kernel resolved,
+/// while a worktree path is the recorded `worktree_dir` join, tilde-expanded and
+/// nothing more. One symlinked component anywhere in `worktree_dir` — macOS's
+/// `$TMPDIR` under `/var`, a symlinked home or volume — made a raw comparison
+/// answer "not inside" for a process that *was* inside, which is the answer that
+/// closes the terminal tab out from under the cleanup running in it.
+pub fn path_contains(outer: &Path, inner: &Path) -> bool {
+    canonicalize_existing_prefix(inner).starts_with(canonicalize_existing_prefix(outer))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// The guard that keeps cleanup from closing the tab it is running in has to
+    /// see through a symlinked ancestor — the everyday case is a `worktree_dir`
+    /// under macOS's `$TMPDIR`, which is reached via `/var` -> `/private/var`.
+    #[cfg(unix)]
+    #[test]
+    fn path_contains_sees_through_a_symlinked_ancestor() {
+        let dir = TempDir::new().unwrap();
+        let real = dir.path().join("real");
+        let worktree = real.join("wt");
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::os::unix::fs::symlink(&real, dir.path().join("link")).unwrap();
+
+        // The same worktree spelled through the symlink, as foundry's recorded
+        // path would be, against the resolved cwd the kernel reports.
+        let spelled_through_link = dir.path().join("link").join("wt");
+        assert!(path_contains(
+            &spelled_through_link,
+            &worktree.canonicalize().unwrap()
+        ));
+        assert!(path_contains(&spelled_through_link, &worktree.join("src")));
+    }
+
+    /// A sibling whose name merely starts with the same characters is not inside.
+    #[test]
+    fn path_contains_does_not_match_a_name_prefix() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("wt")).unwrap();
+        std::fs::create_dir(dir.path().join("wt-other")).unwrap();
+
+        assert!(!path_contains(
+            &dir.path().join("wt"),
+            &dir.path().join("wt-other")
+        ));
+    }
 
     #[test]
     fn writes_contents_to_target() {

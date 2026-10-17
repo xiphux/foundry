@@ -100,11 +100,22 @@ impl WorkspaceState {
 
     pub fn find_by_worktree_path(&self, path: &str) -> Option<&Workspace> {
         let cwd = Path::new(path);
-        self.inner.workspaces.iter().find(|w| {
-            // Use Path::starts_with which compares by path components.
-            // This handles mixed separators on Windows (e.g., stored path
-            // has forward slashes from config while cwd uses backslashes).
-            cwd.starts_with(Path::new(&w.worktree_path))
+        // Use Path::starts_with which compares by path components.
+        // This handles mixed separators on Windows (e.g., stored path
+        // has forward slashes from config while cwd uses backslashes).
+        let spelled = self
+            .inner
+            .workspaces
+            .iter()
+            .find(|w| cwd.starts_with(Path::new(&w.worktree_path)));
+        // The recorded path is the configured `worktree_dir` join, while a cwd
+        // comes back from the kernel resolved, so one symlink in
+        // `worktree_dir` made every workspace unfindable from its own tab.
+        spelled.or_else(|| {
+            self.inner
+                .workspaces
+                .iter()
+                .find(|w| crate::fs_util::path_contains(Path::new(&w.worktree_path), cwd))
         })
     }
 
