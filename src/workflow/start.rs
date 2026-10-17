@@ -38,10 +38,11 @@ pub fn run(
             ctx,
             name,
             &worktree_path,
-            &HashSet::new(),
-            prompt,
-            &std::collections::HashMap::new(),
-            plan,
+            &super::open::OpenOptions {
+                prompt,
+                plan,
+                ..Default::default()
+            },
         )?;
         return Ok(());
     }
@@ -233,10 +234,12 @@ pub fn run(
         ctx,
         name,
         &worktree_path,
-        &skip_command_panes,
-        prompt,
-        &deferred_commands,
-        plan,
+        &super::open::OpenOptions {
+            prompt,
+            plan,
+            skip_command_panes,
+            deferred_commands,
+        },
     )?;
 
     if can_defer && let Some(d) = deferred {

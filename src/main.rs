@@ -260,10 +260,7 @@ fn run() -> Result<()> {
                             &mut c,
                             ws_name,
                             worktree_path,
-                            &std::collections::HashSet::new(),
-                            None,
-                            &std::collections::HashMap::new(),
-                            false,
+                            &Default::default(),
                         )?;
 
                         // Brief pause between opens to let the terminal settle.
@@ -312,15 +309,7 @@ fn run() -> Result<()> {
                     &state_path,
                     cli.verbose,
                 );
-                workflow::open::open_workspace(
-                    &mut c,
-                    &name,
-                    &worktree_path,
-                    &std::collections::HashSet::new(),
-                    None, // no prompt for open
-                    &std::collections::HashMap::new(),
-                    false,
-                )?;
+                workflow::open::open_workspace(&mut c, &name, &worktree_path, &Default::default())?;
             } else {
                 let mut registry = Registry::load_from(&registry_path)?;
                 let (project_name, _) = workflow::resolve_project(

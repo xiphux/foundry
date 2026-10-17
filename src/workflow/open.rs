@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::agent_hooks;
@@ -16,24 +16,36 @@ pub enum Opened {
     New,
 }
 
+/// What a first launch adds to opening a workspace. Only `start` sets any of
+/// it; everything else reopens with `OpenOptions::default()`.
+#[derive(Debug, Default)]
+pub struct OpenOptions<'a> {
+    /// Handed to the first agent pane.
+    pub prompt: Option<&'a str>,
+    /// Start the agent in plan mode.
+    pub plan: bool,
+    /// Panes created with no command, because theirs is held back until setup
+    /// scripts finish (see `start::plan_deferred`).
+    pub skip_command_panes: HashSet<String>,
+    /// Panes whose command is replaced, keyed by pane name — the deferred
+    /// script chain followed by the pane's own command.
+    pub deferred_commands: HashMap<String, String>,
+}
+
 /// Open the terminal workspace for an existing worktree.
-/// `skip_command_panes` contains pane names whose commands should be suppressed
-/// (the pane is still created, but no command is sent). Used by `start` to
-/// defer certain pane commands until after setup scripts complete.
-///
-/// The widest signature left, sitting exactly at clippy's seven-argument limit.
-/// The seven are all genuinely independent inputs rather than the project
-/// context the other workflows were threading, so there is nothing left here to
-/// bundle.
 pub fn open_workspace(
     ctx: &mut super::WorkflowCtx,
     name: &str,
     worktree_path: &Path,
-    skip_command_panes: &HashSet<String>,
-    prompt: Option<&str>,
-    deferred_commands: &std::collections::HashMap<String, String>,
-    plan: bool,
+    opts: &OpenOptions,
 ) -> Result<Opened> {
+    let OpenOptions {
+        prompt,
+        plan,
+        skip_command_panes,
+        deferred_commands,
+    } = opts;
+    let (prompt, plan) = (*prompt, *plan);
     let (project_name, config, state, state_path, verbose) = (
         ctx.project,
         ctx.config,

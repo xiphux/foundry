@@ -104,15 +104,7 @@ pub fn run(ctx: &mut super::WorkflowCtx, branch: &str) -> Result<()> {
                 worktree_path.display()
             );
         }
-        super::open::open_workspace(
-            ctx,
-            &name,
-            &worktree_path,
-            &std::collections::HashSet::new(),
-            None, // no prompt for restore
-            &std::collections::HashMap::new(),
-            false,
-        )?;
+        super::open::open_workspace(ctx, &name, &worktree_path, &Default::default())?;
         return Ok(());
     }
 
@@ -213,15 +205,7 @@ pub fn run(ctx: &mut super::WorkflowCtx, branch: &str) -> Result<()> {
     eprintln!("Restored workspace '{name}' from branch '{branch}'.");
 
     // Open workspace
-    super::open::open_workspace(
-        ctx,
-        &name,
-        &worktree_path,
-        &std::collections::HashSet::new(),
-        None, // no prompt for restore
-        &std::collections::HashMap::new(),
-        false,
-    )?;
+    super::open::open_workspace(ctx, &name, &worktree_path, &Default::default())?;
     Ok(())
 }
 
