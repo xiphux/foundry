@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- `foundry finish` and `foundry pr` no longer refuse a Claude workspace over foundry's own `.claude/settings.local.json`. The file is untracked, so unless your global gitignore already covered it, every finish failed with "uncommitted changes" and `status` showed the workspace dirty. Foundry now adds the path to the repository's `.git/info/exclude`, which is local to the clone and never committed.
 - A workspace opened in bare mode, tmux or Zellij no longer overwrites state recorded while it was open. Those backends hold `start`/`open` until the session ends, and saving afterwards wrote back the state as it was beforehand — dropping a PR recorded by `foundry pr` (so `finish` merged locally and left the PR open) or resurrecting a workspace that had been finished.
 
 ## v0.6.1

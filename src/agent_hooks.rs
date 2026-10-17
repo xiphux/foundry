@@ -741,6 +741,13 @@ fn setup_claude(
     std::fs::write(&settings_path, contents)
         .with_context(|| format!("failed to write {}", settings_path.display()))?;
 
+    // Without this the file foundry just wrote is untracked work as far as git
+    // is concerned, and `finish` and `pr` refuse a worktree that has any —
+    // unless the user happens to ignore the path globally already.
+    if let Err(e) = crate::git::exclude_locally(worktree_path, "/.claude/settings.local.json") {
+        eprintln!("Warning: could not exclude .claude/settings.local.json from git: {e:#}");
+    }
+
     Ok(())
 }
 

@@ -339,6 +339,41 @@ pub fn main_repo_root(path: &Path) -> Result<std::path::PathBuf> {
     }
 }
 
+/// Ignore `pattern` in this repository and every worktree of it, by adding it
+/// to `info/exclude` in the common git dir if it is not already there.
+///
+/// For files foundry itself creates inside a worktree: they must not read as
+/// uncommitted work, but they are nobody's to commit, so `.gitignore` is the
+/// wrong place. `info/exclude` is local to this clone and never committed. Git
+/// reads it from the common dir only, so it covers all worktrees at once.
+pub fn exclude_locally(path: &Path, pattern: &str) -> Result<()> {
+    let common = run_git(
+        path,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    let info = Path::new(&common).join("info");
+    let exclude = info.join("exclude");
+    let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+    if existing.lines().any(|line| line.trim() == pattern) {
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(&info)
+        .with_context(|| format!("failed to create {}", info.display()))?;
+    let separator = if existing.is_empty() || existing.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&exclude)
+        .and_then(|mut f| writeln!(f, "{separator}{pattern}"))
+        .with_context(|| format!("failed to update {}", exclude.display()))
+}
+
 /// Get the commit log between base and branch as one-line summaries.
 pub fn log_commits(repo_path: &Path, base: &str, branch: &str) -> Result<String> {
     reject_option_like(base, "revision")?;

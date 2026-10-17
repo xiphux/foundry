@@ -488,3 +488,24 @@ fn test_worktree_registered_matches_a_path_spelled_through_a_symlink() {
             .unwrap()
     );
 }
+
+#[test]
+fn exclude_locally_hides_a_file_in_every_worktree_and_is_idempotent() {
+    let repo = init_test_repo();
+    let worktree = repo.path().join("wt");
+    foundry::git::create_branch(repo.path(), "feat").unwrap();
+    foundry::git::create_worktree(repo.path(), &worktree, "feat").unwrap();
+    // Not `.claude/settings.local.json`, which a developer's global gitignore
+    // may already cover and so would pass without the exclude.
+    std::fs::create_dir(worktree.join(".foundry-scratch")).unwrap();
+    std::fs::write(worktree.join(".foundry-scratch/generated.json"), "{}").unwrap();
+    assert!(foundry::git::has_uncommitted_changes(&worktree).unwrap());
+
+    let pattern = "/.foundry-scratch/generated.json";
+    foundry::git::exclude_locally(&worktree, pattern).unwrap();
+    foundry::git::exclude_locally(&worktree, pattern).unwrap();
+
+    assert!(!foundry::git::has_uncommitted_changes(&worktree).unwrap());
+    let exclude = std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap();
+    assert_eq!(exclude.lines().filter(|l| *l == pattern).count(), 1);
+}
