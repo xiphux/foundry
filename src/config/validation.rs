@@ -245,21 +245,28 @@ const SCRIPTS_CONFIG_KEYS: &[&str] = &["setup", "teardown"];
 /// `` escape. This runs immediately before the trust prompt is drawn, so an
 /// unsanitized key would hand a repo the very cursor-control primitive that
 /// prompt sanitizes its own text against.
-fn warn_unknown_keys(table: &toml::value::Table, known: &[&str], context: &str) {
+fn unknown_keys(
+    table: &toml::value::Table,
+    known: &[&str],
+    context: &str,
+    found: &mut Vec<String>,
+) {
     for key in table.keys() {
         if !known.contains(&key.as_str()) {
             let key = crate::str_util::sanitize_for_display(key);
-            eprintln!("Warning: unknown config key '{key}' in {context} (ignored)");
+            found.push(format!("unknown config key '{key}' in {context} (ignored)"));
         }
     }
 }
 
-/// Check a parsed TOML value for unknown keys in the global config schema.
-pub fn check_global_config_keys(value: &toml::Value, file_path: &str) {
+/// Check a parsed TOML value for unknown keys in the global config schema,
+/// returning one warning per unknown key.
+pub fn check_global_config_keys(value: &toml::Value, file_path: &str) -> Vec<String> {
+    let mut found = Vec::new();
     let Some(table) = value.as_table() else {
-        return;
+        return found;
     };
-    warn_unknown_keys(table, GLOBAL_CONFIG_KEYS, file_path);
+    unknown_keys(table, GLOBAL_CONFIG_KEYS, file_path, &mut found);
 
     // Check [[panes]] entries
     if let Some(toml::Value::Array(panes)) = table.get("panes") {
@@ -270,29 +277,34 @@ pub fn check_global_config_keys(value: &toml::Value, file_path: &str) {
                     .get("name")
                     .and_then(|v| v.as_str())
                     .unwrap_or(&fallback);
-                warn_unknown_keys(
+                unknown_keys(
                     pane_table,
                     PANE_CONFIG_KEYS,
                     &format!("{file_path} pane '{name}'"),
+                    &mut found,
                 );
             }
         }
     }
+    found
 }
 
-/// Check a parsed TOML value for unknown keys in the project config schema.
-pub fn check_project_config_keys(value: &toml::Value, file_path: &str) {
+/// Check a parsed TOML value for unknown keys in the project config schema,
+/// returning one warning per unknown key.
+pub fn check_project_config_keys(value: &toml::Value, file_path: &str) -> Vec<String> {
+    let mut found = Vec::new();
     let Some(table) = value.as_table() else {
-        return;
+        return found;
     };
-    warn_unknown_keys(table, PROJECT_CONFIG_KEYS, file_path);
+    unknown_keys(table, PROJECT_CONFIG_KEYS, file_path, &mut found);
 
     // Check [scripts] table
     if let Some(toml::Value::Table(scripts)) = table.get("scripts") {
-        warn_unknown_keys(
+        unknown_keys(
             scripts,
             SCRIPTS_CONFIG_KEYS,
             &format!("{file_path} [scripts]"),
+            &mut found,
         );
 
         // Check [[scripts.setup]] and [[scripts.teardown]] entries
@@ -305,10 +317,11 @@ pub fn check_project_config_keys(value: &toml::Value, file_path: &str) {
                             .get("name")
                             .and_then(|v| v.as_str())
                             .unwrap_or(&fallback);
-                        warn_unknown_keys(
+                        unknown_keys(
                             entry_table,
                             SCRIPT_CONFIG_KEYS,
                             &format!("{file_path} {section} script '{name}'"),
+                            &mut found,
                         );
                     }
                 }
@@ -320,14 +333,16 @@ pub fn check_project_config_keys(value: &toml::Value, file_path: &str) {
     if let Some(toml::Value::Table(panes)) = table.get("panes") {
         for (pane_name, pane_value) in panes {
             if let Some(pane_table) = pane_value.as_table() {
-                warn_unknown_keys(
+                unknown_keys(
                     pane_table,
                     PANE_OVERRIDE_KEYS,
                     &format!("{file_path} pane override '{pane_name}'"),
+                    &mut found,
                 );
             }
         }
     }
+    found
 }
 
 #[cfg(test)]
@@ -456,7 +471,10 @@ mod tests {
             auto_fetch = false
         "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
-        check_global_config_keys(&value, "test");
+        assert_eq!(
+            check_global_config_keys(&value, "test"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -466,7 +484,10 @@ mod tests {
             branchprefix = "typo"
         "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
-        check_global_config_keys(&value, "test");
+        assert_eq!(
+            check_global_config_keys(&value, "test"),
+            ["unknown config key 'branchprefix' in test (ignored)"]
+        );
     }
 
     #[test]
@@ -485,7 +506,10 @@ mod tests {
             command = "npm run dev"
         "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
-        check_project_config_keys(&value, "test");
+        assert_eq!(
+            check_project_config_keys(&value, "test"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -497,7 +521,10 @@ mod tests {
             timeout = 30
         "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
-        check_project_config_keys(&value, "test");
+        assert_eq!(
+            check_project_config_keys(&value, "test"),
+            ["unknown config key 'timeout' in test setup script 'install' (ignored)"]
+        );
     }
 
     #[test]
@@ -508,7 +535,10 @@ mod tests {
             split_from = "agent"
         "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
-        check_project_config_keys(&value, "test");
+        assert_eq!(
+            check_project_config_keys(&value, "test"),
+            ["unknown config key 'split_from' in test pane override 'shell' (ignored)"]
+        );
     }
 
     #[test]
@@ -597,10 +627,80 @@ mod tests {
     }
 
     #[test]
-    fn warn_unknown_keys_finds_extras() {
+    fn unknown_keys_finds_extras() {
         let mut table = toml::value::Table::new();
         table.insert("known".into(), toml::Value::String("ok".into()));
         table.insert("typo".into(), toml::Value::String("bad".into()));
-        warn_unknown_keys(&table, &["known"], "test");
+        let mut found = Vec::new();
+        unknown_keys(&table, &["known"], "test", &mut found);
+        assert_eq!(found, ["unknown config key 'typo' in test (ignored)"]);
+    }
+
+    /// The field names serde deserializes `T` from.
+    ///
+    /// A derived `Deserialize` hands its field list to `deserialize_struct`;
+    /// this deserializer records it and stops there.
+    fn struct_fields<T: serde::de::DeserializeOwned>() -> Vec<&'static str> {
+        use serde::de::{Error as _, Visitor, value::Error};
+
+        struct Grab<'a>(&'a mut Vec<&'static str>);
+
+        impl<'de> serde::Deserializer<'de> for Grab<'_> {
+            type Error = Error;
+
+            fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value, Error> {
+                Err(Error::custom("not a struct"))
+            }
+
+            fn deserialize_struct<V: Visitor<'de>>(
+                self,
+                _name: &'static str,
+                fields: &'static [&'static str],
+                _visitor: V,
+            ) -> Result<V::Value, Error> {
+                self.0.extend_from_slice(fields);
+                Err(Error::custom("fields recorded"))
+            }
+
+            serde::forward_to_deserialize_any! {
+                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+                bytes byte_buf option unit unit_struct newtype_struct seq tuple
+                tuple_struct map enum identifier ignored_any
+            }
+        }
+
+        let mut fields = Vec::new();
+        let _ = T::deserialize(Grab(&mut fields));
+        fields.sort_unstable();
+        fields
+    }
+
+    fn sorted(keys: &[&'static str]) -> Vec<&'static str> {
+        let mut keys = keys.to_vec();
+        keys.sort_unstable();
+        keys
+    }
+
+    /// Each known-key list must name exactly its struct's fields. A field
+    /// added without its key makes every use of it warn "unknown config key",
+    /// and a key left behind by a removed field stops the typo check seeing it.
+    #[test]
+    fn known_key_lists_match_the_config_structs() {
+        use crate::config::global::GlobalConfig;
+        use crate::config::project::ProjectConfig;
+        use crate::config::types::{PaneOverride, ScriptConfig, ScriptsConfig};
+
+        assert_eq!(sorted(GLOBAL_CONFIG_KEYS), struct_fields::<GlobalConfig>());
+        assert_eq!(
+            sorted(PROJECT_CONFIG_KEYS),
+            struct_fields::<ProjectConfig>()
+        );
+        assert_eq!(sorted(PANE_CONFIG_KEYS), struct_fields::<PaneConfig>());
+        assert_eq!(sorted(PANE_OVERRIDE_KEYS), struct_fields::<PaneOverride>());
+        assert_eq!(sorted(SCRIPT_CONFIG_KEYS), struct_fields::<ScriptConfig>());
+        assert_eq!(
+            sorted(SCRIPTS_CONFIG_KEYS),
+            struct_fields::<ScriptsConfig>()
+        );
     }
 }

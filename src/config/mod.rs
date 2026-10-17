@@ -92,7 +92,9 @@ pub fn load_global_config() -> Result<GlobalConfig> {
 
     // Check for unknown keys before deserializing
     if let Some(raw) = prescan_document(&contents) {
-        validation::check_global_config_keys(&raw, &config_path.to_string_lossy());
+        for warning in validation::check_global_config_keys(&raw, &config_path.to_string_lossy()) {
+            eprintln!("Warning: {warning}");
+        }
     }
 
     let config: GlobalConfig = toml::from_str(&contents)
@@ -125,7 +127,9 @@ pub fn load_project_config(repo_root: &Path) -> Result<Option<ProjectConfig>> {
 
     // Check for unknown keys before deserializing
     if let Some(raw) = prescan_document(&contents) {
-        validation::check_project_config_keys(&raw, &config_path.to_string_lossy());
+        for warning in validation::check_project_config_keys(&raw, &config_path.to_string_lossy()) {
+            eprintln!("Warning: {warning}");
+        }
     }
 
     let config: ProjectConfig = toml::from_str(&contents)
