@@ -473,7 +473,6 @@ pub fn remote_url(repo_path: &Path, remote: &str) -> Result<String> {
     run_git(repo_path, &["remote", "get-url", "--", remote])
 }
 
-/// Push a branch to a remote. Uses --set-upstream on first push.
 /// Delete `branch` on `remote`.
 pub fn delete_remote_branch(repo_path: &Path, remote: &str, branch: &str) -> Result<()> {
     reject_option_like(remote, "remote name")?;
@@ -482,6 +481,7 @@ pub fn delete_remote_branch(repo_path: &Path, remote: &str, branch: &str) -> Res
     Ok(())
 }
 
+/// Push a branch to a remote. Uses --set-upstream on first push.
 pub fn push_branch(repo_path: &Path, remote: &str, branch: &str) -> Result<()> {
     reject_option_like(remote, "remote name")?;
     reject_option_like(branch, "branch name")?;
