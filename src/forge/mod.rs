@@ -64,7 +64,10 @@ impl ChecksStatus {
 /// Trait for forge (GitHub, GitLab, etc.) operations.
 /// Analogous to `TerminalBackend` — implementations shell out to
 /// CLI tools (`gh`, `glab`) for the actual operations.
-pub trait Forge {
+///
+/// `Sync` so independent queries can run on separate threads; `finish` asks
+/// for PR state and CI status at once.
+pub trait Forge: Sync {
     /// Create a pull/merge request for the given branch.
     fn create_pr(
         &self,

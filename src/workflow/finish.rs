@@ -57,9 +57,15 @@ fn do_pr_merge(
     // Detect forge
     let (forge_impl, remote) = forge::detect_forge(source_path, config.pr_remote.as_deref())?;
 
-    // Verify the PR is still open
-    let live_pr = forge_impl.pr_for_branch(source_path, branch)?;
-    if live_pr.is_none() {
+    // Whether the PR is still open, and its CI status. Independent network
+    // round trips to the forge, so they overlap rather than queue.
+    let (live_pr, checks) = std::thread::scope(|s| {
+        let checks = (!skip_confirm).then(|| s.spawn(|| forge_impl.pr_checks(source_path, branch)));
+        let live_pr = forge_impl.pr_for_branch(source_path, branch);
+        let checks = checks.map(|h| h.join().expect("PR checks thread panicked"));
+        (live_pr, checks)
+    });
+    if live_pr?.is_none() {
         let url_hint = pr_url.map(|u| format!(" ({u})")).unwrap_or_default();
         anyhow::bail!(
             "PR #{pr_number}{url_hint} for branch '{branch}' is no longer open.\n\
@@ -70,8 +76,8 @@ fn do_pr_merge(
     }
 
     // Check CI status before merging
-    if !skip_confirm {
-        match forge_impl.pr_checks(source_path, branch) {
+    if let Some(checks) = checks {
+        match checks {
             Ok(status) if !status.checks.is_empty() && !status.all_passed() => {
                 super::checks::print_checks(pr_number, &status);
                 if status.has_failures() {
