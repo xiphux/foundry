@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::Path;
 
-use crate::agent_hooks;
+use crate::agent_status;
 use crate::git;
 use crate::state::{Workspace, WorkspaceState};
 
@@ -19,7 +19,7 @@ struct Row {
     missing: bool,
     dirty: bool,
     commit_info: String,
-    agent_infos: Vec<(String, agent_hooks::AgentStatusInfo)>,
+    agent_infos: Vec<(String, agent_status::AgentStatusInfo)>,
 }
 
 /// Display a status dashboard of all active workspaces.
@@ -129,7 +129,7 @@ fn probe_one(ws: &Workspace, main_branches: &HashMap<String, String>) -> Row {
         missing: false,
         dirty: git::has_uncommitted_changes(worktree).unwrap_or(false),
         commit_info,
-        agent_infos: agent_hooks::read_all_status_infos(&ws.project, &ws.name),
+        agent_infos: agent_status::read_all_status_infos(&ws.project, &ws.name),
     }
 }
 
@@ -233,12 +233,12 @@ fn render_dashboard(state: &WorkspaceState, main_branches: &mut HashMap<String, 
             // Use the most urgent color
             let color = if agent_infos
                 .iter()
-                .any(|(_, i)| matches!(i.status, agent_hooks::AgentStatus::WaitingPermission))
+                .any(|(_, i)| matches!(i.status, agent_status::AgentStatus::WaitingPermission))
             {
                 "\x1b[31m"
             } else if agent_infos
                 .iter()
-                .any(|(_, i)| matches!(i.status, agent_hooks::AgentStatus::Working))
+                .any(|(_, i)| matches!(i.status, agent_status::AgentStatus::Working))
             {
                 "\x1b[34m"
             } else {
@@ -272,14 +272,14 @@ fn render_dashboard(state: &WorkspaceState, main_branches: &mut HashMap<String, 
 }
 
 /// Map agent status to display label and ANSI color.
-fn status_display(status: &agent_hooks::AgentStatus) -> (&'static str, &'static str) {
+fn status_display(status: &agent_status::AgentStatus) -> (&'static str, &'static str) {
     match status {
-        agent_hooks::AgentStatus::Working => ("working", "\x1b[34m"),
-        agent_hooks::AgentStatus::Idle => ("idle", "\x1b[33m"),
-        agent_hooks::AgentStatus::WaitingPermission => ("waiting", "\x1b[31m"),
-        agent_hooks::AgentStatus::Error => ("error", "\x1b[31m"),
-        agent_hooks::AgentStatus::Offline => ("offline", "\x1b[90m"),
-        agent_hooks::AgentStatus::Unknown => ("unknown", ""),
+        agent_status::AgentStatus::Working => ("working", "\x1b[34m"),
+        agent_status::AgentStatus::Idle => ("idle", "\x1b[33m"),
+        agent_status::AgentStatus::WaitingPermission => ("waiting", "\x1b[31m"),
+        agent_status::AgentStatus::Error => ("error", "\x1b[31m"),
+        agent_status::AgentStatus::Offline => ("offline", "\x1b[90m"),
+        agent_status::AgentStatus::Unknown => ("unknown", ""),
     }
 }
 
@@ -299,19 +299,19 @@ fn ellipsize(s: &str, max_bytes: usize) -> String {
 }
 
 /// Build an activity string from rich status info.
-fn activity_text(info: &agent_hooks::AgentStatusInfo) -> String {
+fn activity_text(info: &agent_status::AgentStatusInfo) -> String {
     match info.status {
-        agent_hooks::AgentStatus::Working => info
+        agent_status::AgentStatus::Working => info
             .last_tool
             .as_deref()
             .map(|t| ellipsize(t, 50))
             .unwrap_or_default(),
-        agent_hooks::AgentStatus::Idle => info
+        agent_status::AgentStatus::Idle => info
             .last_message
             .as_deref()
             .map(|m| format!("\"{}\"", ellipsize(m, 60)))
             .unwrap_or_default(),
-        agent_hooks::AgentStatus::Error => info
+        agent_status::AgentStatus::Error => info
             .error
             .clone()
             .unwrap_or_else(|| "unknown error".to_string()),
@@ -364,8 +364,8 @@ mod tests {
 
     #[test]
     fn activity_text_truncates_a_long_multibyte_message() {
-        let info = agent_hooks::AgentStatusInfo {
-            status: agent_hooks::AgentStatus::Idle,
+        let info = agent_status::AgentStatusInfo {
+            status: agent_status::AgentStatus::Idle,
             last_message: Some(format!("{}émigré refactor complete", "a".repeat(56))),
             ..Default::default()
         };
@@ -375,8 +375,8 @@ mod tests {
 
     #[test]
     fn activity_text_truncates_a_long_multibyte_tool() {
-        let info = agent_hooks::AgentStatusInfo {
-            status: agent_hooks::AgentStatus::Working,
+        let info = agent_status::AgentStatusInfo {
+            status: agent_status::AgentStatus::Working,
             last_tool: Some(format!("grep {}é pattern", "a".repeat(46))),
             ..Default::default()
         };

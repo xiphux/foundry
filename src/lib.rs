@@ -1,4 +1,5 @@
 pub mod agent_hooks;
+pub mod agent_status;
 pub mod config;
 pub mod forge;
 pub mod fs_util;

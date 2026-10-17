@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use crate::agent_hooks;
+use crate::agent_status;
 use crate::git;
 use crate::terminal;
 
@@ -201,8 +201,8 @@ pub fn cleanup_workspace(
     // window — a failed save prints success and leaves the entry behind.
     announce(archived_as.as_deref());
 
-    agent_hooks::remove_status(ctx.project, name);
-    agent_hooks::remove_context(ctx.project, name);
+    agent_status::remove_status(ctx.project, name);
+    agent_status::remove_context(ctx.project, name);
 
     // Close terminal tab LAST
     if !tab_id.is_empty() {
