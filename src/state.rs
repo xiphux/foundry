@@ -132,19 +132,6 @@ impl WorkspaceState {
         }
     }
 
-    /// Clear PR info (e.g., after --local merge ignoring a closed PR).
-    pub fn clear_pr_info(&mut self, project: &str, name: &str) {
-        if let Some(ws) = self
-            .inner
-            .workspaces
-            .iter_mut()
-            .find(|w| w.project == project && w.name == name)
-        {
-            ws.pr_number = None;
-            ws.pr_url = None;
-        }
-    }
-
     pub fn set_terminal_tab_id(&mut self, project: &str, name: &str, tab_id: String) {
         if let Some(ws) = self
             .inner

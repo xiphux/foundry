@@ -200,32 +200,6 @@ fn test_set_pr_info() {
 }
 
 #[test]
-fn test_clear_pr_info() {
-    let dir = TempDir::new().unwrap();
-    let state_path = dir.path().join("state.toml");
-    let mut state = foundry::state::WorkspaceState::load_from(&state_path).unwrap();
-
-    state.add(foundry::state::Workspace {
-        project: "myapp".into(),
-        name: "feat".into(),
-        branch: "feat".into(),
-        worktree_path: "/tmp/test-worktree".into(),
-        source_path: "/tmp/test-source".into(),
-        created_at: Utc::now(),
-        terminal_tab_id: String::new(),
-        allocated_ports: std::collections::HashMap::new(),
-        pr_number: Some(42),
-        pr_url: Some("https://github.com/user/repo/pull/42".into()),
-    });
-
-    state.clear_pr_info("myapp", "feat");
-
-    let ws = state.list().iter().find(|w| w.name == "feat").unwrap();
-    assert_eq!(ws.pr_number, None);
-    assert_eq!(ws.pr_url, None);
-}
-
-#[test]
 fn test_set_pr_info_wrong_workspace_is_noop() {
     let dir = TempDir::new().unwrap();
     let state_path = dir.path().join("state.toml");

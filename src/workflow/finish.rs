@@ -26,9 +26,9 @@ pub fn run(
     match ws.pr_number {
         Some(pr_num) if !force_local => do_pr_merge(ctx, &ws, pr_num, skip_confirm),
         Some(pr_num) => {
-            // User explicitly chose local merge, clear PR info
-            ctx.state.clear_pr_info(ctx.project, name);
-            ctx.state.save_to(ctx.state_path)?;
+            // The PR link stays recorded until the merge succeeds, when cleanup
+            // drops the whole entry. Clearing it first meant a merge that then
+            // failed — dirty main, a non-fast-forward — forgot the PR for good.
             if ctx.verbose {
                 eprintln!("Ignoring PR #{pr_num}, merging locally...");
             }

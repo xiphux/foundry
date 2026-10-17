@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- `foundry finish --local` no longer forgets a workspace's PR when the local merge fails. The PR link was cleared before merging, so after a refusal a plain `foundry finish` merged locally too.
 - A cancelled, timed-out or otherwise unsuccessfully finished CI check counts as failing in `foundry checks` and `finish`, rather than as still pending.
 - `foundry edit` accepts an editor setting with arguments, such as `EDITOR="code --wait"` or `editor = "emacsclient -n"`, which it used to treat as the name of a single program.
 - `foundry open` and `foundry switch` to a workspace that is already running work from inside tmux, by switching the client to its session. They used to try `tmux attach`, which refuses to nest, and report success having done nothing; inside Zellij, which has no equivalent, they now say so instead.
