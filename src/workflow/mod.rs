@@ -63,11 +63,17 @@ pub fn resolve_project(
         );
     }
 
+    registry.add(&name, repo_root.clone()).with_context(|| {
+        format!(
+            "cannot auto-register this repository. \
+             Register it under another name with `foundry projects add <name> {}`.",
+            repo_root.display()
+        )
+    })?;
     eprintln!(
         "Auto-registering project '{name}' at {}",
         repo_root.display()
     );
-    registry.add(&name, repo_root.clone())?;
     registry.save_to(registry_path)?;
 
     Ok((name, repo_root))

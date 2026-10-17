@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Security
+
+- Project names are validated when registered, explicitly or automatically. A project name is joined into worktree and status paths and interpolated into the quoted hook commands in `.claude/settings.local.json`, the same as a workspace name, but unlike one it was never checked — so a `'` broke out of that quoting and a `/` or leading `.` escaped the directory. Spaces and Unicode remain fine.
+
 ### Fixed
 
 - The worktree-scoped `Read`/`Edit`/`Write`/`Glob`/`Grep` rules foundry writes into `.claude/settings.local.json` now take effect. Claude reads a single leading `/` in those rules as relative to the settings file — absolute paths need `//` — so the rules pointed at a directory that does not exist and never matched. The path is also escaped now, so a `*`, `?` or `[` in a directory name matches only that directory rather than acting as a wildcard.

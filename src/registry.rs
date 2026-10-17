@@ -3,6 +3,32 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+/// Reject project names that are unsafe as a path component or inside quotes.
+///
+/// Like a workspace name, the project name is joined into the worktree path
+/// (`worktree_dir/<project>/<name>`) and the status and context paths, and those
+/// paths are interpolated into the single-quoted hook commands written to
+/// `.claude/settings.local.json`. A `/` or leading `.` escapes the directory;
+/// a `'` breaks out of the quoting. Looser than the workspace rule on purpose:
+/// an auto-registered name is the repository's directory name, and spaces in
+/// one are harmless here.
+pub fn validate_project_name(name: &str) -> Result<()> {
+    const FORBIDDEN: &[char] = &['/', '\\', '\'', '"', ';', '&', '|', '$', '`'];
+    if name.is_empty() {
+        bail!("project name cannot be empty");
+    }
+    if name.starts_with('.') || name.starts_with('-') {
+        bail!("project name cannot start with '.' or '-': {name:?}");
+    }
+    if let Some(bad) = name
+        .chars()
+        .find(|c| c.is_control() || FORBIDDEN.contains(c))
+    {
+        bail!("project name contains an unsupported character {bad:?}: {name:?}");
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RegistryFile {
     #[serde(default)]
@@ -43,6 +69,7 @@ impl Registry {
     }
 
     pub fn add(&mut self, name: &str, path: PathBuf) -> Result<()> {
+        validate_project_name(name)?;
         if self.inner.projects.contains_key(name) {
             bail!(
                 "project '{name}' already exists. Use `foundry projects remove` first, or choose a different name."

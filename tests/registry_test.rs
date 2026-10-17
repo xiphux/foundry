@@ -98,3 +98,21 @@ fn test_find_by_path_tolerates_a_stale_entry() {
     registry.add("here", dir.path().to_path_buf()).unwrap();
     assert_eq!(registry.find_by_path(dir.path()).as_deref(), Some("here"));
 }
+
+#[test]
+fn test_registry_rejects_unsafe_project_names() {
+    let mut registry =
+        foundry::registry::Registry::load_from(std::path::Path::new("/nonexistent/registry.toml"))
+            .unwrap();
+    for bad in [
+        "", "..", ".hidden", "-flag", "a/b", "a\\b", "it's", "a;b", "a\nb",
+    ] {
+        assert!(
+            registry.add(bad, PathBuf::from("/tmp/x")).is_err(),
+            "{bad:?} should be rejected"
+        );
+    }
+    for good in ["myapp", "My Project", "my.app", "проект", "web_ui-2"] {
+        registry.add(good, PathBuf::from("/tmp/x")).unwrap();
+    }
+}
