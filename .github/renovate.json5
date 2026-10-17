@@ -29,13 +29,6 @@
 	// wrote them.
 	commitMessagePrefix: 'deps:',
 
-	// Not yet: the preset turns on weekly lock file maintenance, which this
-	// repository never had. Cargo.lock moves only with the update that needs
-	// it, as before the shared preset. Drop this to take the Monday slot.
-	lockFileMaintenance: {
-		enabled: false,
-	},
-
 	// Cargo.toml is left alone wherever possible. Renovate's rangeStrategy
 	// defaults to `auto`, which for cargo means `update-lockfile` unless a
 	// "less than" constraint is present -- so a routine upgrade edits Cargo.lock
