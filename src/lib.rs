@@ -5,6 +5,7 @@ pub mod fs_util;
 pub mod git;
 pub mod github;
 pub mod history;
+pub mod process;
 pub mod prompt;
 pub mod registry;
 pub mod state;

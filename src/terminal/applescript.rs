@@ -3,18 +3,10 @@ use std::process::Command;
 
 /// Run an AppleScript and return its stdout.
 pub fn run_applescript(script: &str) -> Result<String> {
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .output()
-        .context("failed to run osascript")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("AppleScript error: {}", stderr.trim());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    crate::process::run_checked(
+        Command::new("osascript").arg("-e").arg(script),
+        "AppleScript error",
+    )
 }
 
 /// Run an AppleScript, ignoring errors. Used for commands that succeed

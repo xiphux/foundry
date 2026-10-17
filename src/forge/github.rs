@@ -1,8 +1,9 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
 use super::{CheckConclusion, CheckRun, ChecksStatus, Forge, PrInfo};
+use crate::process::{CommandFailed, run_checked};
 
 pub struct GitHubForge;
 
@@ -17,31 +18,27 @@ impl Forge for GitHubForge {
     ) -> Result<PrInfo> {
         check_gh()?;
 
-        let output = Command::new("gh")
-            .args([
-                "pr",
-                "create",
-                "--head",
-                branch,
-                "--base",
-                base,
-                "--title",
-                title,
-                "--body",
-                body,
-                "--json",
-                "number,url",
-            ])
-            .current_dir(repo_path)
-            .output()
-            .context("failed to run gh pr create")?;
+        let output = run_checked(
+            Command::new("gh")
+                .args([
+                    "pr",
+                    "create",
+                    "--head",
+                    branch,
+                    "--base",
+                    base,
+                    "--title",
+                    title,
+                    "--body",
+                    body,
+                    "--json",
+                    "number,url",
+                ])
+                .current_dir(repo_path),
+            "failed to create PR",
+        )?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("failed to create PR: {}", stderr.trim());
-        }
-
-        parse_pr_json(&output.stdout)
+        parse_pr_json(output.as_bytes())
     }
 
     fn merge_pr(&self, repo_path: &Path, branch: &str) -> Result<()> {
@@ -52,17 +49,12 @@ impl Forge for GitHubForge {
         // gh then exits non-zero although the PR is already merged. The local
         // branch goes in cleanup, once the worktree is removed; `finish`
         // deletes the remote one.
-        let output = Command::new("gh")
-            .args(["pr", "merge", branch, "--merge"])
-            .current_dir(repo_path)
-            .output()
-            .context("failed to run gh pr merge")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("failed to merge PR: {}", stderr.trim());
-        }
-
+        run_checked(
+            Command::new("gh")
+                .args(["pr", "merge", branch, "--merge"])
+                .current_dir(repo_path),
+            "failed to merge PR",
+        )?;
         Ok(())
     }
 
@@ -73,30 +65,26 @@ impl Forge for GitHubForge {
         // open PRs for this branch. `gh pr view` returns the most recent PR
         // regardless of state (open/closed/merged), which would incorrectly
         // detect a closed PR from a previous workspace that reused the branch name.
-        let output = Command::new("gh")
-            .args([
-                "pr",
-                "list",
-                "--head",
-                branch,
-                "--state",
-                "open",
-                "--json",
-                "number,url",
-                "--limit",
-                "1",
-            ])
-            .current_dir(repo_path)
-            .output()
-            .context("failed to run gh pr list")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("failed to check for existing PR: {}", stderr.trim());
-        }
+        let output = run_checked(
+            Command::new("gh")
+                .args([
+                    "pr",
+                    "list",
+                    "--head",
+                    branch,
+                    "--state",
+                    "open",
+                    "--json",
+                    "number,url",
+                    "--limit",
+                    "1",
+                ])
+                .current_dir(repo_path),
+            "failed to check for existing PR",
+        )?;
 
         let json: serde_json::Value =
-            serde_json::from_slice(&output.stdout).context("failed to parse gh output as JSON")?;
+            serde_json::from_str(&output).context("failed to parse gh output as JSON")?;
 
         let arr = json
             .as_array()
@@ -110,23 +98,27 @@ impl Forge for GitHubForge {
     fn pr_checks(&self, repo_path: &Path, branch: &str) -> Result<ChecksStatus> {
         check_gh()?;
 
-        let output = Command::new("gh")
-            .args(["pr", "checks", branch, "--json", "name,state,bucket"])
-            .current_dir(repo_path)
-            .output()
-            .context("failed to run gh pr checks")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // If there are no checks configured, gh returns an error
-            if stderr.contains("no checks") || stderr.contains("no status checks") {
+        let output = match run_checked(
+            Command::new("gh")
+                .args(["pr", "checks", branch, "--json", "name,state,bucket"])
+                .current_dir(repo_path),
+            "failed to get PR checks",
+        ) {
+            Ok(output) => output,
+            // gh exits non-zero for a PR with no checks configured. Matched on
+            // its wording, which is all it offers to tell this apart.
+            Err(e)
+                if e.downcast_ref::<CommandFailed>().is_some_and(|f| {
+                    f.stderr.contains("no checks") || f.stderr.contains("no status checks")
+                }) =>
+            {
                 return Ok(ChecksStatus { checks: Vec::new() });
             }
-            bail!("failed to get PR checks: {}", stderr.trim());
-        }
+            Err(e) => return Err(e),
+        };
 
         let json: serde_json::Value =
-            serde_json::from_slice(&output.stdout).context("failed to parse gh output as JSON")?;
+            serde_json::from_str(&output).context("failed to parse gh output as JSON")?;
 
         let arr = json
             .as_array()

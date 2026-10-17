@@ -27,18 +27,10 @@ impl WeztermBackend {
 
     /// Run a `wezterm cli` subcommand and return stdout.
     fn run_cli(args: &[&str]) -> Result<String> {
-        let output = Command::new("wezterm")
-            .arg("cli")
-            .args(args)
-            .output()
-            .context("failed to run wezterm cli")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("wezterm cli error: {}", stderr.trim());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        crate::process::run_checked(
+            Command::new("wezterm").arg("cli").args(args),
+            "wezterm cli error",
+        )
     }
 
     /// Send text to a pane (includes trailing newline to execute).

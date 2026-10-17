@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use std::process::Command;
 
 /// Information fetched from a GitHub issue.
@@ -21,18 +21,12 @@ pub fn fetch_issue(repo_path: &std::path::Path, issue_ref: &str) -> Result<GitHu
     )?;
 
     // gh issue view works with both issue numbers and URLs
-    let output = Command::new("gh")
-        .args(["issue", "view", issue_ref, "--json", "number,title,body"])
-        .current_dir(repo_path)
-        .output()
-        .context("failed to run gh issue view")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("failed to fetch issue '{issue_ref}': {}", stderr.trim());
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = crate::process::run_checked(
+        Command::new("gh")
+            .args(["issue", "view", issue_ref, "--json", "number,title,body"])
+            .current_dir(repo_path),
+        &format!("failed to fetch issue '{issue_ref}'"),
+    )?;
     let json: serde_json::Value =
         serde_json::from_str(&stdout).context("failed to parse gh output")?;
 

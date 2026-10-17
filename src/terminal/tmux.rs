@@ -44,17 +44,7 @@ impl TmuxBackend {
 
     /// Run a tmux command and return stdout.
     fn run_tmux(args: &[&str]) -> Result<String> {
-        let output = Command::new("tmux")
-            .args(args)
-            .output()
-            .context("failed to run tmux")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("tmux error: {}", stderr.trim());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        crate::process::run_checked(Command::new("tmux").args(args), "tmux error")
     }
 }
 
@@ -258,7 +248,12 @@ impl TerminalBackend for TmuxBackend {
         // (session already exited), silently skip.
         let output = match Self::run_tmux(&["list-panes", "-t", tab_id, "-F", "#{pane_id}"]) {
             Ok(o) => o,
-            Err(e) if e.to_string().contains("no server running") => return Ok(()),
+            Err(e)
+                if e.downcast_ref::<crate::process::CommandFailed>()
+                    .is_some_and(|f| f.stderr.contains("no server running")) =>
+            {
+                return Ok(());
+            }
             Err(e) => return Err(e),
         };
         let pane_ids: Vec<&str> = output.lines().collect();

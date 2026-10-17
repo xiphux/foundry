@@ -24,19 +24,10 @@ fn run_git_inner(repo_path: &Path, args: &[&str], no_optional_locks: bool) -> Re
     if no_optional_locks {
         cmd.arg("--no-optional-locks");
     }
-    let output = cmd
-        .arg("-C")
-        .arg(repo_path)
-        .args(args)
-        .output()
-        .context("failed to execute git")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("git {} failed: {}", args.join(" "), stderr.trim());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    crate::process::run_checked(
+        cmd.arg("-C").arg(repo_path).args(args),
+        &format!("git {} failed", args.join(" ")),
+    )
 }
 
 /// Reject a revision operand that git would read as an option.

@@ -417,21 +417,10 @@ impl TerminalBackend for WindowsTerminalBackend {
 
         for (_, pid) in &pids {
             // /T kills the entire process tree, /F forces termination.
-            if let Err(e) = Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .output()
-                .map_err(anyhow::Error::from)
-                .and_then(|o| {
-                    if o.status.success() {
-                        Ok(())
-                    } else {
-                        Err(anyhow::anyhow!(
-                            "{}",
-                            String::from_utf8_lossy(&o.stderr).trim()
-                        ))
-                    }
-                })
-            {
+            if let Err(e) = crate::process::run_checked(
+                Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]),
+                "taskkill failed",
+            ) {
                 eprintln!("Warning: failed to kill pane process {pid}: {e}");
             }
         }
