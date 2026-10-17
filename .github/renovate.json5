@@ -1,8 +1,8 @@
 {
 	// Renovate keeps the crates and action pins here current, in place of
-	// Dependabot's version updates. Dependabot's SECURITY updates stay on: they
-	// are a repository setting rather than a config file, so a vulnerable crate
-	// still arrives as a dependabot/** PR.
+	// Dependabot's version updates, and raises the security fixes too;
+	// Dependabot's own security pull requests are switched off in the
+	// repository settings, and its ALERTS stay on.
 	//
 	// Almost everything comes from the shared preset, xiphux/renovate-config:
 	// the cooldowns, the auto-merge policy, the weekly timetable and its
