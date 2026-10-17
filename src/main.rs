@@ -134,7 +134,7 @@ fn main() -> Result<()> {
 
             // Resolve name and prompt from --issue, --prompt, or --prompt-file
             let (resolved_name, prompt_text) = if let Some(ref issue_ref) = issue {
-                let gh_issue = foundry::github::fetch_issue(issue_ref)?;
+                let gh_issue = foundry::github::fetch_issue(&source_path, issue_ref)?;
                 let auto_name =
                     name.unwrap_or_else(|| foundry::github::issue_to_worktree_name(&gh_issue));
                 // Use issue as prompt unless --prompt or --prompt-file explicitly provided

@@ -80,10 +80,21 @@ impl Sandbox {
     }
 
     fn foundry(&self, args: &[&str]) -> Output {
+        self.foundry_in(&self.repo, args)
+    }
+
+    /// Run foundry from `cwd` rather than from inside the repo.
+    fn foundry_in(&self, cwd: &Path, args: &[&str]) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_foundry"));
+        let bin = self.home.path().join("bin");
+        let path = std::env::join_paths(
+            std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+        )
+        .unwrap();
         command
             .args(args)
-            .current_dir(&self.repo)
+            .current_dir(cwd)
+            .env("PATH", path)
             .env("FOUNDRY_HOME", self.home.path())
             .env("FOUNDRY_TERMINAL", "bare")
             .envs(GIT_IDENTITY);
@@ -115,6 +126,18 @@ impl Sandbox {
             String::from_utf8_lossy(&output.stdout)
         );
         String::from_utf8_lossy(&output.stderr).into_owned()
+    }
+
+    /// Put an executable shell script named `name` first on foundry's PATH,
+    /// standing in for a tool the tests cannot run for real (`gh`).
+    #[cfg(unix)]
+    fn fake_tool(&self, name: &str, script: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = self.home.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let path = bin.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     fn worktree(&self, name: &str) -> PathBuf {
@@ -406,6 +429,32 @@ fn a_change_made_while_the_session_runs_is_not_overwritten() {
         "the discard made during the session must stand"
     );
     assert_eq!(sb.registered_worktrees(), 1);
+}
+
+/// gh resolves an issue number against the repository in its working
+/// directory, so it has to run in the project's repo, not wherever foundry
+/// was invoked.
+#[test]
+#[cfg(unix)]
+fn start_issue_asks_gh_in_the_projects_repo() {
+    let sb = Sandbox::new();
+    sb.ok(&["projects", "add", "myapp", sb.repo.to_str().unwrap()]);
+    sb.fake_tool(
+        "gh",
+        r#"printf '{"number":7,"title":"from %s","body":""}' "$(basename "$PWD")""#,
+    );
+
+    let elsewhere = TempDir::new().unwrap();
+    let output = sb.foundry_in(
+        elsewhere.path(),
+        &["--project", "myapp", "start", "--issue", "7"],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(sb.state().find("myapp", "7-from-myapp").is_some());
 }
 
 #[test]

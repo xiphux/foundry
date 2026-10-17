@@ -10,7 +10,11 @@ pub struct GitHubIssue {
 }
 
 /// Fetch a GitHub issue by number or URL using the `gh` CLI.
-pub fn fetch_issue(issue_ref: &str) -> Result<GitHubIssue> {
+///
+/// Run in `repo_path` because gh resolves a bare issue number against the
+/// repository it finds in its working directory — which, without this, was
+/// wherever foundry happened to be invoked, not the project `--project` named.
+pub fn fetch_issue(repo_path: &std::path::Path, issue_ref: &str) -> Result<GitHubIssue> {
     // Check if gh is available
     which::which("gh").context(
         "GitHub CLI (gh) is required for --issue. Install it from https://cli.github.com",
@@ -19,6 +23,7 @@ pub fn fetch_issue(issue_ref: &str) -> Result<GitHubIssue> {
     // gh issue view works with both issue numbers and URLs
     let output = Command::new("gh")
         .args(["issue", "view", issue_ref, "--json", "number,title,body"])
+        .current_dir(repo_path)
         .output()
         .context("failed to run gh issue view")?;
 
