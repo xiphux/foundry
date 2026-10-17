@@ -492,6 +492,14 @@ pub fn remote_url(repo_path: &Path, remote: &str) -> Result<String> {
 }
 
 /// Push a branch to a remote. Uses --set-upstream on first push.
+/// Delete `branch` on `remote`.
+pub fn delete_remote_branch(repo_path: &Path, remote: &str, branch: &str) -> Result<()> {
+    reject_option_like(remote, "remote name")?;
+    reject_option_like(branch, "branch name")?;
+    run_git(repo_path, &["push", remote, "--delete", branch])?;
+    Ok(())
+}
+
 pub fn push_branch(repo_path: &Path, remote: &str, branch: &str) -> Result<()> {
     reject_option_like(remote, "remote name")?;
     reject_option_like(branch, "branch name")?;

@@ -105,6 +105,14 @@ fn do_pr_merge(
 
     let history_event = history::HistoryEvent::pr_merged(ctx.project, name, branch, pr_number);
 
+    // Best effort: a repository that auto-deletes head branches has already
+    // done this, and the merge is what matters either way.
+    if let Err(e) = git::delete_remote_branch(source_path, &remote, branch)
+        && verbose
+    {
+        eprintln!("Remote branch '{branch}' not deleted: {e:#}");
+    }
+
     // Fetch to update local refs after the remote merge
     let main_branch = git::detect_main_branch(source_path)?;
     if verbose {

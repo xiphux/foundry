@@ -47,8 +47,13 @@ impl Forge for GitHubForge {
     fn merge_pr(&self, repo_path: &Path, branch: &str) -> Result<()> {
         check_gh()?;
 
+        // Not `--delete-branch`: that also deletes the *local* branch, which
+        // git refuses while the workspace's worktree has it checked out — and
+        // gh then exits non-zero although the PR is already merged. The local
+        // branch goes in cleanup, once the worktree is removed; `finish`
+        // deletes the remote one.
         let output = Command::new("gh")
-            .args(["pr", "merge", branch, "--merge", "--delete-branch"])
+            .args(["pr", "merge", branch, "--merge"])
             .current_dir(repo_path)
             .output()
             .context("failed to run gh pr merge")?;

@@ -599,3 +599,15 @@ fn create_branch_from_ignores_head() {
     assert_eq!(rev(clone.path(), "feat"), rev(clone.path(), "main"));
     assert_ne!(rev(clone.path(), "feat"), rev(clone.path(), "wip"));
 }
+
+#[test]
+fn delete_remote_branch_removes_it_from_the_remote() {
+    let (origin, clone) = clone_behind_on_another_branch();
+    foundry::git::push_branch(clone.path(), "origin", "wip").unwrap();
+    assert!(foundry::git::branch_exists(origin.path(), "wip").unwrap());
+
+    foundry::git::delete_remote_branch(clone.path(), "origin", "wip").unwrap();
+
+    assert!(!foundry::git::branch_exists(origin.path(), "wip").unwrap());
+    assert!(foundry::git::delete_remote_branch(clone.path(), "-x", "wip").is_err());
+}
