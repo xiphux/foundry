@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::applescript::{
-    escape_applescript, pane_var, run_applescript, run_applescript_ignoring_errors,
+    escape_applescript, escape_typed_input, pane_var, run_applescript,
+    run_applescript_ignoring_errors,
 };
 use super::{PaneSpec, TerminalBackend};
 use crate::config::types::SplitDirection;
@@ -34,7 +35,7 @@ impl GhosttyBackend {
             lines.push("    set t to focused terminal of selected tab of front window".to_string());
             lines.push(format!(
                 "    input text \"{}\" to t",
-                escape_applescript(&super::shell_cd(path_str))
+                escape_typed_input(&super::shell_cd(path_str))
             ));
             lines.push("    send key \"enter\" to t".to_string());
             lines.push("    return id of selected tab of front window".to_string());
@@ -61,7 +62,7 @@ impl GhosttyBackend {
         // line for AppleScript. Reversing the order would mangle the quoting.
         lines.push(format!(
             "    input text \"{}\" to {first_var}",
-            escape_applescript(&super::shell_cd(path_str))
+            escape_typed_input(&super::shell_cd(path_str))
         ));
         lines.push(format!("    send key \"enter\" to {first_var}"));
 
@@ -118,12 +119,12 @@ impl GhosttyBackend {
                 if pane.split_from.is_none() && !pane.env.is_empty() {
                     for (k, v) in &pane.env {
                         // Shell-quote the export, then escape for AppleScript.
-                        let line = escape_applescript(&super::shell_export(k, v));
+                        let line = escape_typed_input(&super::shell_export(k, v));
                         lines.push(format!("    input text \"{line}\" to {cur_var}"));
                         lines.push(format!("    send key \"enter\" to {cur_var}"));
                     }
                 }
-                let escaped_cmd = escape_applescript(cmd);
+                let escaped_cmd = escape_typed_input(cmd);
                 lines.push(format!("    input text \"{escaped_cmd}\" to {cur_var}"));
                 lines.push(format!("    send key \"enter\" to {cur_var}"));
             }
@@ -170,7 +171,7 @@ end tell"#
     }
 
     fn build_run_in_pane_script(tab_id: &str, pane_index: usize, command: &str) -> String {
-        let escaped_cmd = escape_applescript(command);
+        let escaped_cmd = escape_typed_input(command);
         // AppleScript uses 1-based indexing
         let as_index = pane_index + 1;
         Self::with_tab(

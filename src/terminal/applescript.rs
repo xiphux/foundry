@@ -33,6 +33,30 @@ pub fn escape_applescript(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Escape a line that will be *typed* into a shell (`input text`, `write text`).
+///
+/// Typed text goes through the line editor before the shell parses anything,
+/// so a control character is a keystroke, not data — and pane commands carry
+/// the agent prompt, which under `--issue` is GitHub issue text. Ctrl-A, for
+/// one, jumps to the start of the line, so a body beginning `\x01rm -rf ~; `
+/// put that ahead of `claude '...'` and ran it on Enter, quoting or no
+/// quoting. Controls are dropped; tab (which would trigger completion) becomes
+/// a space and CR a newline. Newline itself stays: inside the single-quoted
+/// prompt a typed newline only continues the quoted string.
+pub fn escape_typed_input(s: &str) -> String {
+    let typed: String = s
+        .chars()
+        .filter_map(|c| match c {
+            '\n' => Some('\n'),
+            '\r' => Some('\n'),
+            '\t' => Some(' '),
+            c if c.is_control() => None,
+            c => Some(c),
+        })
+        .collect();
+    escape_applescript(&typed)
+}
+
 /// Build a sanitized AppleScript variable name for a pane.
 pub fn pane_var(name: &str) -> String {
     let sanitized: String = name
@@ -64,6 +88,18 @@ mod tests {
     #[test]
     fn escape_applescript_no_escape_needed() {
         assert_eq!(escape_applescript("hello world"), "hello world");
+    }
+
+    #[test]
+    fn escape_typed_input_drops_line_editor_keystrokes() {
+        assert_eq!(
+            escape_typed_input("claude '\x01rm -rf ~; \x1b[A\u{7f}\u{9b}x'"),
+            "claude 'rm -rf ~; [Ax'"
+        );
+        assert_eq!(
+            escape_typed_input("a\tb\r\nc\n\"d\""),
+            "a b\n\nc\n\\\"d\\\""
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use super::applescript::{escape_applescript, pane_var, run_applescript};
+use super::applescript::{escape_applescript, escape_typed_input, pane_var, run_applescript};
 use super::{PaneSpec, TerminalBackend};
 use crate::config::types::SplitDirection;
 
@@ -25,7 +25,7 @@ impl Iterm2Backend {
         // the whole resulting line is then escaped for the AppleScript string.
         // The order matters: escaping the other way round would leave the shell
         // quoting mangled by AppleScript's own unescaping.
-        let cd_line = escape_applescript(&super::shell_cd(path_str));
+        let cd_line = escape_typed_input(&super::shell_cd(path_str));
         let mut lines = vec![
             r#"tell application "iTerm2""#.to_string(),
             "    tell current window".to_string(),
@@ -98,7 +98,7 @@ impl Iterm2Backend {
                 lines.push(format!("    tell {var}"));
                 for (k, v) in &pane.env {
                     // Shell-quote the export, then escape the line for AppleScript.
-                    let line = escape_applescript(&super::shell_export(k, v));
+                    let line = escape_typed_input(&super::shell_export(k, v));
                     lines.push(format!("        write text \"{line}\""));
                 }
                 lines.push("    end tell".to_string());
@@ -108,7 +108,7 @@ impl Iterm2Backend {
             if let Some(ref cmd) = pane.command
                 && !cmd.is_empty()
             {
-                let escaped_cmd = escape_applescript(cmd);
+                let escaped_cmd = escape_typed_input(cmd);
                 lines.push(format!("    tell {var}"));
                 lines.push(format!("        write text \"{escaped_cmd}\""));
                 lines.push("    end tell".to_string());
@@ -187,7 +187,7 @@ end tell"#
         }
 
         let escaped_id = escape_applescript(tab_id);
-        let escaped_cmd = escape_applescript(command);
+        let escaped_cmd = escape_typed_input(command);
         // AppleScript uses 1-based indexing
         let as_index = pane_index + 1;
 

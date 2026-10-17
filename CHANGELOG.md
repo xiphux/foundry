@@ -4,6 +4,7 @@
 
 ### Security
 
+- Ghostty and iTerm2 no longer type control characters from a pane command into the shell. Both backends type the command rather than passing it as an argument, so a control character in the agent prompt — which under `--issue` is GitHub issue text — reached the line editor as a keystroke: Ctrl-A in an issue body could move the cursor out of the quoted prompt and put a command of the issue author's choosing in front of it. Control characters are now dropped from typed lines.
 - Project names are validated when registered, explicitly or automatically. A project name is joined into worktree and status paths and interpolated into the quoted hook commands in `.claude/settings.local.json`, the same as a workspace name, but unlike one it was never checked — so a `'` broke out of that quoting and a `/` or leading `.` escaped the directory. Spaces and Unicode remain fine.
 
 ### Fixed
