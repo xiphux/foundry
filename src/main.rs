@@ -73,7 +73,28 @@ struct CommandEnv<'a> {
     state_path: &'a Path,
 }
 
-impl CommandEnv<'_> {
+impl<'a> CommandEnv<'a> {
+    /// The context a workflow runs inside, for one project.
+    fn ctx<'b>(
+        &self,
+        project: &'b str,
+        source_path: &'b Path,
+        config: &'b ResolvedConfig,
+        state: &'b mut WorkspaceState,
+    ) -> workflow::WorkflowCtx<'b>
+    where
+        'a: 'b,
+    {
+        workflow::WorkflowCtx {
+            project,
+            source_path,
+            config,
+            state,
+            state_path: self.state_path,
+            verbose: self.verbose,
+        }
+    }
+
     /// Run `f` on one existing workspace: the preamble every such command
     /// shares.
     ///
@@ -90,14 +111,7 @@ impl CommandEnv<'_> {
         let mut state = WorkspaceState::load_from(self.state_path)?;
         let ws = resolve_workspace(name, self.project, self.registry_path, &state, command)?;
         let resolved = load_config(&ws.source_path)?;
-        let mut c = ctx(
-            &ws.project_name,
-            &ws.source_path,
-            &resolved,
-            &mut state,
-            self.state_path,
-            self.verbose,
-        );
+        let mut c = self.ctx(&ws.project_name, &ws.source_path, &resolved, &mut state);
         f(&mut c, &ws.name)
     }
 }
@@ -121,25 +135,6 @@ fn restore_sigpipe() {
 
 #[cfg(not(unix))]
 fn restore_sigpipe() {}
-
-/// Build the context every workflow runs inside.
-fn ctx<'a>(
-    project: &'a str,
-    source_path: &'a Path,
-    config: &'a ResolvedConfig,
-    state: &'a mut WorkspaceState,
-    state_path: &'a Path,
-    verbose: bool,
-) -> workflow::WorkflowCtx<'a> {
-    workflow::WorkflowCtx {
-        project,
-        source_path,
-        config,
-        state,
-        state_path,
-        verbose,
-    }
-}
 
 fn main() -> std::process::ExitCode {
     match run() {
@@ -213,14 +208,7 @@ fn run() -> Result<()> {
                 resolved.issue_prompt.as_deref(),
             )?;
 
-            let mut c = ctx(
-                &project_name,
-                &source_path,
-                &resolved,
-                &mut state,
-                &state_path,
-                cli.verbose,
-            );
+            let mut c = env.ctx(&project_name, &source_path, &resolved, &mut state);
             workflow::start::run(
                 &mut c,
                 &resolved_name,
@@ -276,14 +264,7 @@ fn run() -> Result<()> {
                             eprintln!("Opening workspace '{ws_name}'...");
                         }
 
-                        let mut c = ctx(
-                            &project_name,
-                            &source_path,
-                            &resolved,
-                            &mut state,
-                            &state_path,
-                            cli.verbose,
-                        );
+                        let mut c = env.ctx(&project_name, &source_path, &resolved, &mut state);
                         let opened = workflow::open::open_workspace(
                             &mut c,
                             ws_name,
@@ -329,14 +310,7 @@ fn run() -> Result<()> {
                     );
                 }
 
-                let mut c = ctx(
-                    &project_name,
-                    &source_path,
-                    &resolved,
-                    &mut state,
-                    &state_path,
-                    cli.verbose,
-                );
+                let mut c = env.ctx(&project_name, &source_path, &resolved, &mut state);
                 workflow::open::open_workspace(&mut c, &name, &worktree_path, &Default::default())?;
             } else {
                 let mut registry = Registry::load_from(&registry_path)?;
@@ -429,14 +403,7 @@ fn run() -> Result<()> {
 
             if let Some(branch) = branch {
                 let mut state = WorkspaceState::load_from(&state_path)?;
-                let mut c = ctx(
-                    &project_name,
-                    &source_path,
-                    &resolved,
-                    &mut state,
-                    &state_path,
-                    cli.verbose,
-                );
+                let mut c = env.ctx(&project_name, &source_path, &resolved, &mut state);
                 workflow::restore::run(&mut c, &branch)?;
             } else {
                 workflow::restore::list_archived(&source_path, &resolved.archive_prefix)?;
