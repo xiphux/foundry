@@ -111,7 +111,7 @@ impl Forge for GitHubForge {
         check_gh()?;
 
         let output = Command::new("gh")
-            .args(["pr", "checks", branch, "--json", "name,state"])
+            .args(["pr", "checks", branch, "--json", "name,state,bucket"])
             .current_dir(repo_path)
             .output()
             .context("failed to run gh pr checks")?;
@@ -136,18 +136,36 @@ impl Forge for GitHubForge {
             .iter()
             .map(|item| {
                 let name = item["name"].as_str().unwrap_or("unknown").to_string();
-                let state = item["state"].as_str().unwrap_or("");
-                let conclusion = match state {
-                    "SUCCESS" => CheckConclusion::Pass,
-                    "FAILURE" | "ERROR" => CheckConclusion::Fail,
-                    "SKIPPED" | "NEUTRAL" => CheckConclusion::Skipped,
-                    _ => CheckConclusion::Pending,
-                };
+                let conclusion = check_conclusion(
+                    item["bucket"].as_str(),
+                    item["state"].as_str().unwrap_or(""),
+                );
                 CheckRun { name, conclusion }
             })
             .collect();
 
         Ok(ChecksStatus { checks })
+    }
+}
+
+/// Classify one check. `bucket` is gh's own summary of `state` and the field
+/// meant for this; `state` is the fallback, and lists the finished-but-not-
+/// passed states explicitly — treating every unlisted state as pending made a
+/// cancelled or timed-out run read as "still running" when `finish` asked.
+fn check_conclusion(bucket: Option<&str>, state: &str) -> CheckConclusion {
+    match bucket {
+        Some("pass") => return CheckConclusion::Pass,
+        Some("fail" | "cancel") => return CheckConclusion::Fail,
+        Some("skipping") => return CheckConclusion::Skipped,
+        Some("pending") => return CheckConclusion::Pending,
+        _ => {}
+    }
+    match state {
+        "SUCCESS" => CheckConclusion::Pass,
+        "FAILURE" | "ERROR" | "CANCELLED" | "TIMED_OUT" | "ACTION_REQUIRED" | "STARTUP_FAILURE"
+        | "STALE" => CheckConclusion::Fail,
+        "SKIPPED" | "NEUTRAL" => CheckConclusion::Skipped,
+        _ => CheckConclusion::Pending,
     }
 }
 
@@ -174,4 +192,46 @@ fn parse_pr_json_value(json: &serde_json::Value) -> Result<PrInfo> {
         .to_string();
 
     Ok(PrInfo { number, url })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_conclusion_prefers_the_bucket() {
+        assert_eq!(check_conclusion(Some("pass"), ""), CheckConclusion::Pass);
+        assert_eq!(
+            check_conclusion(Some("cancel"), "CANCELLED"),
+            CheckConclusion::Fail
+        );
+        assert_eq!(
+            check_conclusion(Some("skipping"), ""),
+            CheckConclusion::Skipped
+        );
+        assert_eq!(
+            check_conclusion(Some("pending"), "QUEUED"),
+            CheckConclusion::Pending
+        );
+    }
+
+    #[test]
+    fn check_conclusion_counts_finished_unsuccessful_states_as_failed() {
+        for state in [
+            "CANCELLED",
+            "TIMED_OUT",
+            "ACTION_REQUIRED",
+            "STARTUP_FAILURE",
+        ] {
+            assert_eq!(
+                check_conclusion(None, state),
+                CheckConclusion::Fail,
+                "{state}"
+            );
+        }
+        assert_eq!(
+            check_conclusion(None, "IN_PROGRESS"),
+            CheckConclusion::Pending
+        );
+    }
 }
