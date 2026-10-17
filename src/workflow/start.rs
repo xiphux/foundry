@@ -104,6 +104,11 @@ pub fn run(
         ports
     };
 
+    if let Some(parent) = worktree_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create directory {}", parent.display()))?;
+    }
+
     if verbose {
         eprintln!("Creating branch '{branch}'...");
     }
@@ -111,24 +116,22 @@ pub fn run(
     git::create_branch_from(source_path, &branch, &main_branch)
         .with_context(|| format!("failed to create branch '{branch}'"))?;
 
-    // Record history event
+    if verbose {
+        eprintln!("Creating worktree at {}...", worktree_path.display());
+    }
+    if let Err(e) = git::create_worktree(source_path, &worktree_path, &branch) {
+        // Nothing records the branch yet, so left behind it would only make
+        // the retry fail with "already exists". It has no commits to lose.
+        let _ = git::delete_branch(source_path, &branch);
+        return Err(e.context("failed to create worktree"));
+    }
+
     let _ = history::record(&history::HistoryEvent::started(
         project_name,
         name,
         &branch,
         issue_ref,
     ));
-
-    if let Some(parent) = worktree_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create directory {}", parent.display()))?;
-    }
-
-    if verbose {
-        eprintln!("Creating worktree at {}...", worktree_path.display());
-    }
-    git::create_worktree(source_path, &worktree_path, &branch)
-        .with_context(|| "failed to create worktree")?;
 
     // Record state BEFORE setup scripts so discard can clean up on failure
     ctx.state.add(Workspace {

@@ -226,6 +226,29 @@ fn start_applies_the_branch_prefix_and_rejects_a_bad_name() {
     assert_eq!(sb.state().list().len(), 1);
 }
 
+/// A worktree that cannot be created takes its new branch with it, so the
+/// retry is not refused over a branch nothing records.
+#[test]
+fn start_removes_the_branch_when_the_worktree_cannot_be_created() {
+    let sb = Sandbox::new();
+    // A path git still has registered, its directory gone: `worktree add`
+    // refuses it.
+    let target = sb.worktree("feat");
+    let target_str = target.to_str().unwrap();
+    git(
+        &sb.repo,
+        &["worktree", "add", "-q", "-b", "other", target_str],
+    );
+    std::fs::remove_dir_all(&target).unwrap();
+
+    sb.fails(&["start", "feat"]);
+    assert_eq!(sb.branches(), ["main", "other"]);
+    assert!(sb.history().is_empty());
+
+    git(&sb.repo, &["worktree", "prune"]);
+    sb.ok(&["start", "feat"]);
+}
+
 /// Finish merges into main, archives the branch (it has commits — merging
 /// must not make it look commitless and get it deleted), and removes the
 /// worktree, its registration and its state entry.
