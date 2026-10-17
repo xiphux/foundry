@@ -18,8 +18,9 @@ pub enum BranchCleanup {
     ///
     /// A branch that no longer exists is left alone either way.
     Archive { commits: u64 },
-    /// Delete the local branch unconditionally (e.g., after PR merge
-    /// where the remote branch was already deleted by the forge).
+    /// Delete the local branch unconditionally (e.g., after a PR merge, where
+    /// the work is on the forge's main and `finish` deletes the remote branch
+    /// itself).
     Delete,
 }
 
