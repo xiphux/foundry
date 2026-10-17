@@ -354,6 +354,8 @@ The following variables can be used in `command` and `working_dir` fields in scr
 | `{name}` | Short name (without prefix) |
 | `{project}` | Project name |
 
+Only a known name in braces is substituted. Other braces are left as they are, so shell syntax such as `awk '{print $1}'`, `${HOME}` or `--format '{{.Names}}'` works unchanged; an unknown name like `{wroktree}` is rejected as a likely typo.
+
 ### Config Merging Rules
 
 - **Scalar values** (branch_prefix, agent_command, etc.): project overrides global
