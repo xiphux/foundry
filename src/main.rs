@@ -64,6 +64,44 @@ fn load_config(source_path: &Path) -> Result<ResolvedConfig> {
     ))
 }
 
+/// What every command runs with, fixed for the whole invocation.
+struct CommandEnv<'a> {
+    /// `--project`, if given.
+    project: Option<&'a str>,
+    verbose: bool,
+    registry_path: &'a Path,
+    state_path: &'a Path,
+}
+
+impl CommandEnv<'_> {
+    /// Run `f` on one existing workspace: the preamble every such command
+    /// shares.
+    ///
+    /// Loads state, resolves the workspace — by name, or from the current
+    /// directory when none is given (`command` names the command in that
+    /// error) — and loads its project's config, which is also what runs the
+    /// trust gate.
+    fn with_workspace(
+        &self,
+        name: Option<String>,
+        command: &str,
+        f: impl FnOnce(&mut workflow::WorkflowCtx, &str) -> Result<()>,
+    ) -> Result<()> {
+        let mut state = WorkspaceState::load_from(self.state_path)?;
+        let ws = resolve_workspace(name, self.project, self.registry_path, &state, command)?;
+        let resolved = load_config(&ws.source_path)?;
+        let mut c = ctx(
+            &ws.project_name,
+            &ws.source_path,
+            &resolved,
+            &mut state,
+            self.state_path,
+            self.verbose,
+        );
+        f(&mut c, &ws.name)
+    }
+}
+
 /// Restore the default `SIGPIPE` disposition.
 ///
 /// Rust ignores `SIGPIPE` and surfaces the closed pipe as an `EPIPE` error,
@@ -126,6 +164,12 @@ fn run() -> Result<()> {
 
     foundry::fs_util::secure_default_home()?;
     let (registry_path, state_path) = workflow::foundry_paths()?;
+    let env = CommandEnv {
+        project: cli.project.as_deref(),
+        verbose: cli.verbose,
+        registry_path: &registry_path,
+        state_path: &state_path,
+    };
 
     match cli.command {
         cli::Commands::Start {
@@ -321,54 +365,13 @@ fn run() -> Result<()> {
             }
         }
         cli::Commands::Edit { name } => {
-            let mut state = WorkspaceState::load_from(&state_path)?;
-            let ws =
-                resolve_workspace(name, cli.project.as_deref(), &registry_path, &state, "edit")?;
-            let resolved = load_config(&ws.source_path)?;
-            let mut c = ctx(
-                &ws.project_name,
-                &ws.source_path,
-                &resolved,
-                &mut state,
-                &state_path,
-                cli.verbose,
-            );
-            workflow::edit::run(&mut c, &ws.name)?;
+            env.with_workspace(name, "edit", workflow::edit::run)?;
         }
         cli::Commands::Browse { name } => {
-            let mut state = WorkspaceState::load_from(&state_path)?;
-            let ws = resolve_workspace(
-                name,
-                cli.project.as_deref(),
-                &registry_path,
-                &state,
-                "browse",
-            )?;
-            let resolved = load_config(&ws.source_path)?;
-            let mut c = ctx(
-                &ws.project_name,
-                &ws.source_path,
-                &resolved,
-                &mut state,
-                &state_path,
-                cli.verbose,
-            );
-            workflow::edit::browse(&mut c, &ws.name)?;
+            env.with_workspace(name, "browse", workflow::edit::browse)?;
         }
         cli::Commands::Diff { name, stat } => {
-            let mut state = WorkspaceState::load_from(&state_path)?;
-            let ws =
-                resolve_workspace(name, cli.project.as_deref(), &registry_path, &state, "diff")?;
-            let resolved = load_config(&ws.source_path)?;
-            let mut c = ctx(
-                &ws.project_name,
-                &ws.source_path,
-                &resolved,
-                &mut state,
-                &state_path,
-                cli.verbose,
-            );
-            workflow::diff::run(&mut c, &ws.name, stat)?;
+            env.with_workspace(name, "diff", |c, name| workflow::diff::run(c, name, stat))?;
         }
         cli::Commands::Switch { name } => {
             let mut state = WorkspaceState::load_from(&state_path)?;
@@ -425,46 +428,14 @@ fn run() -> Result<()> {
             }
         }
         cli::Commands::Finish { name, local } => {
-            let mut state = WorkspaceState::load_from(&state_path)?;
-            let ws = resolve_workspace(
-                name,
-                cli.project.as_deref(),
-                &registry_path,
-                &state,
-                "finish",
-            )?;
-            let resolved = load_config(&ws.source_path)?;
-
-            let mut c = ctx(
-                &ws.project_name,
-                &ws.source_path,
-                &resolved,
-                &mut state,
-                &state_path,
-                cli.verbose,
-            );
-            workflow::finish::run(&mut c, &ws.name, local, cli.yes)?;
+            env.with_workspace(name, "finish", |c, name| {
+                workflow::finish::run(c, name, local, cli.yes)
+            })?;
         }
         cli::Commands::Discard { name, force } => {
-            let mut state = WorkspaceState::load_from(&state_path)?;
-            let ws = resolve_workspace(
-                name,
-                cli.project.as_deref(),
-                &registry_path,
-                &state,
-                "discard",
-            )?;
-            let resolved = load_config(&ws.source_path)?;
-
-            let mut c = ctx(
-                &ws.project_name,
-                &ws.source_path,
-                &resolved,
-                &mut state,
-                &state_path,
-                cli.verbose,
-            );
-            workflow::discard::run(&mut c, &ws.name, cli.yes, force)?;
+            env.with_workspace(name, "discard", |c, name| {
+                workflow::discard::run(c, name, cli.yes, force)
+            })?;
         }
         cli::Commands::Restore { branch } => {
             let mut registry = Registry::load_from(&registry_path)?;
@@ -626,40 +597,12 @@ fn run() -> Result<()> {
             workflow::status::run(&state, &state_path, watch)?;
         }
         cli::Commands::Pr { name, title, body } => {
-            let mut state = WorkspaceState::load_from(&state_path)?;
-            let ws = resolve_workspace(name, cli.project.as_deref(), &registry_path, &state, "pr")?;
-            let resolved = load_config(&ws.source_path)?;
-
-            let mut c = ctx(
-                &ws.project_name,
-                &ws.source_path,
-                &resolved,
-                &mut state,
-                &state_path,
-                cli.verbose,
-            );
-            workflow::pr::run(&mut c, &ws.name, title.as_deref(), body.as_deref())?;
+            env.with_workspace(name, "pr", |c, name| {
+                workflow::pr::run(c, name, title.as_deref(), body.as_deref())
+            })?;
         }
         cli::Commands::Checks { name } => {
-            let mut state = WorkspaceState::load_from(&state_path)?;
-            let ws = resolve_workspace(
-                name,
-                cli.project.as_deref(),
-                &registry_path,
-                &state,
-                "checks",
-            )?;
-            let resolved = load_config(&ws.source_path)?;
-
-            let mut c = ctx(
-                &ws.project_name,
-                &ws.source_path,
-                &resolved,
-                &mut state,
-                &state_path,
-                cli.verbose,
-            );
-            workflow::checks::run(&mut c, &ws.name)?;
+            env.with_workspace(name, "checks", workflow::checks::run)?;
         }
         cli::Commands::Completions { shell } => {
             clap_complete::generate(
