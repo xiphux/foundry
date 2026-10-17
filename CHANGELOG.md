@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- A layout that puts the same agent in two panes is refused before `start` creates anything. It used to be caught only after the branch, worktree and state entry existed, leaving them to clean up with `discard`.
 - Answering no to a `finish` or `discard` confirmation exits with status 1, so `foundry finish x && deploy` no longer carries on after a decline. The discard prompt is also on stderr now, like the others.
 - A `foundry start` whose worktree cannot be created no longer leaves its new branch behind, which made every retry fail with "branch already exists".
 - `start` and `restore` refuse, before creating anything, when no block of free ports is left in the range. They used to hand out ports past the end of it — duplicates of ports already in use, or a crash with `port_range_start` near 65535.

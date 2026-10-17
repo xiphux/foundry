@@ -132,23 +132,13 @@ pub fn run(
     });
     ctx.state.save_to(state_path)?;
 
-    // Validate that no agent type appears in more than one pane
-    let mut seen_agents = std::collections::HashMap::new();
-    for pane in &config.panes {
-        if let Some(ref agent) = pane.agent {
-            if let Some(existing_pane) = seen_agents.get(agent) {
-                anyhow::bail!(
-                    "agent '{agent}' is configured in both pane '{existing_pane}' and pane '{}'. \
-                     Each agent type can only appear in one pane per workspace.",
-                    pane.name
-                );
-            }
-            seen_agents.insert(agent.clone(), pane.name.clone());
-        }
-    }
-
-    // Set up agent-specific workspace configuration for each unique agent in the panes
-    let agents: Vec<String> = seen_agents.into_keys().collect();
+    // Set up agent-specific workspace configuration for each agent in the
+    // panes; `validate_panes` has already ensured each appears only once.
+    let agents: Vec<&str> = config
+        .panes
+        .iter()
+        .filter_map(|p| p.agent.as_deref())
+        .collect();
 
     // Build worktree context for agents that support it (e.g., Claude SessionStart hook)
     let agent_context = build_agent_context(config, ctx.state, &worktree_path);

@@ -93,6 +93,7 @@ pub fn validate_panes(panes: &[super::PaneConfig]) -> Result<()> {
 
     let mut seen: Vec<&str> = Vec::new();
     let mut seen_vars: Vec<(String, &str)> = Vec::new();
+    let mut seen_agents: Vec<(&str, &str)> = Vec::new();
 
     for (i, pane) in panes.iter().enumerate() {
         if pane.name.is_empty() {
@@ -117,6 +118,19 @@ pub fn validate_panes(panes: &[super::PaneConfig]) -> Result<()> {
             );
         }
         seen_vars.push((var, &pane.name));
+
+        // One agent per type: its status file and settings are per workspace
+        // and agent, so two panes of the same agent would share them.
+        if let Some(agent) = pane.agent.as_deref() {
+            if let Some((_, other)) = seen_agents.iter().find(|(a, _)| *a == agent) {
+                bail!(
+                    "agent '{agent}' is configured in both pane '{other}' and pane '{}'. \
+                     Each agent type can only appear in one pane per workspace.",
+                    pane.name
+                );
+            }
+            seen_agents.push((agent, &pane.name));
+        }
 
         match (i, &pane.split_from) {
             // The first pane becomes the tab itself, so it has nothing to split from.
@@ -338,6 +352,15 @@ mod tests {
     fn validate_panes_accepts_the_default_layout() {
         let panes = vec![pane("agent", None), pane("shell", Some("agent"))];
         assert!(validate_panes(&panes).is_ok());
+    }
+
+    #[test]
+    fn validate_panes_rejects_an_agent_in_two_panes() {
+        let mut panes = vec![pane("a", None), pane("b", Some("a"))];
+        panes[0].agent = Some("claude".into());
+        panes[1].agent = Some("claude".into());
+        let err = validate_panes(&panes).unwrap_err().to_string();
+        assert!(err.contains("both pane 'a' and pane 'b'"), "{err}");
     }
 
     #[test]
