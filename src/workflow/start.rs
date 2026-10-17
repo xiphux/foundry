@@ -62,10 +62,11 @@ pub fn run(
     // workspace that happened to have the same name.
     agent_hooks::clear_agent_conversations(&worktree_path);
 
+    let main_branch = git::detect_main_branch(source_path)?;
+
     // Fetch and fast-forward main if requested (via --fetch flag or auto_fetch config)
     if fetch || config.auto_fetch {
         let remote = &config.fetch_remote;
-        let main_branch = git::detect_main_branch(source_path)?;
 
         if verbose {
             eprintln!("Fetching from {remote}...");
@@ -88,7 +89,8 @@ pub fn run(
     if verbose {
         eprintln!("Creating branch '{branch}'...");
     }
-    git::create_branch(source_path, &branch)
+    // From main, not HEAD: the source repo may be checked out on anything.
+    git::create_branch_from(source_path, &branch, &main_branch)
         .with_context(|| format!("failed to create branch '{branch}'"))?;
 
     // Record history event

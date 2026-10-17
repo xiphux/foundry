@@ -509,3 +509,93 @@ fn exclude_locally_hides_a_file_in_every_worktree_and_is_idempotent() {
     let exclude = std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap();
     assert_eq!(exclude.lines().filter(|l| *l == pattern).count(), 1);
 }
+
+/// A clone of a repo whose `main` has moved on since, checked out on `wip`.
+fn clone_behind_on_another_branch() -> (TempDir, TempDir) {
+    let origin = init_test_repo();
+    let clone = TempDir::new().unwrap();
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(
+        clone.path(),
+        &["clone", "-q", origin.path().to_str().unwrap(), "."],
+    );
+    git(
+        origin.path(),
+        &["commit", "--allow-empty", "-q", "-m", "upstream"],
+    );
+    git(clone.path(), &["checkout", "-q", "-b", "wip"]);
+    foundry::git::fetch(clone.path(), "origin").unwrap();
+    (origin, clone)
+}
+
+fn rev(dir: &std::path::Path, rev: &str) -> String {
+    let out = Command::new("git")
+        .args(["rev-parse", rev])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+#[test]
+fn ff_to_remote_moves_main_even_when_another_branch_is_checked_out() {
+    let (origin, clone) = clone_behind_on_another_branch();
+    let wip_before = rev(clone.path(), "wip");
+
+    foundry::git::ff_to_remote(clone.path(), "origin", "main").unwrap();
+
+    assert_eq!(rev(clone.path(), "main"), rev(origin.path(), "main"));
+    assert_eq!(
+        rev(clone.path(), "wip"),
+        wip_before,
+        "HEAD's branch is untouched"
+    );
+}
+
+#[test]
+fn ff_to_remote_moves_the_checked_out_main() {
+    let (origin, clone) = clone_behind_on_another_branch();
+    Command::new("git")
+        .args(["checkout", "-q", "main"])
+        .current_dir(clone.path())
+        .output()
+        .unwrap();
+
+    foundry::git::ff_to_remote(clone.path(), "origin", "main").unwrap();
+
+    assert_eq!(rev(clone.path(), "main"), rev(origin.path(), "main"));
+}
+
+#[test]
+fn create_branch_from_ignores_head() {
+    let (_origin, clone) = clone_behind_on_another_branch();
+    Command::new("git")
+        .args(["commit", "--allow-empty", "-q", "-m", "wip work"])
+        .current_dir(clone.path())
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .output()
+        .unwrap();
+
+    foundry::git::create_branch_from(clone.path(), "feat", "main").unwrap();
+
+    assert_eq!(rev(clone.path(), "feat"), rev(clone.path(), "main"));
+    assert_ne!(rev(clone.path(), "feat"), rev(clone.path(), "wip"));
+}

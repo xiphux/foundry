@@ -148,6 +148,16 @@ fn do_local_merge(ctx: &mut super::WorkflowCtx, ws: &super::ActiveWorkspace) -> 
 
     let main_branch = git::detect_main_branch(source_path)?;
 
+    // The merge below lands on HEAD, so HEAD has to be main. Checked before the
+    // fetch so that a refusal leaves the repo untouched.
+    let current = git::current_branch(source_path)?;
+    if current != main_branch {
+        anyhow::bail!(
+            "main repo is on branch '{current}', expected '{main_branch}'. \
+             Checkout '{main_branch}' before finishing."
+        );
+    }
+
     // Fetch and fast-forward main before merging (same logic as start)
     if config.auto_fetch {
         let remote = &config.fetch_remote;
@@ -167,14 +177,6 @@ fn do_local_merge(ctx: &mut super::WorkflowCtx, ws: &super::ActiveWorkspace) -> 
                  Resolve manually with `git pull` in your source repo, then retry."
             )
         })?;
-    }
-
-    let current = git::current_branch(source_path)?;
-    if current != main_branch {
-        anyhow::bail!(
-            "main repo is on branch '{current}', expected '{main_branch}'. \
-             Checkout '{main_branch}' before finishing."
-        );
     }
 
     let commit_count = git::commit_count(source_path, branch, &main_branch)?;

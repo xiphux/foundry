@@ -84,6 +84,12 @@ pub fn create_branch(repo_path: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Create a branch at `start_point` rather than at whatever HEAD happens to be.
+pub fn create_branch_from(repo_path: &Path, name: &str, start_point: &str) -> Result<()> {
+    run_git(repo_path, &["branch", "--", name, start_point])?;
+    Ok(())
+}
+
 pub fn create_worktree(repo_path: &Path, worktree_path: &Path, branch: &str) -> Result<()> {
     let path_str = worktree_path.to_str().context("invalid worktree path")?;
     run_git(repo_path, &["worktree", "add", "--", path_str, branch])?;
@@ -146,12 +152,25 @@ pub fn fetch(repo_path: &Path, remote: &str) -> Result<()> {
     Ok(())
 }
 
-/// Fast-forward the current branch to match a remote tracking branch.
-/// Fails if the merge is not a fast-forward (e.g., local and remote have diverged).
+/// Fast-forward local `branch` to its remote tracking branch, whether or not
+/// it is the one checked out. Fails if it is not a fast-forward (e.g., local
+/// and remote have diverged).
+///
+/// A plain `merge --ff-only` moves HEAD, so with the source repo on some other
+/// branch it fast-forwarded *that* branch and left `branch` stale. When
+/// `branch` is not checked out, a fetch from the repo itself updates the ref
+/// directly: without a `+` the refspec is fast-forward-only, and git refuses it
+/// if another worktree has `branch` checked out.
 pub fn ff_to_remote(repo_path: &Path, remote: &str, branch: &str) -> Result<()> {
     let remote_ref = format!("{remote}/{branch}");
     reject_option_like(&remote_ref, "merge target")?;
-    run_git(repo_path, &["merge", "--ff-only", &remote_ref])?;
+    reject_option_like(branch, "branch")?;
+    if current_branch(repo_path)? == branch {
+        run_git(repo_path, &["merge", "--ff-only", &remote_ref])?;
+    } else {
+        let refspec = format!("refs/remotes/{remote}/{branch}:refs/heads/{branch}");
+        run_git(repo_path, &["fetch", "--", ".", &refspec])?;
+    }
     Ok(())
 }
 

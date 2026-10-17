@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- `foundry start` branches from main even when the source repository has something else checked out, and fast-forwarding main (`--fetch`, `auto_fetch`, and after a PR merge) updates main itself. Both used to act on whatever HEAD was, so with the source repo on `wip` a new workspace started from `wip`, and the fast-forward moved `wip` while main stayed stale. `finish` now checks that main is checked out before fetching rather than after.
 - The worktree-scoped `Read`/`Edit`/`Write`/`Glob`/`Grep` rules foundry writes into `.claude/settings.local.json` now take effect. Claude reads a single leading `/` in those rules as relative to the settings file — absolute paths need `//` — so the rules pointed at a directory that does not exist and never matched. The path is also escaped now, so a `*`, `?` or `[` in a directory name matches only that directory rather than acting as a wildcard.
 - `foundry discard` can clear a workspace whose branch was deleted by hand. It tried to archive the missing branch after the worktree was already gone, failed, and left a state entry no rerun could remove.
 - A branch is never deleted because git's commit count could not be read. An unexpected answer used to count as zero commits, and a branch with none is deleted rather than archived; it is now an error.
