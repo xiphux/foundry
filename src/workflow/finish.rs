@@ -177,14 +177,7 @@ fn do_local_merge(ctx: &mut super::WorkflowCtx, ws: &super::ActiveWorkspace) -> 
         );
     }
 
-    let has_commits = git::branch_has_commits(source_path, branch, &main_branch).unwrap_or(true);
-    let commit_count = if has_commits {
-        git::log_commits(source_path, &main_branch, branch)
-            .map(|log| log.lines().filter(|l| !l.is_empty()).count() as u64)
-            .unwrap_or(0)
-    } else {
-        0
-    };
+    let commit_count = git::commit_count(source_path, branch, &main_branch)?;
 
     if verbose {
         eprintln!("Merging '{branch}' into '{main_branch}'...");
@@ -224,7 +217,7 @@ fn do_local_merge(ctx: &mut super::WorkflowCtx, ws: &super::ActiveWorkspace) -> 
         // every merged branch as commitless and delete it instead of archiving
         // it — which is what has been happening.
         super::BranchCleanup::Archive {
-            has_commits: Some(has_commits),
+            commits: commit_count,
         },
         false,
         |_| history_event,

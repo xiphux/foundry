@@ -337,6 +337,23 @@ fn discard_clears_a_workspace_whose_directory_is_gone() {
 }
 
 #[test]
+fn discard_clears_a_workspace_whose_branch_was_deleted_by_hand() {
+    let sb = Sandbox::new();
+    sb.ok(&["start", "gone"]);
+    sb.commit_in("gone", "work.txt");
+    let worktree = sb.worktree("gone");
+    git(
+        &sb.repo,
+        &["worktree", "remove", "--force", worktree.to_str().unwrap()],
+    );
+    git(&sb.repo, &["branch", "-D", "gone"]);
+
+    sb.ok(&["discard", "gone"]);
+    assert!(sb.state().list().is_empty());
+    assert_eq!(sb.branches(), ["main"]);
+}
+
+#[test]
 fn restore_recreates_a_workspace_from_its_archive() {
     let sb = Sandbox::new();
     sb.ok(&["start", "feat"]);

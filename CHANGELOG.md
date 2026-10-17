@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- `foundry discard` can clear a workspace whose branch was deleted by hand. It tried to archive the missing branch after the worktree was already gone, failed, and left a state entry no rerun could remove.
+- A branch is never deleted because git's commit count could not be read. An unexpected answer used to count as zero commits, and a branch with none is deleted rather than archived; it is now an error.
 - `foundry finish` and `foundry pr` no longer refuse a Claude workspace over foundry's own `.claude/settings.local.json`. The file is untracked, so unless your global gitignore already covered it, every finish failed with "uncommitted changes" and `status` showed the workspace dirty. Foundry now adds the path to the repository's `.git/info/exclude`, which is local to the clone and never committed.
 - A workspace opened in bare mode, tmux or Zellij no longer overwrites state recorded while it was open. Those backends hold `start`/`open` until the session ends, and saving afterwards wrote back the state as it was beforehand — dropping a PR recorded by `foundry pr` (so `finish` merged locally and left the PR open) or resurrecting a workspace that had been finished.
 

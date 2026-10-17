@@ -179,7 +179,11 @@ pub fn commit_count(repo_path: &Path, branch: &str, base: &str) -> Result<u64> {
         repo_path,
         &["rev-list", "--count", &format!("{base}..{branch}")],
     )?;
-    Ok(output.parse().unwrap_or(0))
+    // An error, not zero: callers delete a branch with no commits and archive
+    // one with some, so misreading the output as "none" would throw work away.
+    output
+        .parse()
+        .with_context(|| format!("unexpected `git rev-list --count` output: {output:?}"))
 }
 
 /// Check if a branch has any commits that aren't on the base branch.

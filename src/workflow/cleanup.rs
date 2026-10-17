@@ -8,16 +8,16 @@ use crate::terminal;
 pub enum BranchCleanup {
     /// Archive the branch if it has commits, otherwise delete it.
     ///
-    /// `has_commits` carries a decision the caller already made. It exists for
-    /// callers that change history before cleanup runs: `finish` merges the
-    /// branch into main first, which makes `main..branch` empty, so recomputing
-    /// here concluded "no commits" for a branch that had twenty — deleting it
-    /// instead of archiving it, contradicting the archive rule in CLAUDE.md and
-    /// leaving `foundry restore` with nothing to restore from.
+    /// `commits` is counted by the caller, never here: `finish` merges the
+    /// branch into main before cleanup runs, which makes `main..branch` empty,
+    /// so recomputing here concluded "no commits" for a branch that had twenty
+    /// — deleting it instead of archiving it, contradicting the archive rule in
+    /// CLAUDE.md and leaving `foundry restore` with nothing to restore from.
+    /// The caller also needs the same number for its history event, and one
+    /// count cannot disagree with itself.
     ///
-    /// `None` recomputes, which is correct for `discard`: nothing has moved, so
-    /// the count taken here is the true one.
-    Archive { has_commits: Option<bool> },
+    /// A branch that no longer exists is left alone either way.
+    Archive { commits: u64 },
     /// Delete the local branch unconditionally (e.g., after PR merge
     /// where the remote branch was already deleted by the forge).
     Delete,
@@ -154,17 +154,16 @@ pub fn cleanup_workspace(
 
     // Handle local branch cleanup
     let archived_as = match branch_cleanup {
-        BranchCleanup::Archive { has_commits } => {
-            let has_commits = match has_commits {
-                Some(decided) => decided,
-                None => git::branch_has_commits(
-                    source_path,
-                    branch,
-                    &git::detect_main_branch(source_path)?,
-                )
-                .unwrap_or(true),
-            };
-            if has_commits {
+        BranchCleanup::Archive { .. } if !git::branch_exists(source_path, branch)? => {
+            // Deleted by hand. Failing here, after the worktree is already
+            // gone, would leave a state entry no rerun could ever clear.
+            if verbose {
+                eprintln!("Branch '{branch}' no longer exists, nothing to archive.");
+            }
+            None
+        }
+        BranchCleanup::Archive { commits } => {
+            if commits > 0 {
                 if verbose {
                     eprintln!("Archiving branch '{branch}'...");
                 }

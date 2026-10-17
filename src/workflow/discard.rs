@@ -19,17 +19,14 @@ pub fn run(
     let worktree_present = ws.worktree_path.exists();
 
     // Check for unmerged commits — require --force to discard work
-    let main_branch = git::detect_main_branch(source_path)?;
-    let has_commits =
-        git::branch_has_commits(source_path, &ws.branch, &main_branch).unwrap_or(false);
-    let commit_count = if has_commits {
-        git::log_commits(source_path, &main_branch, &ws.branch)
-            .map(|log| log.lines().filter(|l| !l.is_empty()).count() as u64)
-            .unwrap_or(0)
+    // A branch deleted by hand has nothing left to lose and nothing to count.
+    let commit_count = if git::branch_exists(source_path, &ws.branch)? {
+        let main_branch = git::detect_main_branch(source_path)?;
+        git::commit_count(source_path, &ws.branch, &main_branch)?
     } else {
         0
     };
-    if has_commits && !force {
+    if commit_count > 0 && !force {
         let s = if commit_count == 1 { "" } else { "s" };
         anyhow::bail!(
             "branch '{}' has {commit_count} unmerged commit{s}. \
@@ -68,9 +65,9 @@ pub fn run(
     super::cleanup_workspace(
         ctx,
         &ws,
-        // Recomputed inside cleanup: discard changes no history beforehand, so
-        // the count taken there is the true one.
-        super::BranchCleanup::Archive { has_commits: None },
+        super::BranchCleanup::Archive {
+            commits: commit_count,
+        },
         // Discard exists to throw work away, so a dirty worktree is expected
         // here — unlike finish, which refuses to run on one.
         true,
@@ -80,8 +77,7 @@ pub fn run(
         // Announced from inside the cleanup rather than before it, so the
         // message is only printed once the branch has actually been dealt with.
         // `archived_as` is the outcome itself, so this reports what happened
-        // instead of re-deriving it from `has_commits` — which is computed with
-        // the opposite error fallback and can disagree.
+        // instead of re-deriving it from the count.
         |archived_as| match archived_as {
             Some(archived) => {
                 eprintln!("Discarded workspace '{name}'. Branch '{branch}' archived as {archived}.")
