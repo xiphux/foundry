@@ -9,6 +9,16 @@ pub enum MergeStrategy {
     Merge,
 }
 
+impl MergeStrategy {
+    /// The config spelling, which is also what the history log records.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MergeStrategy::FfOnly => "ff-only",
+            MergeStrategy::Merge => "merge",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum SplitDirection {
@@ -65,4 +75,22 @@ pub struct PaneOverride {
     /// If true, defer this pane's command until after deferred setup scripts.
     #[serde(default)]
     pub deferred: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `as_str` is the spelling a config is parsed from.
+    #[test]
+    fn merge_strategy_as_str_round_trips_through_serde() {
+        for strategy in [MergeStrategy::FfOnly, MergeStrategy::Merge] {
+            let parsed: MergeStrategy =
+                serde::Deserialize::deserialize(serde::de::value::StrDeserializer::<
+                    serde::de::value::Error,
+                >::new(strategy.as_str()))
+                .unwrap();
+            assert_eq!(parsed, strategy);
+        }
+    }
 }

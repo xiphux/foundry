@@ -195,13 +195,13 @@ fn do_local_merge(ctx: &mut super::WorkflowCtx, ws: &super::ActiveWorkspace) -> 
         }
     }
 
-    let strategy_str = match config.merge_strategy {
-        MergeStrategy::FfOnly => "ff-only",
-        MergeStrategy::Merge => "merge",
-    };
-
-    let history_event =
-        history::HistoryEvent::finished(ctx.project, name, branch, commit_count, strategy_str);
+    let history_event = history::HistoryEvent::finished(
+        ctx.project,
+        name,
+        branch,
+        commit_count,
+        config.merge_strategy.as_str(),
+    );
 
     super::cleanup_workspace(
         ctx,
