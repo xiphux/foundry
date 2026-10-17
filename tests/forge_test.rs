@@ -1,79 +1,50 @@
-use std::process::Command;
-use tempfile::TempDir;
-
-fn init_test_repo() -> TempDir {
-    let dir = TempDir::new().unwrap();
-    Command::new("git")
-        .args(["init", "--initial-branch=main"])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
-    // Configure git identity for CI environments without global config
-    Command::new("git")
-        .args(["config", "user.email", "test@test.com"])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
-    Command::new("git")
-        .args(["config", "user.name", "Test"])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
-    Command::new("git")
-        .args(["commit", "--allow-empty", "-m", "initial"])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
-    dir
-}
+mod common;
+use common::*;
 
 #[test]
 fn test_list_remotes_none() {
-    let dir = init_test_repo();
+    let dir = init_repo();
     let remotes = foundry::git::list_remotes(dir.path()).unwrap();
     assert!(remotes.is_empty());
 }
 
 #[test]
 fn test_list_remotes_single() {
-    let dir = init_test_repo();
-    Command::new("git")
-        .args([
+    let dir = init_repo();
+    git(
+        dir.path(),
+        &[
             "remote",
             "add",
             "origin",
             "https://github.com/user/repo.git",
-        ])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
+        ],
+    );
     let remotes = foundry::git::list_remotes(dir.path()).unwrap();
     assert_eq!(remotes, vec!["origin"]);
 }
 
 #[test]
 fn test_list_remotes_multiple() {
-    let dir = init_test_repo();
-    Command::new("git")
-        .args([
+    let dir = init_repo();
+    git(
+        dir.path(),
+        &[
             "remote",
             "add",
             "origin",
             "https://github.com/user/repo.git",
-        ])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
-    Command::new("git")
-        .args([
+        ],
+    );
+    git(
+        dir.path(),
+        &[
             "remote",
             "add",
             "upstream",
             "https://github.com/org/repo.git",
-        ])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
+        ],
+    );
     let mut remotes = foundry::git::list_remotes(dir.path()).unwrap();
     remotes.sort();
     assert_eq!(remotes, vec!["origin", "upstream"]);
@@ -81,24 +52,23 @@ fn test_list_remotes_multiple() {
 
 #[test]
 fn test_remote_url() {
-    let dir = init_test_repo();
-    Command::new("git")
-        .args([
+    let dir = init_repo();
+    git(
+        dir.path(),
+        &[
             "remote",
             "add",
             "origin",
             "https://github.com/user/repo.git",
-        ])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
+        ],
+    );
     let url = foundry::git::remote_url(dir.path(), "origin").unwrap();
     assert_eq!(url, "https://github.com/user/repo.git");
 }
 
 #[test]
 fn test_push_branch_no_remote() {
-    let dir = init_test_repo();
+    let dir = init_repo();
     // push_branch should fail when no remote exists
     let result = foundry::git::push_branch(dir.path(), "origin", "main");
     assert!(result.is_err());
@@ -160,17 +130,16 @@ fn test_resolve_pr_remote_empty_defaults_to_origin() {
 
 #[test]
 fn test_detect_forge_with_github_remote() {
-    let dir = init_test_repo();
-    Command::new("git")
-        .args([
+    let dir = init_repo();
+    git(
+        dir.path(),
+        &[
             "remote",
             "add",
             "origin",
             "https://github.com/user/repo.git",
-        ])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
+        ],
+    );
 
     let result = foundry::forge::detect_forge(dir.path(), None);
     assert!(result.is_ok());
@@ -180,17 +149,16 @@ fn test_detect_forge_with_github_remote() {
 
 #[test]
 fn test_detect_forge_with_unknown_remote() {
-    let dir = init_test_repo();
-    Command::new("git")
-        .args([
+    let dir = init_repo();
+    git(
+        dir.path(),
+        &[
             "remote",
             "add",
             "origin",
             "https://bitbucket.org/user/repo.git",
-        ])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
+        ],
+    );
 
     let result = foundry::forge::detect_forge(dir.path(), None);
     assert!(result.is_err());
@@ -203,7 +171,7 @@ fn test_detect_forge_with_unknown_remote() {
 
 #[test]
 fn test_detect_forge_no_remotes() {
-    let dir = init_test_repo();
+    let dir = init_repo();
 
     let result = foundry::forge::detect_forge(dir.path(), None);
     assert!(result.is_err());
@@ -216,27 +184,25 @@ fn test_detect_forge_no_remotes() {
 
 #[test]
 fn test_detect_forge_configured_remote() {
-    let dir = init_test_repo();
-    Command::new("git")
-        .args([
+    let dir = init_repo();
+    git(
+        dir.path(),
+        &[
             "remote",
             "add",
             "origin",
             "https://bitbucket.org/user/repo.git",
-        ])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
-    Command::new("git")
-        .args([
+        ],
+    );
+    git(
+        dir.path(),
+        &[
             "remote",
             "add",
             "github",
             "https://github.com/user/repo.git",
-        ])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
+        ],
+    );
 
     // Without config, defaults to "origin" (bitbucket) — should fail
     let result = foundry::forge::detect_forge(dir.path(), None);
