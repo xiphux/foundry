@@ -496,6 +496,39 @@ fn start_issue_asks_gh_in_the_projects_repo() {
     assert!(sb.state().find("myapp", "7-from-myapp").is_some());
 }
 
+/// Restore sets a workspace up the way start does, deferred scripts included.
+/// Bare mode cannot type into a pane later, so the deferred script is chained
+/// ahead of the pane command and runs as the workspace opens.
+#[test]
+fn restore_runs_deferred_setup_scripts_like_start() {
+    let sb = Sandbox::new();
+    let project_config = "[[scripts.setup]]\n\
+         name = \"record deferred\"\n\
+         command = 'echo {name} >> \"$FOUNDRY_HOME/deferred-ran\"'\n\
+         deferred = true\n\n\
+         [panes.main]\n\
+         deferred = true\n";
+    std::fs::write(sb.repo.join(".foundry.toml"), project_config).unwrap();
+    git(&sb.repo, &["add", ".foundry.toml"]);
+    git(&sb.repo, &["commit", "-q", "-m", "project config"]);
+    let mut store =
+        foundry::trust::TrustStore::load_from(&sb.home.path().join("trust.toml")).unwrap();
+    store.trust(&sb.repo, &foundry::trust::hash_config(project_config));
+    store.save_to(&sb.home.path().join("trust.toml")).unwrap();
+
+    sb.ok(&["start", "feat"]);
+    sb.commit_in("feat", "work.txt");
+    sb.ok(&["discard", "feat", "--force"]);
+    let archived = sb
+        .branches()
+        .into_iter()
+        .find(|b| b.starts_with("archive/feat-"))
+        .unwrap();
+    sb.ok(&["restore", &archived]);
+
+    assert_eq!(sb.home_file("deferred-ran").lines().count(), 2);
+}
+
 #[test]
 fn open_reopens_an_existing_workspace() {
     let sb = Sandbox::new();

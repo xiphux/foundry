@@ -1,11 +1,8 @@
 use anyhow::{Context, Result};
-use chrono::Utc;
 use std::path::Path;
 
-use crate::config::TemplateVars;
 use crate::git;
 use crate::history;
-use crate::state::Workspace;
 
 /// Derive a short worktree name from an archived branch name.
 /// e.g., "archive/xiphux/my-feature-20260321" → "my-feature"
@@ -67,13 +64,8 @@ pub fn list_archived(source_path: &Path, archive_prefix: &str) -> Result<()> {
 
 /// Restore a workspace from an archived branch.
 pub fn run(ctx: &mut super::WorkflowCtx, branch: &str) -> Result<()> {
-    let (project_name, source_path, config, state_path, verbose) = (
-        ctx.project,
-        ctx.source_path,
-        ctx.config,
-        ctx.state_path,
-        ctx.verbose,
-    );
+    let (project_name, source_path, config, verbose) =
+        (ctx.project, ctx.source_path, ctx.config, ctx.verbose);
     // Verify the branch exists
     if !git::branch_exists(source_path, branch)? {
         // Try prepending the archive prefix if not already present
@@ -108,21 +100,11 @@ pub fn run(ctx: &mut super::WorkflowCtx, branch: &str) -> Result<()> {
         return Ok(());
     }
 
-    // Allocate ports for restored workspace, before the worktree exists.
-    let allocated_ports = if config.ports.is_empty() {
-        std::collections::HashMap::new()
-    } else {
-        let reserved = ctx.state.all_allocated_ports();
-        let ports = super::allocate_ports(&config.ports, &reserved, config.port_range_start)?;
-        if verbose {
-            let mut sorted: Vec<_> = ports.iter().collect();
-            sorted.sort_by_key(|(_, v)| *v);
-            for (name, port) in &sorted {
-                eprintln!("Allocated port: {name}={port}");
-            }
-        }
-        ports
-    };
+    // The same checks and order as `start`, so a refusal leaves nothing behind.
+    // Prior conversations are kept, unlike in `start`: this is the same work
+    // coming back, and resuming its agent session is the point.
+    super::start::check_launchable(config)?;
+    let allocated_ports = super::start::allocate_workspace_ports(ctx)?;
 
     // Create worktree directory parent
     if let Some(parent) = worktree_path.parent() {
@@ -148,65 +130,9 @@ pub fn run(ctx: &mut super::WorkflowCtx, branch: &str) -> Result<()> {
         branch, // from_branch is the archived branch name
     ));
 
-    // Record state before setup scripts
-    ctx.state.add(Workspace {
-        project: project_name.into(),
-        name: name.clone(),
-        branch: branch.into(),
-        worktree_path: worktree_path.to_string_lossy().into(),
-        source_path: source_path.to_string_lossy().into(),
-        created_at: Utc::now(),
-        terminal_tab_id: String::new(),
-        allocated_ports,
-        pr_number: None,
-        pr_url: None,
-    });
-    ctx.state.save_to(state_path)?;
-
-    // Run setup scripts
-    let template_vars = TemplateVars {
-        source: source_path.to_string_lossy().into(),
-        worktree: worktree_path.to_string_lossy().into(),
-        branch: branch.into(),
-        name: name.clone(),
-        project: project_name.into(),
-    };
-
-    // A deferred script is one the user asked to run *in a pane* — typically a
-    // long-lived process like a dev server. Running it here would block
-    // `restore` until the user killed it, so only the blocking phase runs.
-    // (`start` chains the deferred ones into a pane; restore does not yet.)
-    let (immediate, deferred): (Vec<_>, Vec<_>) =
-        config.setup_scripts.iter().partition(|s| !s.deferred);
-    if !deferred.is_empty() {
-        eprintln!(
-            "Note: {} deferred setup script(s) were not run — restore does not \
-             start deferred scripts. Run them in the workspace if you need them.",
-            deferred.len()
-        );
-    }
-
-    // Same port environment `start` gives its setup scripts, read back from the
-    // state entry written above.
-    let script_env = ctx
-        .state
-        .find_by_worktree_path(&worktree_path.to_string_lossy())
-        .map(|ws| ws.allocated_ports.clone())
-        .unwrap_or_default();
-
-    super::run_scripts(
-        immediate.iter().copied(),
-        super::ScriptKind::Setup,
-        &template_vars,
-        &script_env,
-        verbose,
-    )?;
-
+    super::start::record_workspace(ctx, &name, branch, &worktree_path, allocated_ports)?;
     eprintln!("Restored workspace '{name}' from branch '{branch}'.");
-
-    // Open workspace
-    super::open::open_workspace(ctx, &name, &worktree_path, &Default::default())?;
-    Ok(())
+    super::start::set_up_and_open(ctx, &name, branch, &worktree_path, None, false)
 }
 
 #[cfg(test)]

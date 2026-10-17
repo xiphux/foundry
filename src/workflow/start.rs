@@ -17,13 +17,8 @@ pub fn run(
     issue_ref: Option<&str>,
     plan: bool,
 ) -> Result<()> {
-    let (project_name, source_path, config, state_path, verbose) = (
-        ctx.project,
-        ctx.source_path,
-        ctx.config,
-        ctx.state_path,
-        ctx.verbose,
-    );
+    let (project_name, source_path, config, verbose) =
+        (ctx.project, ctx.source_path, ctx.config, ctx.verbose);
     let branch = super::compute_branch_name(name, config.branch_prefix.as_deref());
     let worktree_path = config.worktree_dir.join(project_name).join(name);
 
@@ -47,17 +42,7 @@ pub fn run(
         return Ok(());
     }
 
-    // Verify that all configured agents are installed before doing any work.
-    // This prevents creating a worktree only to fail when launching the agent.
-    for pane in &config.panes {
-        if let Some(ref agent) = pane.agent {
-            config::check_agent_available(agent)?;
-        }
-    }
-
-    // Same reason: `open_workspace` checks this too, but that runs after the
-    // branch and worktree exist, so a broken layout would leave them behind.
-    config::validate_panes(&config.panes)?;
+    check_launchable(config)?;
 
     // Clear stale conversation history if this worktree name was used before.
     // This prevents --continue from resuming a conversation from a previous
@@ -71,22 +56,9 @@ pub fn run(
         super::sync_main_from_remote(source_path, &config.fetch_remote, &main_branch, verbose)?;
     }
 
-    // Allocate ports for this workspace. Before the branch and worktree exist,
-    // so running out of ports refuses cleanly instead of leaving them behind.
-    let allocated_ports = if config.ports.is_empty() {
-        std::collections::HashMap::new()
-    } else {
-        let reserved = ctx.state.all_allocated_ports();
-        let ports = super::allocate_ports(&config.ports, &reserved, config.port_range_start)?;
-        if verbose {
-            let mut sorted: Vec<_> = ports.iter().collect();
-            sorted.sort_by_key(|(_, v)| *v);
-            for (name, port) in &sorted {
-                eprintln!("Allocated port: {name}={port}");
-            }
-        }
-        ports
-    };
+    // Before the branch and worktree exist, so running out of ports refuses
+    // cleanly instead of leaving them behind.
+    let allocated_ports = allocate_workspace_ports(ctx)?;
 
     if let Some(parent) = worktree_path.parent() {
         std::fs::create_dir_all(parent)
@@ -117,20 +89,82 @@ pub fn run(
         issue_ref,
     ));
 
-    // Record state BEFORE setup scripts so discard can clean up on failure
+    record_workspace(ctx, name, &branch, &worktree_path, allocated_ports)?;
+    set_up_and_open(ctx, name, &branch, &worktree_path, prompt, plan)
+}
+
+/// What must hold before anything is created: every configured agent is
+/// installed and the layout can be built. `open_workspace` checks the layout
+/// too, but only once the branch and worktree exist, so a broken one would
+/// leave them behind.
+pub(super) fn check_launchable(config: &ResolvedConfig) -> Result<()> {
+    for pane in &config.panes {
+        if let Some(ref agent) = pane.agent {
+            config::check_agent_available(agent)?;
+        }
+    }
+    config::validate_panes(&config.panes)
+}
+
+/// Allocate the project's ports for a new workspace, avoiding every port
+/// another workspace holds.
+pub(super) fn allocate_workspace_ports(
+    ctx: &super::WorkflowCtx,
+) -> Result<std::collections::HashMap<String, u16>> {
+    let config = ctx.config;
+    if config.ports.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let reserved = ctx.state.all_allocated_ports();
+    let ports = super::allocate_ports(&config.ports, &reserved, config.port_range_start)?;
+    if ctx.verbose {
+        let mut sorted: Vec<_> = ports.iter().collect();
+        sorted.sort_by_key(|(_, v)| *v);
+        for (name, port) in &sorted {
+            eprintln!("Allocated port: {name}={port}");
+        }
+    }
+    Ok(ports)
+}
+
+/// Record a just-created workspace in state, before its setup scripts run, so
+/// `discard` can clean up if they fail.
+pub(super) fn record_workspace(
+    ctx: &mut super::WorkflowCtx,
+    name: &str,
+    branch: &str,
+    worktree_path: &std::path::Path,
+    ports: std::collections::HashMap<String, u16>,
+) -> Result<()> {
     ctx.state.add(Workspace {
-        project: project_name.into(),
+        project: ctx.project.into(),
         name: name.into(),
-        branch: branch.clone(),
+        branch: branch.into(),
         worktree_path: worktree_path.to_string_lossy().into(),
-        source_path: source_path.to_string_lossy().into(),
+        source_path: ctx.source_path.to_string_lossy().into(),
         created_at: Utc::now(),
         terminal_tab_id: String::new(),
-        allocated_ports,
+        allocated_ports: ports,
         pr_number: None,
         pr_url: None,
     });
-    ctx.state.save_to(state_path)?;
+    ctx.state.save_to(ctx.state_path)?;
+    Ok(())
+}
+
+/// Everything after a new worktree exists: agent settings, setup scripts, and
+/// opening the terminal with deferred scripts delivered to their pane. Shared
+/// by `start` and `restore`, which differ only in how the worktree came to be.
+pub(super) fn set_up_and_open(
+    ctx: &mut super::WorkflowCtx,
+    name: &str,
+    branch: &str,
+    worktree_path: &std::path::Path,
+    prompt: Option<&str>,
+    plan: bool,
+) -> Result<()> {
+    let (project_name, source_path, config, verbose) =
+        (ctx.project, ctx.source_path, ctx.config, ctx.verbose);
 
     // Set up agent-specific workspace configuration for each agent in the
     // panes; `validate_panes` has already ensured each appears only once.
@@ -141,11 +175,11 @@ pub fn run(
         .collect();
 
     // Build worktree context for agents that support it (e.g., Claude SessionStart hook)
-    let agent_context = build_agent_context(config, ctx.state, &worktree_path);
+    let agent_context = build_agent_context(config, ctx.state, worktree_path);
 
     for agent in &agents {
         if let Err(e) = agent_hooks::setup_agent_hooks(
-            &worktree_path,
+            worktree_path,
             source_path,
             project_name,
             name,
@@ -160,7 +194,7 @@ pub fn run(
     let template_vars = TemplateVars {
         source: source_path.to_string_lossy().into(),
         worktree: worktree_path.to_string_lossy().into(),
-        branch: branch.clone(),
+        branch: branch.into(),
         name: name.into(),
         project: project_name.into(),
     };
@@ -223,7 +257,7 @@ pub fn run(
     super::open::open_workspace(
         ctx,
         name,
-        &worktree_path,
+        worktree_path,
         &super::open::OpenOptions {
             prompt,
             plan,
