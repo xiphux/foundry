@@ -21,7 +21,8 @@ pub fn run(
     // A branch deleted by hand has nothing left to lose and nothing to count.
     let commit_count = if git::branch_exists(source_path, &ws.branch)? {
         let main_branch = git::detect_main_branch(source_path)?;
-        git::commit_count(source_path, &ws.branch, &main_branch)?
+        let base = git::main_start_point(source_path, &main_branch, &ctx.config.fetch_remote)?;
+        git::commit_count(source_path, &ws.branch, &base)?
     } else {
         0
     };

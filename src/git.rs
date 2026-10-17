@@ -75,6 +75,24 @@ pub fn create_branch(repo_path: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// The ref to build on for main branch `main`: the local branch if there is
+/// one, otherwise `remote`'s copy of it.
+///
+/// A single-branch clone, or a user who deleted local `main` and works only
+/// through PRs, has no `refs/heads/main` — but does have `origin/main`, which
+/// is what the local branch would have been.
+pub fn main_start_point(repo_path: &Path, main: &str, remote: &str) -> Result<String> {
+    for candidate in [
+        format!("refs/heads/{main}"),
+        format!("refs/remotes/{remote}/{main}"),
+    ] {
+        if run_git(repo_path, &["rev-parse", "--verify", "--quiet", &candidate]).is_ok() {
+            return Ok(candidate);
+        }
+    }
+    bail!("main branch '{main}' exists neither locally nor as '{remote}/{main}'")
+}
+
 /// Create a branch at `start_point` rather than at whatever HEAD happens to be.
 pub fn create_branch_from(repo_path: &Path, name: &str, start_point: &str) -> Result<()> {
     run_git(repo_path, &["branch", "--", name, start_point])?;

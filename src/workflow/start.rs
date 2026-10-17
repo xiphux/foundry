@@ -81,12 +81,24 @@ pub fn run(
     // workspace that happened to have the same name.
     agent_hooks::clear_agent_conversations(&worktree_path);
 
-    let main_branch = git::detect_main_branch(source_path)?;
-
     // Fetch and fast-forward main if requested (via --fetch flag or auto_fetch config)
     if fetch || config.auto_fetch {
+        let main_branch = git::detect_main_branch(source_path)?;
         super::sync_main_from_remote(source_path, &config.fetch_remote, &main_branch, verbose)?;
     }
+
+    // Branch from main, not from HEAD: the source repo may have anything
+    // checked out. A repo whose main cannot be found still starts, from HEAD,
+    // as every start did before branching from main.
+    let start_point = match git::detect_main_branch(source_path)
+        .and_then(|main| git::main_start_point(source_path, &main, &config.fetch_remote))
+    {
+        Ok(start_point) => start_point,
+        Err(e) => {
+            eprintln!("Warning: {e:#}. Branching '{branch}' from the current HEAD instead.");
+            "HEAD".to_string()
+        }
+    };
 
     // Before the branch and worktree exist, so running out of ports refuses
     // cleanly instead of leaving them behind.
@@ -100,8 +112,7 @@ pub fn run(
     if verbose {
         eprintln!("Creating branch '{branch}'...");
     }
-    // From main, not HEAD: the source repo may be checked out on anything.
-    git::create_branch_from(source_path, &branch, &main_branch)
+    git::create_branch_from(source_path, &branch, &start_point)
         .with_context(|| format!("failed to create branch '{branch}'"))?;
 
     if verbose {

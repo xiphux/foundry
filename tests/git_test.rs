@@ -486,3 +486,19 @@ fn delete_remote_branch_removes_it_from_the_remote() {
     assert!(!foundry::git::branch_exists(origin.path(), "wip").unwrap());
     assert!(foundry::git::delete_remote_branch(clone.path(), "-x", "wip").is_err());
 }
+
+#[test]
+fn main_start_point_falls_back_to_the_remote_copy() {
+    let (_origin, clone) = clone_behind_on_another_branch();
+    assert_eq!(
+        foundry::git::main_start_point(clone.path(), "main", "origin").unwrap(),
+        "refs/heads/main"
+    );
+
+    git(clone.path(), &["branch", "-D", "main"]);
+    assert_eq!(
+        foundry::git::main_start_point(clone.path(), "main", "origin").unwrap(),
+        "refs/remotes/origin/main"
+    );
+    assert!(foundry::git::main_start_point(clone.path(), "trunk", "origin").is_err());
+}

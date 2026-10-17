@@ -30,7 +30,7 @@
 - `foundry open --all` no longer pauses after workspaces that were only brought forward.
 - `foundry status --watch` no longer blanks the screen between refreshes, and refreshes every 2 seconds rather than 2 seconds plus probe time.
 - `foundry finish` no longer stops after merging a PR: `gh pr merge --delete-branch` failed on the worktree's local branch. Foundry deletes the remote branch itself.
-- `foundry start` branches from main whatever the source repository has checked out, and fast-forwarding updates main itself rather than the current branch.
+- `foundry start` branches from main whatever the source repository has checked out — from the remote's copy when there is no local main — and fast-forwarding updates main itself rather than the current branch.
 - The worktree-scoped `Read`/`Edit`/`Write`/`Glob`/`Grep` rules in `.claude/settings.local.json` now take effect; a single leading `/` made them relative to the settings file, so they never matched.
 - `foundry discard` can clear a workspace whose branch was deleted by hand.
 - A branch is never deleted because its commit count could not be read; that is now an error instead of "no commits".
