@@ -64,31 +64,38 @@ fn do_pr_merge(
         (live_pr, checks)
     });
 
-    if live_pr?.is_some() {
-        confirm_checks(pr_number, checks, verbose)?;
+    // The PR that ends up merged, for the history log and the message.
+    let merged_number = if let Some(live) = live_pr? {
+        // The open PR is the one `merge_pr` merges, by branch. It need not be
+        // the one recorded: a PR closed and reopened as a new one outside
+        // foundry leaves the record pointing at the closed one.
+        let live_number = live.number;
+        confirm_checks(live_number, checks, verbose)?;
 
         if verbose {
-            eprintln!("Merging PR #{pr_number} for branch '{branch}'...");
+            eprintln!("Merging PR #{live_number} for branch '{branch}'...");
         }
         forge_impl.merge_pr(source_path, branch)?;
 
         // `gh pr merge` succeeds when it only adds the PR to a required merge
         // queue. Deleting the remote branch then would close the PR, and
         // cleanup would remove the only local copy of the work.
-        if forge_impl.pr_state(source_path, pr_number)? != forge::PrState::Merged {
+        if forge_impl.pr_state(source_path, live_number)? != forge::PrState::Merged {
             eprintln!(
-                "PR #{pr_number} was accepted but has not merged yet (a merge queue, \
+                "PR #{live_number} was accepted but has not merged yet (a merge queue, \
                  perhaps). Workspace '{name}' is left as it is; run \
                  `foundry finish {name}` again once it has merged."
             );
             return Ok(());
         }
+        live_number
     } else if forge_impl.pr_state(source_path, pr_number)? == forge::PrState::Merged {
         // Merged since the last `finish` — through the queue, say — so all
         // that is left is the cleanup.
         if verbose {
             eprintln!("PR #{pr_number} has already merged.");
         }
+        pr_number
     } else {
         let url_hint = pr_url.map(|u| format!(" ({u})")).unwrap_or_default();
         anyhow::bail!(
@@ -97,9 +104,9 @@ fn do_pr_merge(
              foundry finish {name} --local\n\
              to merge locally instead."
         );
-    }
+    };
 
-    let history_event = history::HistoryEvent::pr_merged(ctx.project, name, branch, pr_number);
+    let history_event = history::HistoryEvent::pr_merged(ctx.project, name, branch, merged_number);
 
     // Best effort: a repository that auto-deletes head branches has already
     // done this, and the merge is what matters either way.
@@ -119,7 +126,7 @@ fn do_pr_merge(
 
     // Earned before cleanup starts: the PR is already merged on the forge, and
     // this message claims nothing about the local worktree or branch.
-    eprintln!("Merged PR #{pr_number}.");
+    eprintln!("Merged PR #{merged_number}.");
 
     super::cleanup_workspace(
         ctx,
