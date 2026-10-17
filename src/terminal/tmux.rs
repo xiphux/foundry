@@ -120,10 +120,7 @@ impl TerminalBackend for TmuxBackend {
         pane_ids.push(first_pane_id.lines().next().unwrap_or("%0").to_string());
 
         for pane in panes.iter().skip(1) {
-            let split_from = pane
-                .split_from
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("pane '{}' has no split_from", pane.name))?;
+            let (split_from, direction) = pane.split()?;
 
             // Find the tmux pane ID for the parent
             let parent_idx = panes
@@ -138,11 +135,7 @@ impl TerminalBackend for TmuxBackend {
                 })?;
             let parent_pane_id = &pane_ids[parent_idx];
 
-            let split_flag = match pane
-                .direction
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("pane '{}' has no direction", pane.name))?
-            {
+            let split_flag = match direction {
                 SplitDirection::Right => "-h",
                 SplitDirection::Down => "-v",
             };

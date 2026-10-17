@@ -69,17 +69,10 @@ impl GhosttyBackend {
         // Process remaining panes — create splits
         for pane in &panes[1..] {
             let cur_var = pane_var(&pane.name);
-            let split_from = pane
-                .split_from
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("pane '{}' has no split_from", pane.name))?;
+            let (split_from, direction) = pane.split()?;
             let parent_var = pane_var(split_from);
 
-            let dir_str = match pane
-                .direction
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("pane '{}' has no direction", pane.name))?
-            {
+            let dir_str = match direction {
                 SplitDirection::Right => "right",
                 SplitDirection::Down => "down",
             };

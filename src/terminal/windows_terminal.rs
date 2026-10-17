@@ -303,15 +303,7 @@ impl TerminalBackend for WindowsTerminalBackend {
                 nav_paths.insert(pane.name.clone(), vec![]);
                 args.push("new-tab".into());
             } else {
-                let split_from = pane
-                    .split_from
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("pane '{}' has no split_from", pane.name))?;
-
-                let dir = pane
-                    .direction
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("pane '{}' has no direction", pane.name))?;
+                let (split_from, dir) = pane.split()?;
 
                 let parent_path = nav_paths.get(split_from).ok_or_else(|| {
                     anyhow::anyhow!(

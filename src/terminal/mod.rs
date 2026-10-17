@@ -61,6 +61,23 @@ pub struct PaneSpec {
     pub shell: Option<String>,
 }
 
+impl PaneSpec {
+    /// The pane this one splits from, and in which direction.
+    ///
+    /// For every pane after the first. `validate_panes` guarantees both are set
+    /// before a layout reaches a backend, so the error is a backstop for a
+    /// caller that skipped it, not something a config can trigger.
+    pub(crate) fn split(&self) -> anyhow::Result<(&str, &SplitDirection)> {
+        match (self.split_from.as_deref(), self.direction.as_ref()) {
+            (Some(from), Some(direction)) => Ok((from, direction)),
+            _ => anyhow::bail!(
+                "pane '{}' needs both split_from and direction (layout was not validated)",
+                self.name
+            ),
+        }
+    }
+}
+
 /// Work out which backend to use.
 ///
 /// Ordering is deliberate: native terminals are probed first, and the

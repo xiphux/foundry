@@ -60,19 +60,12 @@ impl Iterm2Backend {
         // Create splits for remaining panes
         for pane in &panes[1..] {
             let var = pane_var(&pane.name);
-            let split_from = pane
-                .split_from
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("pane '{}' has no split_from", pane.name))?;
+            let (split_from, direction) = pane.split()?;
             let parent_var = pane_var(split_from);
 
             // iTerm2 split naming: "vertically" creates a vertical divider (left/right panes),
             // "horizontally" creates a horizontal divider (top/bottom panes).
-            let split_dir = match pane
-                .direction
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("pane '{}' has no direction", pane.name))?
-            {
+            let split_dir = match direction {
                 SplitDirection::Right => "vertically",
                 SplitDirection::Down => "horizontally",
             };

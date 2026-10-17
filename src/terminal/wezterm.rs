@@ -112,10 +112,7 @@ impl TerminalBackend for WeztermBackend {
         }
 
         for pane in panes.iter().skip(1) {
-            let split_from = pane
-                .split_from
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("pane '{}' has no split_from", pane.name))?;
+            let (split_from, direction) = pane.split()?;
 
             let parent_id = pane_ids
                 .get(split_from)
@@ -128,11 +125,7 @@ impl TerminalBackend for WeztermBackend {
                 })?
                 .to_string();
 
-            let dir_flag = match pane
-                .direction
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("pane '{}' has no direction", pane.name))?
-            {
+            let dir_flag = match direction {
                 SplitDirection::Right => "--right",
                 SplitDirection::Down => "--bottom",
             };
