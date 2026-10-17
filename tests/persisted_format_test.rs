@@ -227,10 +227,10 @@ fn project_config_loads_every_key_and_merges() {
     assert!(project.scripts.setup[1].deferred);
     assert_eq!(project.scripts.teardown[0].name, "Stop containers");
     assert_eq!(project.ports, ["VITE_PORT", "API_PORT"]);
+    assert_eq!(project.agent.as_deref(), Some("codex"));
 
     let resolved = config::merge_configs(&global, Some(&project));
     assert_eq!(resolved.branch_prefix.as_deref(), Some("team"));
-    assert_eq!(resolved.agent, "codex");
     assert_eq!(resolved.archive_prefix, "old");
     assert_eq!(resolved.merge_strategy, MergeStrategy::FfOnly);
     assert_eq!(

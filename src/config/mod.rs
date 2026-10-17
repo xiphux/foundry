@@ -22,9 +22,6 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     pub branch_prefix: Option<String>,
-    /// The default agent identifier ("claude", "codex", "every-code", "custom").
-    /// Used for the default pane layout when no panes have explicit agent fields.
-    pub agent: String,
     /// Custom agent command (only used when agent = "custom")
     pub custom_agent_command: Option<String>,
     pub archive_prefix: String,
@@ -63,7 +60,6 @@ impl ResolvedConfig {
         if let Some(pane) = self.panes.iter_mut().find(|p| p.agent.is_some()) {
             pane.agent = Some(agent.to_string());
         }
-        self.agent = agent.to_string();
     }
 }
 
@@ -238,7 +234,6 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
         branch_prefix: project
             .and_then(|p| p.branch_prefix.clone())
             .or_else(|| global.branch_prefix.clone()),
-        agent,
         custom_agent_command,
         archive_prefix: project
             .and_then(|p| p.archive_prefix.clone())
@@ -411,7 +406,6 @@ mod tests {
 
         resolved.override_primary_agent("crush");
         assert_eq!(resolved.panes[0].agent.as_deref(), Some("crush"));
-        assert_eq!(resolved.agent, "crush");
     }
 
     #[test]

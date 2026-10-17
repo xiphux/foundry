@@ -21,8 +21,6 @@ pub enum BranchCleanup {
     /// Delete the local branch unconditionally (e.g., after PR merge
     /// where the remote branch was already deleted by the forge).
     Delete,
-    /// Leave the branch as-is (no local branch cleanup needed).
-    None,
 }
 
 /// Shared cleanup for finish and discard: teardown scripts, worktree removal,
@@ -188,7 +186,6 @@ pub fn cleanup_workspace(
             let _ = git::delete_branch(source_path, branch);
             None
         }
-        BranchCleanup::None => None,
     };
 
     // Record history

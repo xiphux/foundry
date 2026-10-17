@@ -49,19 +49,6 @@ pub enum AgentStatus {
     Unknown,
 }
 
-impl AgentStatus {
-    pub fn label(self) -> &'static str {
-        match self {
-            AgentStatus::Working => "working",
-            AgentStatus::Idle => "idle",
-            AgentStatus::WaitingPermission => "waiting for permission",
-            AgentStatus::Error => "error",
-            AgentStatus::Offline => "offline",
-            AgentStatus::Unknown => "unknown",
-        }
-    }
-}
-
 /// Rich status information parsed from a JSON status file.
 #[derive(Debug, Clone)]
 pub struct AgentStatusInfo {
@@ -792,17 +779,6 @@ fn setup_claude(
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
-    #[test]
-    fn agent_status_label_all_variants() {
-        assert_eq!(AgentStatus::Working.label(), "working");
-        assert_eq!(AgentStatus::Idle.label(), "idle");
-        assert_eq!(
-            AgentStatus::WaitingPermission.label(),
-            "waiting for permission"
-        );
-        assert_eq!(AgentStatus::Unknown.label(), "unknown");
-    }
 
     /// Write a status file in the current per-workspace layout.
     fn write_status(project: &str, name: &str, agent: &str, body: &str) -> PathBuf {
