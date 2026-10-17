@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- `start` and `restore` refuse, before creating anything, when no block of free ports is left in the range. They used to hand out ports past the end of it — duplicates of ports already in use, or a crash with `port_range_start` near 65535.
 - Commands in scripts and panes can use shell braces — `awk '{print $1}'`, `${HOME}`, `docker ps --format '{{.Names}}'`, `{a,b}`. Any `{` used to start a template variable, so these failed config loading with "unknown template variable". Only `{name}`-style identifiers are variables now, and an unknown one is still reported.
 - `foundry finish --local` no longer forgets a workspace's PR when the local merge fails. The PR link was cleared before merging, so after a refusal a plain `foundry finish` merged locally too.
 - A cancelled, timed-out or otherwise unsuccessfully finished CI check counts as failing in `foundry checks` and `finish`, rather than as still pending.

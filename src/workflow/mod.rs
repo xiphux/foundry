@@ -283,39 +283,55 @@ const PORT_RANGE_END: u16 = 60000;
 /// Allocate a contiguous block of ports for a new workspace.
 /// Scans from `range_start` to find a contiguous block of `port_names.len()`
 /// ports that don't overlap with any already-reserved ports.
+///
+/// The range ends at `PORT_RANGE_END`, or at the last port when `range_start`
+/// is already past it. Fails when no block fits: it used to hand back the
+/// ports after the range regardless, colliding with ones in use or, near
+/// 65535, overflowing.
 pub fn allocate_ports(
     port_names: &[String],
     reserved: &[u16],
     range_start: u16,
-) -> std::collections::HashMap<String, u16> {
-    let count = port_names.len();
+) -> Result<std::collections::HashMap<String, u16>> {
+    let count = port_names.len() as u32;
     if count == 0 {
-        return std::collections::HashMap::new();
+        return Ok(std::collections::HashMap::new());
     }
 
     let mut sorted_reserved: Vec<u16> = reserved.to_vec();
     sorted_reserved.sort();
 
+    // Exclusive. u32 so `start + count` cannot overflow.
+    let end = if range_start < PORT_RANGE_END {
+        u32::from(PORT_RANGE_END)
+    } else {
+        u32::from(u16::MAX) + 1
+    };
+
     // Find the first contiguous block of `count` ports in the range
-    let mut start = range_start;
-    'outer: while start + count as u16 <= PORT_RANGE_END {
-        for offset in 0..count as u16 {
-            let port = start + offset;
+    let mut start = u32::from(range_start);
+    'outer: while start + count <= end {
+        for offset in 0..count {
+            let port = (start + offset) as u16;
             if sorted_reserved.binary_search(&port).is_ok() {
                 // This port is taken — skip past it
-                start = port + 1;
+                start += offset + 1;
                 continue 'outer;
             }
         }
         // Found a contiguous block
-        break;
+        return Ok(port_names
+            .iter()
+            .zip(start..)
+            .map(|(name, port)| (name.clone(), port as u16))
+            .collect());
     }
 
-    port_names
-        .iter()
-        .enumerate()
-        .map(|(i, name)| (name.clone(), start + i as u16))
-        .collect()
+    bail!(
+        "no block of {count} free port(s) from {range_start} to {}. \
+         Lower `port_range_start`, or finish workspaces that hold ports.",
+        end - 1
+    )
 }
 
 pub fn foundry_paths() -> Result<(PathBuf, PathBuf)> {
@@ -416,7 +432,7 @@ mod tests {
     #[test]
     fn allocate_ports_contiguous_block() {
         let names = vec!["VITE_PORT".into(), "API_PORT".into(), "DB_PORT".into()];
-        let ports = allocate_ports(&names, &[], 10000);
+        let ports = allocate_ports(&names, &[], 10000).unwrap();
         assert_eq!(ports["VITE_PORT"], 10000);
         assert_eq!(ports["API_PORT"], 10001);
         assert_eq!(ports["DB_PORT"], 10002);
@@ -425,14 +441,14 @@ mod tests {
     #[test]
     fn allocate_ports_skips_reserved() {
         let names = vec!["PORT_A".into()];
-        let ports = allocate_ports(&names, &[10000], 10000);
+        let ports = allocate_ports(&names, &[10000], 10000).unwrap();
         assert_eq!(ports["PORT_A"], 10001);
     }
 
     #[test]
     fn allocate_ports_finds_gap_after_reserved_block() {
         let names = vec!["PORT_A".into(), "PORT_B".into()];
-        let ports = allocate_ports(&names, &[10000], 10000);
+        let ports = allocate_ports(&names, &[10000], 10000).unwrap();
         assert_eq!(ports["PORT_A"], 10001);
         assert_eq!(ports["PORT_B"], 10002);
     }
@@ -441,7 +457,7 @@ mod tests {
     fn allocate_ports_skips_fragmented_reserved() {
         let names = vec!["PORT_A".into(), "PORT_B".into(), "PORT_C".into()];
         let reserved = vec![10000, 10002];
-        let ports = allocate_ports(&names, &reserved, 10000);
+        let ports = allocate_ports(&names, &reserved, 10000).unwrap();
         assert_eq!(ports["PORT_A"], 10003);
         assert_eq!(ports["PORT_B"], 10004);
         assert_eq!(ports["PORT_C"], 10005);
@@ -449,14 +465,23 @@ mod tests {
 
     #[test]
     fn allocate_ports_empty_names() {
-        let ports = allocate_ports(&[], &[], 10000);
+        let ports = allocate_ports(&[], &[], 10000).unwrap();
         assert!(ports.is_empty());
+    }
+
+    #[test]
+    fn allocate_ports_fails_rather_than_overflowing_the_range() {
+        let names = vec!["A".to_string(), "B".to_string()];
+        assert!(allocate_ports(&names, &[], 65535).is_err());
+        assert!(allocate_ports(&names, &[59998], 59998).is_err());
+        let ports = allocate_ports(&names, &[], 65534).unwrap();
+        assert_eq!((ports["A"], ports["B"]), (65534, 65535));
     }
 
     #[test]
     fn allocate_ports_custom_range_start() {
         let names = vec!["PORT_A".into()];
-        let ports = allocate_ports(&names, &[], 20000);
+        let ports = allocate_ports(&names, &[], 20000).unwrap();
         assert_eq!(ports["PORT_A"], 20000);
     }
 }

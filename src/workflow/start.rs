@@ -87,6 +87,23 @@ pub fn run(
         })?;
     }
 
+    // Allocate ports for this workspace. Before the branch and worktree exist,
+    // so running out of ports refuses cleanly instead of leaving them behind.
+    let allocated_ports = if config.ports.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        let reserved = ctx.state.all_allocated_ports();
+        let ports = super::allocate_ports(&config.ports, &reserved, config.port_range_start)?;
+        if verbose {
+            let mut sorted: Vec<_> = ports.iter().collect();
+            sorted.sort_by_key(|(_, v)| *v);
+            for (name, port) in &sorted {
+                eprintln!("Allocated port: {name}={port}");
+            }
+        }
+        ports
+    };
+
     if verbose {
         eprintln!("Creating branch '{branch}'...");
     }
@@ -112,22 +129,6 @@ pub fn run(
     }
     git::create_worktree(source_path, &worktree_path, &branch)
         .with_context(|| "failed to create worktree")?;
-
-    // Allocate ports for this workspace
-    let allocated_ports = if config.ports.is_empty() {
-        std::collections::HashMap::new()
-    } else {
-        let reserved = ctx.state.all_allocated_ports();
-        let ports = super::allocate_ports(&config.ports, &reserved, config.port_range_start);
-        if verbose {
-            let mut sorted: Vec<_> = ports.iter().collect();
-            sorted.sort_by_key(|(_, v)| *v);
-            for (name, port) in &sorted {
-                eprintln!("Allocated port: {name}={port}");
-            }
-        }
-        ports
-    };
 
     // Record state BEFORE setup scripts so discard can clean up on failure
     ctx.state.add(Workspace {

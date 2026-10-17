@@ -116,6 +116,22 @@ pub fn run(ctx: &mut super::WorkflowCtx, branch: &str) -> Result<()> {
         return Ok(());
     }
 
+    // Allocate ports for restored workspace, before the worktree exists.
+    let allocated_ports = if config.ports.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        let reserved = ctx.state.all_allocated_ports();
+        let ports = super::allocate_ports(&config.ports, &reserved, config.port_range_start)?;
+        if verbose {
+            let mut sorted: Vec<_> = ports.iter().collect();
+            sorted.sort_by_key(|(_, v)| *v);
+            for (name, port) in &sorted {
+                eprintln!("Allocated port: {name}={port}");
+            }
+        }
+        ports
+    };
+
     // Create worktree directory parent
     if let Some(parent) = worktree_path.parent() {
         std::fs::create_dir_all(parent)
@@ -139,22 +155,6 @@ pub fn run(ctx: &mut super::WorkflowCtx, branch: &str) -> Result<()> {
         branch,
         branch, // from_branch is the archived branch name
     ));
-
-    // Allocate ports for restored workspace
-    let allocated_ports = if config.ports.is_empty() {
-        std::collections::HashMap::new()
-    } else {
-        let reserved = ctx.state.all_allocated_ports();
-        let ports = super::allocate_ports(&config.ports, &reserved, config.port_range_start);
-        if verbose {
-            let mut sorted: Vec<_> = ports.iter().collect();
-            sorted.sort_by_key(|(_, v)| *v);
-            for (name, port) in &sorted {
-                eprintln!("Allocated port: {name}={port}");
-            }
-        }
-        ports
-    };
 
     // Record state before setup scripts
     ctx.state.add(Workspace {
