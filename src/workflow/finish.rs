@@ -101,7 +101,15 @@ fn do_pr_merge(
         eprintln!("Merging PR #{pr_number} for branch '{branch}'...");
     }
 
-    forge_impl.merge_pr(source_path, branch)?;
+    if forge_impl.merge_pr(source_path, branch)? == forge::MergeOutcome::Pending {
+        // Queued, not merged. Deleting the remote branch now would close the
+        // PR, and cleanup would remove the only local copy of the work.
+        eprintln!(
+            "PR #{pr_number} was accepted but has not merged yet (a merge queue, \
+             perhaps). Workspace '{name}' is left as it is."
+        );
+        return Ok(());
+    }
 
     let history_event = history::HistoryEvent::pr_merged(ctx.project, name, branch, pr_number);
 

@@ -61,6 +61,16 @@ impl ChecksStatus {
     }
 }
 
+/// What a merge request to the forge achieved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeOutcome {
+    /// The PR is merged.
+    Merged,
+    /// The forge accepted the request but has not merged yet — a required
+    /// merge queue, say. The PR, its branch and the workspace must stay.
+    Pending,
+}
+
 /// Trait for forge (GitHub, GitLab, etc.) operations.
 /// Analogous to `TerminalBackend` — implementations shell out to
 /// CLI tools (`gh`, `glab`) for the actual operations.
@@ -78,8 +88,9 @@ pub trait Forge: Sync {
         body: &str,
     ) -> Result<PrInfo>;
 
-    /// Merge a pull/merge request by branch name.
-    fn merge_pr(&self, repo_path: &std::path::Path, branch: &str) -> Result<()>;
+    /// Merge a pull/merge request by branch name, reporting whether it merged
+    /// or was only queued.
+    fn merge_pr(&self, repo_path: &std::path::Path, branch: &str) -> Result<MergeOutcome>;
 
     /// Get the PR/MR info for a branch, if one exists.
     fn pr_for_branch(&self, repo_path: &std::path::Path, branch: &str) -> Result<Option<PrInfo>>;

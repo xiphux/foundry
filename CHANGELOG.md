@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- `foundry finish` on a PR that a merge queue only queued leaves the workspace and the branch in place, rather than cleaning up as though it had merged.
 - `foundry history` says "1 commit", not "1 commits", for an archived discard.
 - A project's `agent` takes effect with a global `[[panes]]` layout, replacing the first agent pane's agent as `--agent` does; it was ignored unless the default layout was in use.
 - `foundry start` with neither a name nor `--issue` fails without auto-registering the repository first.

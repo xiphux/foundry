@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
-use super::{CheckConclusion, CheckRun, ChecksStatus, Forge, PrInfo};
+use super::{CheckConclusion, CheckRun, ChecksStatus, Forge, MergeOutcome, PrInfo};
 use crate::process::{CommandFailed, run_checked};
 
 pub struct GitHubForge;
@@ -41,7 +41,7 @@ impl Forge for GitHubForge {
         parse_pr_json(output.as_bytes())
     }
 
-    fn merge_pr(&self, repo_path: &Path, branch: &str) -> Result<()> {
+    fn merge_pr(&self, repo_path: &Path, branch: &str) -> Result<MergeOutcome> {
         check_gh()?;
 
         // Not `--delete-branch`: that also deletes the *local* branch, which
@@ -55,7 +55,16 @@ impl Forge for GitHubForge {
                 .current_dir(repo_path),
             "failed to merge PR",
         )?;
-        Ok(())
+
+        // `gh pr merge` also exits 0 when it only adds the PR to a required
+        // merge queue. Ask what state the PR is in rather than assume.
+        let state = run_checked(
+            Command::new("gh")
+                .args(["pr", "view", branch, "--json", "state", "--jq", ".state"])
+                .current_dir(repo_path),
+            "failed to check the PR's state after merging",
+        )?;
+        Ok(merge_outcome(&state))
     }
 
     fn pr_for_branch(&self, repo_path: &Path, branch: &str) -> Result<Option<PrInfo>> {
@@ -140,6 +149,15 @@ impl Forge for GitHubForge {
     }
 }
 
+/// Read `gh pr view --json state` after a merge request.
+fn merge_outcome(state: &str) -> MergeOutcome {
+    if state.trim() == "MERGED" {
+        MergeOutcome::Merged
+    } else {
+        MergeOutcome::Pending
+    }
+}
+
 /// Classify one check. `bucket` is gh's own summary of `state` and the field
 /// meant for this; `state` is the fallback, and lists the finished-but-not-
 /// passed states explicitly — treating every unlisted state as pending made a
@@ -189,6 +207,12 @@ fn parse_pr_json_value(json: &serde_json::Value) -> Result<PrInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_merged_state_counts_as_merged() {
+        assert_eq!(merge_outcome("MERGED\n"), MergeOutcome::Merged);
+        assert_eq!(merge_outcome("OPEN"), MergeOutcome::Pending);
+    }
 
     #[test]
     fn check_conclusion_prefers_the_bucket() {
