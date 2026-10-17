@@ -92,7 +92,7 @@ fn test_settle_delay_only_where_launch_is_async() {
             .is_zero()
     );
     assert!(
-        foundry::terminal::bare::BareBackend::new()
+        foundry::terminal::bare::BareBackend
             .settle_delay()
             .is_zero()
     );
@@ -116,7 +116,7 @@ fn test_run_in_pane_support_matches_whether_open_blocks() {
     // there is no "afterwards" to send anything into.
     assert!(!foundry::terminal::tmux::TmuxBackend.supports_run_in_pane());
     assert!(!foundry::terminal::zellij::ZellijBackend.supports_run_in_pane());
-    assert!(!foundry::terminal::bare::BareBackend::new().supports_run_in_pane());
+    assert!(!foundry::terminal::bare::BareBackend.supports_run_in_pane());
     // Hands the command to an existing wt.exe and returns before the tab exists.
     assert!(!foundry::terminal::windows_terminal::WindowsTerminalBackend.supports_run_in_pane());
 }

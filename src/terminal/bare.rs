@@ -7,14 +7,7 @@ use super::{PaneSpec, TerminalBackend};
 /// Bare fallback backend for when no terminal multiplexer is available.
 /// Runs the first pane's command in the current terminal. No splits,
 /// no tab management.
-#[derive(Default)]
 pub struct BareBackend;
-
-impl BareBackend {
-    pub fn new() -> Self {
-        Self
-    }
-}
 
 impl TerminalBackend for BareBackend {
     fn supports_run_in_pane(&self) -> bool {
@@ -112,12 +105,12 @@ mod tests {
     /// deferred command expecting to deliver it later.
     #[test]
     fn does_not_claim_run_in_pane_support() {
-        assert!(!BareBackend::new().supports_run_in_pane());
+        assert!(!BareBackend.supports_run_in_pane());
     }
 
     #[test]
     fn run_in_pane_reports_rather_than_silently_dropping() {
-        let err = BareBackend::new()
+        let err = BareBackend
             .run_in_pane("tab", 0, "pnpm install")
             .unwrap_err()
             .to_string();

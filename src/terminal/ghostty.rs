@@ -242,7 +242,7 @@ impl TerminalBackend for GhosttyBackend {
 
         if tab_id.is_empty() {
             eprintln!(
-                "warning: Ghostty did not report a tab id; \
+                "Warning: Ghostty did not report a tab id; \
                  this workspace's tab cannot be closed or focused automatically"
             );
         }

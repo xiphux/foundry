@@ -145,7 +145,7 @@ fn detect_backend() -> Box<dyn TerminalBackend + Send + Sync> {
     }
 
     // Bare fallback — no splits, just run the agent command
-    Box::new(bare::BareBackend::new())
+    Box::new(bare::BareBackend)
 }
 
 /// Names `FOUNDRY_TERMINAL` accepts, in detection order.
@@ -167,7 +167,7 @@ fn backend_named(name: &str) -> Option<Box<dyn TerminalBackend + Send + Sync>> {
         "windows-terminal" => Box::new(windows_terminal::WindowsTerminalBackend),
         "zellij" => Box::new(zellij::ZellijBackend),
         "tmux" => Box::new(tmux::TmuxBackend),
-        "bare" => Box::new(bare::BareBackend::new()),
+        "bare" => Box::new(bare::BareBackend),
         _ => return None,
     })
 }
@@ -233,9 +233,9 @@ pub trait TerminalBackend {
     /// and Zellij outside a session) block here until the user detaches.
     fn focus_tab(&self, tab_id: &str) -> Result<bool>;
 
-    /// Run a command in a specific pane of an already-open workspace.
-    /// The pane is identified by name — the backend finds the terminal
-    /// whose working directory matches the tab_id and selects the right pane.
+    /// Run a command in a specific pane of an already-open workspace: the pane
+    /// at `pane_index` in the layout order `open_workspace` was given, in the
+    /// tab `open_workspace` returned as `tab_id`.
     fn run_in_pane(&self, tab_id: &str, pane_index: usize, command: &str) -> Result<()>;
 }
 
