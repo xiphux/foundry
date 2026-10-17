@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- The worktree-scoped `Read`/`Edit`/`Write`/`Glob`/`Grep` rules foundry writes into `.claude/settings.local.json` now take effect. Claude reads a single leading `/` in those rules as relative to the settings file — absolute paths need `//` — so the rules pointed at a directory that does not exist and never matched. The path is also escaped now, so a `*`, `?` or `[` in a directory name matches only that directory rather than acting as a wildcard.
 - `foundry discard` can clear a workspace whose branch was deleted by hand. It tried to archive the missing branch after the worktree was already gone, failed, and left a state entry no rerun could remove.
 - A branch is never deleted because git's commit count could not be read. An unexpected answer used to count as zero commits, and a branch with none is deleted rather than archived; it is now an error.
 - `foundry finish` and `foundry pr` no longer refuse a Claude workspace over foundry's own `.claude/settings.local.json`. The file is untracked, so unless your global gitignore already covered it, every finish failed with "uncommitted changes" and `status` showed the workspace dirty. Foundry now adds the path to the repository's `.git/info/exclude`, which is local to the clone and never committed.

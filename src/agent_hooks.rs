@@ -406,11 +406,48 @@ fn build_status_hooks(status_path_str: &str) -> serde_json::Value {
     })
 }
 
+/// Spell an absolute path the way a Claude `Read`/`Edit` rule needs it.
+///
+/// Rules are gitignore patterns with their own anchors: `//` is the filesystem
+/// root, while a single leading `/` is relative to the settings file. A bare
+/// `/home/me/wt/...` therefore pointed inside the worktree at a directory that
+/// does not exist, and the rules never matched anything. Windows paths are
+/// matched in POSIX form, `C:\a` as `//c/a`. The gitignore metacharacters are
+/// escaped so the rule covers only this literal directory — the same thing
+/// Claude does for a path approved with "don't ask again". Parentheses need no
+/// escaping.
+fn permission_rule_path(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    let posix = if cfg!(windows) {
+        let forward = raw.replace('\\', "/");
+        match forward.as_bytes() {
+            [drive, b':', rest @ ..] if drive.is_ascii_alphabetic() => format!(
+                "/{}{}",
+                (*drive as char).to_ascii_lowercase(),
+                String::from_utf8_lossy(rest)
+            ),
+            _ => forward,
+        }
+    } else {
+        raw.into_owned()
+    };
+
+    let mut escaped = String::with_capacity(posix.len() + 1);
+    escaped.push('/');
+    for c in posix.chars() {
+        if matches!(c, '*' | '?' | '[' | ']' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
 /// Build worktree-scoped permissions. Allows unrestricted file operations
 /// within the worktree and safe git operations on the current branch.
 /// Denies push and checkout of main/master.
 fn build_worktree_permissions(worktree_path: &Path) -> (Vec<String>, Vec<String>) {
-    let wt = worktree_path.to_string_lossy();
+    let wt = permission_rule_path(worktree_path);
     let allow = vec![
         format!("Read({wt}/**)"),
         format!("Edit({wt}/**)"),
@@ -989,14 +1026,33 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn permission_rule_path_is_absolute_and_escaped() {
+        assert_eq!(
+            permission_rule_path(Path::new("/tmp/wt/feature")),
+            "//tmp/wt/feature"
+        );
+        assert_eq!(
+            permission_rule_path(Path::new("/x/Dropbox (Personal)/a*b?[c]\\d")),
+            "//x/Dropbox (Personal)/a\\*b\\?\\[c\\]\\\\d"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn permission_rule_path_uses_the_posix_drive_form() {
+        assert_eq!(
+            permission_rule_path(Path::new(r"C:\Users\me\wt")),
+            "//c/Users/me/wt"
+        );
+    }
+
+    #[test]
     fn build_worktree_permissions_scoped_to_path() {
         let path = std::path::PathBuf::from("/tmp/worktrees/myproject/feature");
         let (allow, deny) = build_worktree_permissions(&path);
-        assert!(
-            allow
-                .iter()
-                .any(|a| a.contains("/tmp/worktrees/myproject/feature/**"))
-        );
+        let wt = permission_rule_path(&path);
+        assert!(allow.contains(&format!("Read({wt}/**)")));
         assert!(allow.iter().any(|a| a.starts_with("Read(")));
         assert!(allow.iter().any(|a| a.starts_with("Edit(")));
         assert!(allow.iter().any(|a| a.starts_with("Write(")));
@@ -1042,12 +1098,12 @@ mod tests {
         assert!(allow.iter().any(|v| v.as_str() == Some("Bash(pnpm *)")));
 
         // Should also have worktree-scoped permissions
-        let wt_str = worktree.path().to_string_lossy();
-        assert!(allow.iter().any(|v| {
-            v.as_str()
-                .map(|s| s.contains(&*wt_str) && s.starts_with("Read("))
-                .unwrap_or(false)
-        }));
+        let wt = permission_rule_path(worktree.path());
+        assert!(
+            allow
+                .iter()
+                .any(|v| v.as_str() == Some(&format!("Read({wt}/**)")))
+        );
 
         // Should have hooks
         assert!(settings.get("hooks").is_some());
