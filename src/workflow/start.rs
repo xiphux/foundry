@@ -34,7 +34,7 @@ pub fn run(
                 worktree_path.display()
             );
         }
-        return super::open::open_workspace(
+        super::open::open_workspace(
             ctx,
             name,
             &worktree_path,
@@ -42,7 +42,8 @@ pub fn run(
             prompt,
             &std::collections::HashMap::new(),
             plan,
-        );
+        )?;
+        return Ok(());
     }
 
     // Verify that all configured agents are installed before doing any work.

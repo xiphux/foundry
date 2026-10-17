@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- `foundry open --all` no longer pauses half a second after each workspace that was already open. The pause lets Ghostty, iTerm2 and Windows Terminal finish creating a tab, and is now skipped when the workspace was only brought forward.
 - `foundry status --watch` no longer blanks between refreshes. It cleared the screen and drew the header before probing each workspace, so the rows vanished for as long as the git calls took; each frame is now drawn in one go once everything has been probed, and refreshes come every 2 seconds rather than 2 seconds plus probe time.
 - `foundry finish` on a workspace with a PR no longer stops after merging it. `gh pr merge --delete-branch` also deletes the local branch, which git refuses while the workspace's worktree has it checked out, so gh reported failure for a merged PR and the worktree, branch and state were left behind. Foundry now merges without that flag, deletes the remote branch itself, and removes the local one during cleanup as before.
 - `foundry start` branches from main even when the source repository has something else checked out, and fast-forwarding main (`--fetch`, `auto_fetch`, and after a PR merge) updates main itself. Both used to act on whatever HEAD was, so with the source repo on `wip` a new workspace started from `wip`, and the fast-forward moved `wip` while main stayed stale. `finish` now checks that main is checked out before fetching rather than after.

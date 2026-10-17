@@ -104,7 +104,7 @@ pub fn run(ctx: &mut super::WorkflowCtx, branch: &str) -> Result<()> {
                 worktree_path.display()
             );
         }
-        return super::open::open_workspace(
+        super::open::open_workspace(
             ctx,
             &name,
             &worktree_path,
@@ -112,7 +112,8 @@ pub fn run(ctx: &mut super::WorkflowCtx, branch: &str) -> Result<()> {
             None, // no prompt for restore
             &std::collections::HashMap::new(),
             false,
-        );
+        )?;
+        return Ok(());
     }
 
     // Create worktree directory parent
@@ -220,7 +221,8 @@ pub fn run(ctx: &mut super::WorkflowCtx, branch: &str) -> Result<()> {
         None, // no prompt for restore
         &std::collections::HashMap::new(),
         false,
-    )
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

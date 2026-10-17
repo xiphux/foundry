@@ -239,7 +239,7 @@ fn main() -> Result<()> {
                             &state_path,
                             cli.verbose,
                         );
-                        workflow::open::open_workspace(
+                        let opened = workflow::open::open_workspace(
                             &mut c,
                             ws_name,
                             worktree_path,
@@ -249,8 +249,13 @@ fn main() -> Result<()> {
                             false,
                         )?;
 
-                        // Brief pause between opens to let the terminal settle
-                        if i < workspaces.len() - 1 && !settle.is_zero() {
+                        // Brief pause between opens to let the terminal settle.
+                        // Focusing a tab that already exists creates nothing to
+                        // wait for.
+                        if opened == workflow::open::Opened::New
+                            && i < workspaces.len() - 1
+                            && !settle.is_zero()
+                        {
                             std::thread::sleep(settle);
                         }
                     }

@@ -7,6 +7,15 @@ use crate::config::{self, TemplateVars};
 use crate::state::WorkspaceState;
 use crate::terminal::{self, PaneSpec};
 
+/// What `open_workspace` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Opened {
+    /// The workspace already had a tab, which was brought forward.
+    Focused,
+    /// A new tab or session was created.
+    New,
+}
+
 /// Open the terminal workspace for an existing worktree.
 /// `skip_command_panes` contains pane names whose commands should be suppressed
 /// (the pane is still created, but no command is sent). Used by `start` to
@@ -24,7 +33,7 @@ pub fn open_workspace(
     prompt: Option<&str>,
     deferred_commands: &std::collections::HashMap<String, String>,
     plan: bool,
-) -> Result<()> {
+) -> Result<Opened> {
     let (project_name, config, state, state_path, verbose) = (
         ctx.project,
         ctx.config,
@@ -47,7 +56,7 @@ pub fn open_workspace(
         if verbose {
             eprintln!("Workspace '{name}' is already open, switching to it.");
         }
-        return Ok(());
+        return Ok(Opened::Focused);
     }
 
     // Build template vars for pane commands from workspace state
@@ -139,7 +148,7 @@ pub fn open_workspace(
     state.set_terminal_tab_id(project_name, name, tab_id);
     state.save_to(state_path)?;
 
-    Ok(())
+    Ok(Opened::New)
 }
 
 /// List active worktrees for a project.
