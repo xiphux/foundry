@@ -63,7 +63,33 @@ fn do_pr_merge(
         let checks = checks.map(|h| h.join().expect("PR checks thread panicked"));
         (live_pr, checks)
     });
-    if live_pr?.is_none() {
+
+    if live_pr?.is_some() {
+        confirm_checks(pr_number, checks, verbose)?;
+
+        if verbose {
+            eprintln!("Merging PR #{pr_number} for branch '{branch}'...");
+        }
+        forge_impl.merge_pr(source_path, branch)?;
+
+        // `gh pr merge` succeeds when it only adds the PR to a required merge
+        // queue. Deleting the remote branch then would close the PR, and
+        // cleanup would remove the only local copy of the work.
+        if forge_impl.pr_state(source_path, pr_number)? != forge::PrState::Merged {
+            eprintln!(
+                "PR #{pr_number} was accepted but has not merged yet (a merge queue, \
+                 perhaps). Workspace '{name}' is left as it is; run \
+                 `foundry finish {name}` again once it has merged."
+            );
+            return Ok(());
+        }
+    } else if forge_impl.pr_state(source_path, pr_number)? == forge::PrState::Merged {
+        // Merged since the last `finish` — through the queue, say — so all
+        // that is left is the cleanup.
+        if verbose {
+            eprintln!("PR #{pr_number} has already merged.");
+        }
+    } else {
         let url_hint = pr_url.map(|u| format!(" ({u})")).unwrap_or_default();
         anyhow::bail!(
             "PR #{pr_number}{url_hint} for branch '{branch}' is no longer open.\n\
@@ -71,44 +97,6 @@ fn do_pr_merge(
              foundry finish {name} --local\n\
              to merge locally instead."
         );
-    }
-
-    // Check CI status before merging
-    if let Some(checks) = checks {
-        match checks {
-            Ok(status) if !status.checks.is_empty() && !status.all_passed() => {
-                super::checks::print_checks(pr_number, &status);
-                let question = if status.has_failures() {
-                    "PR has failing checks. Merge anyway?"
-                } else {
-                    "PR has pending checks. Merge anyway?"
-                };
-                if !crate::prompt::confirm(question)? {
-                    return Err(crate::prompt::Aborted.into());
-                }
-            }
-            Ok(status) if verbose && !status.checks.is_empty() => {
-                eprintln!("All {} checks passed.", status.checks.len());
-            }
-            Err(e) if verbose => {
-                eprintln!("Warning: could not check CI status: {e}");
-            }
-            _ => {}
-        }
-    }
-
-    if verbose {
-        eprintln!("Merging PR #{pr_number} for branch '{branch}'...");
-    }
-
-    if forge_impl.merge_pr(source_path, branch)? == forge::MergeOutcome::Pending {
-        // Queued, not merged. Deleting the remote branch now would close the
-        // PR, and cleanup would remove the only local copy of the work.
-        eprintln!(
-            "PR #{pr_number} was accepted but has not merged yet (a merge queue, \
-             perhaps). Workspace '{name}' is left as it is."
-        );
-        return Ok(());
     }
 
     let history_event = history::HistoryEvent::pr_merged(ctx.project, name, branch, pr_number);
@@ -146,6 +134,36 @@ fn do_pr_merge(
         |_| {},
     )?;
 
+    Ok(())
+}
+
+/// Ask before merging a PR whose CI has not passed. `checks` is `None` when
+/// the user asked not to be prompted.
+fn confirm_checks(
+    pr_number: u64,
+    checks: Option<Result<forge::ChecksStatus>>,
+    verbose: bool,
+) -> Result<()> {
+    match checks {
+        Some(Ok(status)) if !status.checks.is_empty() && !status.all_passed() => {
+            super::checks::print_checks(pr_number, &status);
+            let question = if status.has_failures() {
+                "PR has failing checks. Merge anyway?"
+            } else {
+                "PR has pending checks. Merge anyway?"
+            };
+            if !crate::prompt::confirm(question)? {
+                return Err(crate::prompt::Aborted.into());
+            }
+        }
+        Some(Ok(status)) if verbose && !status.checks.is_empty() => {
+            eprintln!("All {} checks passed.", status.checks.len());
+        }
+        Some(Err(e)) if verbose => {
+            eprintln!("Warning: could not check CI status: {e}");
+        }
+        _ => {}
+    }
     Ok(())
 }
 

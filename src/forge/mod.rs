@@ -61,14 +61,13 @@ impl ChecksStatus {
     }
 }
 
-/// What a merge request to the forge achieved.
+/// Where a PR stands on the forge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MergeOutcome {
-    /// The PR is merged.
+pub enum PrState {
+    /// Open — including accepted into a merge queue but not merged yet.
+    Open,
     Merged,
-    /// The forge accepted the request but has not merged yet — a required
-    /// merge queue, say. The PR, its branch and the workspace must stay.
-    Pending,
+    Closed,
 }
 
 /// Trait for forge (GitHub, GitLab, etc.) operations.
@@ -88,9 +87,14 @@ pub trait Forge: Sync {
         body: &str,
     ) -> Result<PrInfo>;
 
-    /// Merge a pull/merge request by branch name, reporting whether it merged
-    /// or was only queued.
-    fn merge_pr(&self, repo_path: &std::path::Path, branch: &str) -> Result<MergeOutcome>;
+    /// Merge a pull/merge request by branch name. Success means the forge
+    /// accepted the request, not that the PR has merged: a required merge
+    /// queue only queues it. Ask `pr_state` for that.
+    fn merge_pr(&self, repo_path: &std::path::Path, branch: &str) -> Result<()>;
+
+    /// The state of PR `number`. By number, not branch: a branch name can be
+    /// reused, and the forge would answer for its most recent PR.
+    fn pr_state(&self, repo_path: &std::path::Path, number: u64) -> Result<PrState>;
 
     /// Get the PR/MR info for a branch, if one exists.
     fn pr_for_branch(&self, repo_path: &std::path::Path, branch: &str) -> Result<Option<PrInfo>>;

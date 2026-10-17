@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
-use super::{CheckConclusion, CheckRun, ChecksStatus, Forge, MergeOutcome, PrInfo};
+use super::{CheckConclusion, CheckRun, ChecksStatus, Forge, PrInfo, PrState};
 use crate::process::{CommandFailed, run_checked};
 
 pub struct GitHubForge;
@@ -41,7 +41,7 @@ impl Forge for GitHubForge {
         parse_pr_json(output.as_bytes())
     }
 
-    fn merge_pr(&self, repo_path: &Path, branch: &str) -> Result<MergeOutcome> {
+    fn merge_pr(&self, repo_path: &Path, branch: &str) -> Result<()> {
         check_gh()?;
 
         // Not `--delete-branch`: that also deletes the *local* branch, which
@@ -55,16 +55,26 @@ impl Forge for GitHubForge {
                 .current_dir(repo_path),
             "failed to merge PR",
         )?;
+        Ok(())
+    }
 
-        // `gh pr merge` also exits 0 when it only adds the PR to a required
-        // merge queue. Ask what state the PR is in rather than assume.
+    fn pr_state(&self, repo_path: &Path, number: u64) -> Result<PrState> {
+        check_gh()?;
         let state = run_checked(
             Command::new("gh")
-                .args(["pr", "view", branch, "--json", "state", "--jq", ".state"])
+                .args([
+                    "pr",
+                    "view",
+                    &number.to_string(),
+                    "--json",
+                    "state",
+                    "--jq",
+                    ".state",
+                ])
                 .current_dir(repo_path),
-            "failed to check the PR's state after merging",
+            &format!("failed to check the state of PR #{number}"),
         )?;
-        Ok(merge_outcome(&state))
+        Ok(parse_pr_state(&state))
     }
 
     fn pr_for_branch(&self, repo_path: &Path, branch: &str) -> Result<Option<PrInfo>> {
@@ -149,12 +159,13 @@ impl Forge for GitHubForge {
     }
 }
 
-/// Read `gh pr view --json state` after a merge request.
-fn merge_outcome(state: &str) -> MergeOutcome {
-    if state.trim() == "MERGED" {
-        MergeOutcome::Merged
-    } else {
-        MergeOutcome::Pending
+/// Read `gh pr view --json state`. Anything unrecognised is treated as open,
+/// the state in which `finish` touches nothing.
+fn parse_pr_state(state: &str) -> PrState {
+    match state.trim() {
+        "MERGED" => PrState::Merged,
+        "CLOSED" => PrState::Closed,
+        _ => PrState::Open,
     }
 }
 
@@ -209,9 +220,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_a_merged_state_counts_as_merged() {
-        assert_eq!(merge_outcome("MERGED\n"), MergeOutcome::Merged);
-        assert_eq!(merge_outcome("OPEN"), MergeOutcome::Pending);
+    fn pr_states_parse_and_unknown_ones_read_as_open() {
+        assert_eq!(parse_pr_state("MERGED\n"), PrState::Merged);
+        assert_eq!(parse_pr_state("CLOSED"), PrState::Closed);
+        assert_eq!(parse_pr_state("OPEN"), PrState::Open);
+        assert_eq!(parse_pr_state("SOMETHING_NEW"), PrState::Open);
     }
 
     #[test]
