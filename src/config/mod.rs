@@ -234,6 +234,23 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
         first.agent = Some(agent.clone());
     }
 
+    // A project's `agent` replaces the primary agent pane's — the one `--agent`
+    // replaces too — wherever the layout came from. It used to reach a pane
+    // only through the default-layout fallback above, so with a global layout
+    // that names its agents, `agent = "codex"` in `.foundry.toml` was ignored
+    // and the global agent launched. A project override naming that pane's
+    // agent directly is more specific, and wins.
+    if let Some(project_agent) = project.and_then(|p| p.agent.as_deref())
+        && let Some(primary) = panes.iter_mut().find(|p| p.agent.is_some())
+    {
+        let pane_overridden = project
+            .and_then(|p| p.panes.get(&primary.name))
+            .is_some_and(|ov| ov.agent.is_some());
+        if !pane_overridden {
+            primary.agent = Some(project_agent.to_string());
+        }
+    }
+
     let resolved = ResolvedConfig {
         branch_prefix: project
             .and_then(|p| p.branch_prefix.clone())
@@ -399,6 +416,51 @@ mod tests {
         };
         let resolved = merge_configs(&global, Some(&project));
         assert!(!resolved.unrestricted_permissions);
+    }
+
+    fn agent_pane(name: &str, agent: &str, split_from: Option<&str>) -> PaneConfig {
+        PaneConfig {
+            name: name.into(),
+            agent: Some(agent.into()),
+            command: None,
+            split_from: split_from.map(Into::into),
+            direction: split_from.map(|_| SplitDirection::Right),
+            optional: false,
+            env: Default::default(),
+            deferred: false,
+        }
+    }
+
+    fn global_with_claude_pane() -> GlobalConfig {
+        GlobalConfig {
+            panes: vec![
+                agent_pane("main", "claude", None),
+                agent_pane("review", "gemini", Some("main")),
+            ],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn project_agent_replaces_the_primary_agent_of_a_global_layout() {
+        let project: ProjectConfig = toml::from_str("agent = \"codex\"").unwrap();
+        let resolved = merge_configs(&global_with_claude_pane(), Some(&project));
+        assert_eq!(resolved.panes[0].agent.as_deref(), Some("codex"));
+        assert_eq!(resolved.panes[1].agent.as_deref(), Some("gemini"));
+    }
+
+    #[test]
+    fn a_project_pane_override_beats_the_project_agent() {
+        let project: ProjectConfig =
+            toml::from_str("agent = \"codex\"\n[panes.main]\nagent = \"crush\"").unwrap();
+        let resolved = merge_configs(&global_with_claude_pane(), Some(&project));
+        assert_eq!(resolved.panes[0].agent.as_deref(), Some("crush"));
+    }
+
+    #[test]
+    fn without_a_project_agent_the_global_layout_is_kept() {
+        let resolved = merge_configs(&global_with_claude_pane(), None);
+        assert_eq!(resolved.panes[0].agent.as_deref(), Some("claude"));
     }
 
     #[test]
