@@ -521,3 +521,17 @@ fn ff_to_remote_accepts_a_main_already_ahead_of_the_remote() {
 
     assert_eq!(rev(clone.path(), "main"), ahead);
 }
+
+/// Branching from the remote's main must not make the new branch track it.
+#[test]
+fn create_branch_from_a_remote_ref_sets_no_upstream() {
+    let (_origin, clone) = clone_behind_on_another_branch();
+    foundry::git::create_branch_from(clone.path(), "feat", "refs/remotes/origin/main").unwrap();
+
+    let upstream = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "feat@{upstream}"])
+        .current_dir(clone.path())
+        .output()
+        .unwrap();
+    assert!(!upstream.status.success(), "feat has an upstream");
+}

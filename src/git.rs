@@ -94,8 +94,15 @@ pub fn main_start_point(repo_path: &Path, main: &str, remote: &str) -> Result<St
 }
 
 /// Create a branch at `start_point` rather than at whatever HEAD happens to be.
+///
+/// `--no-track`: a start point that is a remote-tracking branch (see
+/// `main_start_point`) would otherwise become the new branch's upstream, and a
+/// bare `git push` from the workspace would then target main.
 pub fn create_branch_from(repo_path: &Path, name: &str, start_point: &str) -> Result<()> {
-    run_git(repo_path, &["branch", "--", name, start_point])?;
+    run_git(
+        repo_path,
+        &["branch", "--no-track", "--", name, start_point],
+    )?;
     Ok(())
 }
 
