@@ -25,7 +25,7 @@ struct Row {
 /// Display a status dashboard of all active workspaces.
 pub fn run(state: &WorkspaceState, state_path: &Path, watch: bool) -> Result<()> {
     if !watch {
-        print!("{}", render_dashboard(state));
+        print!("{}", render_dashboard(state, &mut HashMap::new()));
         return Ok(());
     }
 
@@ -33,9 +33,12 @@ pub fn run(state: &WorkspaceState, state_path: &Path, watch: bool) -> Result<()>
     // appear and disappear. A transient read failure (state.toml being
     // rewritten concurrently) just keeps the last good snapshot on screen.
     let mut snapshot = state.clone();
+    // A repo's main branch does not change between ticks, and detecting it is
+    // one or two git calls per repo, so it is asked once for the whole watch.
+    let mut main_branches = HashMap::new();
     loop {
         let started = std::time::Instant::now();
-        let frame = render_dashboard(&snapshot);
+        let frame = render_dashboard(&snapshot, &mut main_branches);
         // Home, clear, frame: one write, so the screen is never seen empty.
         let mut stdout = std::io::stdout().lock();
         write!(stdout, "\x1b[H\x1b[2J{frame}")?;
@@ -94,7 +97,7 @@ where
 }
 
 /// Gather the display data for a single workspace.
-fn probe_one(ws: &Workspace, main_branches: &HashMap<&str, Option<String>>) -> Row {
+fn probe_one(ws: &Workspace, main_branches: &HashMap<String, String>) -> Row {
     let workspace_name = format!("{}/{}", ws.project, ws.name);
     let worktree = Path::new(&ws.worktree_path);
     let source = Path::new(&ws.source_path);
@@ -111,10 +114,7 @@ fn probe_one(ws: &Workspace, main_branches: &HashMap<&str, Option<String>>) -> R
 
     // Commit count vs main. One `rev-list --count` answers both "are there
     // commits?" and "how many?" — asking twice ran the identical command.
-    let commit_info = match main_branches
-        .get(ws.source_path.as_str())
-        .and_then(|m| m.as_ref())
-    {
+    let commit_info = match main_branches.get(&ws.source_path) {
         Some(main_branch) => match git::commit_count(source, &ws.branch, main_branch) {
             Ok(0) => "no commits".to_string(),
             Ok(1) => "1 commit".to_string(),
@@ -139,7 +139,11 @@ fn probe_one(ws: &Workspace, main_branches: &HashMap<&str, Option<String>>) -> R
 /// can replace the previous frame in a single write. Printing as it went put
 /// the header on a freshly cleared screen and the rows only once the git
 /// probes returned, blanking the dashboard for that long on every refresh.
-fn render_dashboard(state: &WorkspaceState) -> String {
+///
+/// `main_branches` caches each source repo's main branch across calls; only
+/// repos missing from it are probed, and a failed detection is retried next
+/// time rather than remembered.
+fn render_dashboard(state: &WorkspaceState, main_branches: &mut HashMap<String, String>) -> String {
     let workspaces = state.list();
     // Writing to a String cannot fail, hence the `let _ =` on every writeln.
     let mut out = String::new();
@@ -161,17 +165,24 @@ fn render_dashboard(state: &WorkspaceState) -> String {
     // branch once per repo rather than once per workspace. Detection costs one
     // subprocess, or two when the repo has no origin/HEAD, so it runs in
     // parallel too rather than as a serial prefix to every refresh.
-    let mut sources: Vec<&str> = workspaces.iter().map(|w| w.source_path.as_str()).collect();
+    let mut sources: Vec<&str> = workspaces
+        .iter()
+        .map(|w| w.source_path.as_str())
+        .filter(|src| !main_branches.contains_key(*src))
+        .collect();
     sources.sort_unstable();
     sources.dedup();
 
-    let main_branches: HashMap<&str, Option<String>> = parallel_map(&sources, |src| {
+    for (src, main) in parallel_map(&sources, |src| {
         (*src, git::detect_main_branch(Path::new(src)).ok())
-    })
-    .into_iter()
-    .collect();
+    }) {
+        if let Some(main) = main {
+            main_branches.insert(src.to_string(), main);
+        }
+    }
+    let main_branches = &*main_branches;
 
-    for row in parallel_map(workspaces, |ws| probe_one(ws, &main_branches)) {
+    for row in parallel_map(workspaces, |ws| probe_one(ws, main_branches)) {
         let Row {
             workspace_name,
             missing,
