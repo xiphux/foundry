@@ -97,7 +97,13 @@ pub fn issue_to_prompt(issue: &GitHubIssue, custom_template: Option<&str>) -> St
 /// Other `<` are left alone: issues are full of `Vec<T>` and HTML.
 fn defuse_closing_tags(text: &str) -> String {
     const TAG: &str = "github_issue";
-    let skippable = |c: char| c.is_whitespace() || crate::str_util::is_display_control(c);
+    // Also variation selectors and the combining grapheme joiner: invisible
+    // inside a word, but not controls, so `is_display_control` leaves them.
+    let skippable = |c: char| {
+        c.is_whitespace()
+            || crate::str_util::is_display_control(c)
+            || matches!(c, '\u{034F}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}')
+    };
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     for (i, &c) in chars.iter().enumerate() {
@@ -259,6 +265,8 @@ mod tests {
             "</GITHUB_ISSUE>",
             "< / github_issue >",
             "</git\u{200b}hub_issue>",
+            "</git\u{FE0F}hub_issue>",
+            "</github\u{034F}_issue>",
         ] {
             assert!(defuse_closing_tags(tag).starts_with("<\\"), "{tag:?}");
         }
