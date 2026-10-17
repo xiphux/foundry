@@ -4,37 +4,37 @@
 
 ### Security
 
-- The default `--issue` prompt fences the issue text off in `<github_issue>` tags and tells the agent to treat it as a task description rather than instructions, since on a public repository anyone can write it. A custom `issue_prompt` template is used exactly as written.
-- `~/.foundry` is created owner-only (`0700`), and tightened if it already exists with wider permissions. Agent status and context files there can quote the code being worked on. A directory chosen with `FOUNDRY_HOME` is left as it is.
-- Ghostty and iTerm2 no longer type control characters from a pane command into the shell. Both backends type the command rather than passing it as an argument, so a control character in the agent prompt — which under `--issue` is GitHub issue text — reached the line editor as a keystroke: Ctrl-A in an issue body could move the cursor out of the quoted prompt and put a command of the issue author's choosing in front of it. Control characters are now dropped from typed lines.
-- Project names are validated when registered, explicitly or automatically. A project name is joined into worktree and status paths and interpolated into the quoted hook commands in `.claude/settings.local.json`, the same as a workspace name, but unlike one it was never checked — so a `'` broke out of that quoting and a `/` or leading `.` escaped the directory. Spaces and Unicode remain fine.
+- The default `--issue` prompt fences the issue text in `<github_issue>` tags and tells the agent to treat it as a task description, not instructions. A custom `issue_prompt` is used as written.
+- `~/.foundry` is made owner-only (`0700`); a `FOUNDRY_HOME` you chose is left alone.
+- Ghostty and iTerm2 no longer type control characters from a pane command into the shell, where a Ctrl-A in issue text could put a command in front of the agent's prompt.
+- Project names are validated when registered: a `'`, `/` or leading `.` could escape the quoted hook commands or the worktree directory.
 
 ### Fixed
 
-- `foundry history` says "1 commit" rather than "1 commits" for a discarded branch that was archived.
-- A project's `agent` setting takes effect when the global config defines `[[panes]]` with agents. It only reached the default layout, so `agent = "codex"` in `.foundry.toml` was ignored and the global layout's agent launched. It now replaces the first agent pane's agent, as `--agent` does; a project pane override that names an agent still wins for that pane.
-- `foundry start` with neither a name nor `--issue` fails without first auto-registering the current repository as a project.
-- `foundry restore` sets a workspace up the way `start` does. It skipped the agent setup — so a restored Claude workspace had no status in `foundry status` and none of the worktree permission rules — and it skipped deferred setup scripts, printing a note instead. It also checks that the agents are installed and the layout is valid before creating the worktree.
-- A layout that puts the same agent in two panes is refused before `start` creates anything. It used to be caught only after the branch, worktree and state entry existed, leaving them to clean up with `discard`.
-- Answering no to a `finish` or `discard` confirmation exits with status 1, so `foundry finish x && deploy` no longer carries on after a decline. The discard prompt is also on stderr now, like the others.
-- A `foundry start` whose worktree cannot be created no longer leaves its new branch behind, which made every retry fail with "branch already exists".
-- `start` and `restore` refuse, before creating anything, when no block of free ports is left in the range. They used to hand out ports past the end of it — duplicates of ports already in use, or a crash with `port_range_start` near 65535.
-- Commands in scripts and panes can use shell braces — `awk '{print $1}'`, `${HOME}`, `docker ps --format '{{.Names}}'`, `{a,b}`. Any `{` used to start a template variable, so these failed config loading with "unknown template variable". Only `{name}`-style identifiers are variables now, and an unknown one is still reported.
-- `foundry finish --local` no longer forgets a workspace's PR when the local merge fails. The PR link was cleared before merging, so after a refusal a plain `foundry finish` merged locally too.
-- A cancelled, timed-out or otherwise unsuccessfully finished CI check counts as failing in `foundry checks` and `finish`, rather than as still pending.
-- `foundry edit` accepts an editor setting with arguments, such as `EDITOR="code --wait"` or `editor = "emacsclient -n"`, which it used to treat as the name of a single program.
-- `foundry open` and `foundry switch` to a workspace that is already running work from inside tmux, by switching the client to its session. They used to try `tmux attach`, which refuses to nest, and report success having done nothing; inside Zellij, which has no equivalent, they now say so instead.
-- Commands run without a workspace name inside a workspace (`finish`, `discard`, `pr`, `diff` and the rest) find it when `worktree_dir` goes through a symlink — a symlinked home or volume, or macOS's `/var`. They compared the spelled path against the resolved current directory and reported "could not infer workspace".
-- `foundry start --project <name> --issue <n>` fetches the issue from that project's repository. gh was run in whatever directory foundry was started from, so outside a repo it failed, and inside a different one it fetched that repository's issue `<n>`.
-- `foundry open --all` no longer pauses half a second after each workspace that was already open. The pause lets Ghostty, iTerm2 and Windows Terminal finish creating a tab, and is now skipped when the workspace was only brought forward.
-- `foundry status --watch` no longer blanks between refreshes. It cleared the screen and drew the header before probing each workspace, so the rows vanished for as long as the git calls took; each frame is now drawn in one go once everything has been probed, and refreshes come every 2 seconds rather than 2 seconds plus probe time.
-- `foundry finish` on a workspace with a PR no longer stops after merging it. `gh pr merge --delete-branch` also deletes the local branch, which git refuses while the workspace's worktree has it checked out, so gh reported failure for a merged PR and the worktree, branch and state were left behind. Foundry now merges without that flag, deletes the remote branch itself, and removes the local one during cleanup as before.
-- `foundry start` branches from main even when the source repository has something else checked out, and fast-forwarding main (`--fetch`, `auto_fetch`, and after a PR merge) updates main itself. Both used to act on whatever HEAD was, so with the source repo on `wip` a new workspace started from `wip`, and the fast-forward moved `wip` while main stayed stale. `finish` now checks that main is checked out before fetching rather than after.
-- The worktree-scoped `Read`/`Edit`/`Write`/`Glob`/`Grep` rules foundry writes into `.claude/settings.local.json` now take effect. Claude reads a single leading `/` in those rules as relative to the settings file — absolute paths need `//` — so the rules pointed at a directory that does not exist and never matched. The path is also escaped now, so a `*`, `?` or `[` in a directory name matches only that directory rather than acting as a wildcard.
-- `foundry discard` can clear a workspace whose branch was deleted by hand. It tried to archive the missing branch after the worktree was already gone, failed, and left a state entry no rerun could remove.
-- A branch is never deleted because git's commit count could not be read. An unexpected answer used to count as zero commits, and a branch with none is deleted rather than archived; it is now an error.
-- `foundry finish` and `foundry pr` no longer refuse a Claude workspace over foundry's own `.claude/settings.local.json`. The file is untracked, so unless your global gitignore already covered it, every finish failed with "uncommitted changes" and `status` showed the workspace dirty. Foundry now adds the path to the repository's `.git/info/exclude`, which is local to the clone and never committed.
-- A workspace opened in bare mode, tmux or Zellij no longer overwrites state recorded while it was open. Those backends hold `start`/`open` until the session ends, and saving afterwards wrote back the state as it was beforehand — dropping a PR recorded by `foundry pr` (so `finish` merged locally and left the PR open) or resurrecting a workspace that had been finished.
+- `foundry history` says "1 commit", not "1 commits", for an archived discard.
+- A project's `agent` takes effect with a global `[[panes]]` layout, replacing the first agent pane's agent as `--agent` does; it was ignored unless the default layout was in use.
+- `foundry start` with neither a name nor `--issue` fails without auto-registering the repository first.
+- `foundry restore` sets a workspace up the way `start` does: agent settings (status tracking and permissions) and deferred setup scripts, which it skipped.
+- A layout with the same agent in two panes is refused before `start` creates anything.
+- Declining a `finish` or `discard` confirmation exits with status 1, so `foundry finish x && deploy` stops.
+- A `foundry start` whose worktree cannot be created no longer leaves its branch behind to block the retry.
+- `start` and `restore` refuse when the port range is exhausted, instead of handing out ports past its end.
+- Shell braces in commands — `awk '{print $1}'`, `${HOME}`, `{{.Names}}` — no longer fail config loading; only `{name}`-style identifiers are template variables.
+- `foundry finish --local` keeps the workspace's PR link if the local merge fails.
+- Cancelled, timed-out and other unsuccessfully finished CI checks count as failing, not pending.
+- `foundry edit` accepts an editor with arguments, such as `EDITOR="code --wait"`.
+- `foundry open` and `switch` to a running workspace work from inside tmux (via `switch-client`); inside Zellij they now say they cannot, instead of reporting success.
+- Commands that infer the workspace from the current directory work when `worktree_dir` goes through a symlink.
+- `foundry start --project <name> --issue <n>` fetches the issue from that project's repository rather than the current directory's.
+- `foundry open --all` no longer pauses after workspaces that were only brought forward.
+- `foundry status --watch` no longer blanks the screen between refreshes, and refreshes every 2 seconds rather than 2 seconds plus probe time.
+- `foundry finish` no longer stops after merging a PR: `gh pr merge --delete-branch` failed on the worktree's local branch. Foundry deletes the remote branch itself.
+- `foundry start` branches from main whatever the source repository has checked out, and fast-forwarding updates main itself rather than the current branch.
+- The worktree-scoped `Read`/`Edit`/`Write`/`Glob`/`Grep` rules in `.claude/settings.local.json` now take effect; a single leading `/` made them relative to the settings file, so they never matched.
+- `foundry discard` can clear a workspace whose branch was deleted by hand.
+- A branch is never deleted because its commit count could not be read; that is now an error instead of "no commits".
+- `finish` and `pr` no longer refuse a Claude workspace over foundry's own `.claude/settings.local.json`, which is now listed in `.git/info/exclude`.
+- A workspace held open by bare mode, tmux or Zellij no longer overwrites state recorded meanwhile, such as a PR from `foundry pr`.
 
 ## v0.6.1
 
