@@ -199,6 +199,7 @@ fn start_applies_the_branch_prefix_and_rejects_a_bad_name() {
     assert_eq!(sb.state().find("myapp", "feat").unwrap().branch, "dev/feat");
 
     sb.fails(&["start", "../escape"]);
+    sb.fails(&["start"]);
     assert_eq!(sb.state().list().len(), 1);
 }
 
