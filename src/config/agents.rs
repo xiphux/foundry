@@ -17,6 +17,31 @@ pub struct AgentCapabilities {
     /// honour, which it simply ignores. That is the whole contract: a mode this
     /// registry cannot express is a mode foundry cannot ask for.
     pub build_command: fn(&AgentInvocation) -> String,
+    /// What foundry manages in a workspace for this agent beyond its command
+    /// line, or `None` if nothing.
+    pub workspace: Option<WorkspaceHooks>,
+}
+
+/// An agent's per-workspace state that foundry sets up and tidies away.
+pub struct WorkspaceHooks {
+    /// Write the agent's configuration into a new workspace — status hooks,
+    /// worktree-scoped permissions.
+    pub setup: fn(&WorkspaceSetup) -> Result<()>,
+    /// Whether the agent has a conversation to resume in this worktree.
+    pub has_conversation: fn(&std::path::Path) -> bool,
+    /// Forget the conversations recorded for this worktree, so a new workspace
+    /// that reuses a name does not resume the old one's.
+    pub clear_conversations: fn(&std::path::Path),
+}
+
+/// What `WorkspaceHooks::setup` is given.
+pub struct WorkspaceSetup<'a> {
+    pub worktree_path: &'a std::path::Path,
+    pub source_path: &'a std::path::Path,
+    pub project: &'a str,
+    pub name: &'a str,
+    /// Text to hand the agent at session start, for agents that take it.
+    pub context: Option<&'a str>,
 }
 
 /// Everything that varies between one launch of an agent and the next.
@@ -57,6 +82,11 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         AgentCapabilities {
             names: &["claude"],
             executable: "claude",
+            workspace: Some(WorkspaceHooks {
+                setup: crate::agent_hooks::setup_claude,
+                has_conversation: crate::agent_hooks::has_claude_conversation,
+                clear_conversations: crate::agent_hooks::clear_claude_conversations,
+            }),
             // Default: `auto` mode, where Claude uses model analysis to approve
             // most permission prompts, combined with settings.local.json for
             // worktree-scoped allow/deny rules (level #2).
@@ -87,6 +117,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         AgentCapabilities {
             names: &["codex"],
             executable: "codex",
+            workspace: None,
             // Codex has a built-in OS sandbox with --full-auto. The sandbox is
             // always active (level #2). unrestricted doesn't change behavior.
             build_command: |inv| {
@@ -106,6 +137,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         AgentCapabilities {
             names: &["coder", "every-code"],
             executable: "coder",
+            workspace: None,
             // Same sandbox model as Codex.
             build_command: |inv| {
                 let mut cmd = "coder --full-auto".to_string();
@@ -124,6 +156,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         AgentCapabilities {
             names: &["gemini"],
             executable: "gemini",
+            workspace: None,
             // Default: sandbox mode restricts writes to project directory (level #2).
             // Unrestricted: yolo mode without sandbox (level #3).
             build_command: |inv| {
@@ -147,6 +180,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         AgentCapabilities {
             names: &["aider"],
             executable: "aider",
+            workspace: None,
             // Default: interactive REPL, user approves actions (level #1).
             // Unrestricted: --yes auto-approves all confirmations (level #3).
             // Never passes --message (which would auto-exit after processing).
@@ -164,6 +198,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         AgentCapabilities {
             names: &["copilot"],
             executable: "copilot",
+            workspace: None,
             // Default: standard permissions, user approves actions (level #1).
             // Unrestricted: --yolo enables all permissions (level #3).
             build_command: |inv| {
@@ -184,6 +219,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         AgentCapabilities {
             names: &["kiro", "kiro-cli"],
             executable: "kiro-cli",
+            workspace: None,
             // Default: standard permissions, user approves tool usage (level #1).
             // Unrestricted: --trust-all-tools auto-approves (level #3).
             build_command: |inv| {
@@ -206,6 +242,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         AgentCapabilities {
             names: &["opencode"],
             executable: "opencode",
+            workspace: None,
             // Default: interactive TUI, standard permissions (level #1).
             // Unrestricted: --auto approves every permission not explicitly
             // denied in opencode.json (level #3). Unlike Claude's `auto` mode,
@@ -231,6 +268,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         AgentCapabilities {
             names: &["crush"],
             executable: "crush",
+            workspace: None,
             // Default: interactive TUI, user approves tool calls (level #1).
             // Unrestricted: --yolo skips all permission prompts (level #3).
             // No prompt passthrough in interactive mode (crush run exits after prompt).
@@ -252,6 +290,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         AgentCapabilities {
             names: &["nanocoder"],
             executable: "nanocoder",
+            workspace: None,
             // Default: interactive TUI, user approves tool calls (level #1).
             // No CLI auto-approve flag available.
             // Prompt is passed as a positional argument.
@@ -269,6 +308,7 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
         AgentCapabilities {
             names: &["pi"],
             executable: "pi",
+            workspace: None,
             // Pi has no permission popups by design — it executes tools without
             // approval prompts and offers no auto-approve/restrict flag, so the
             // unrestricted flag is a no-op (Pi is always permissive). Pi's docs
@@ -289,6 +329,11 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
 ];
 
 /// Look up capabilities for a known agent. Returns None for unknown/custom agents.
+/// Every registered agent's capabilities.
+pub fn all_agent_capabilities() -> impl Iterator<Item = &'static AgentCapabilities> {
+    AGENT_REGISTRY.iter().map(|(_, caps)| caps)
+}
+
 pub fn agent_capabilities(agent: &str) -> Option<&'static AgentCapabilities> {
     AGENT_REGISTRY
         .iter()

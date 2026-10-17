@@ -56,22 +56,24 @@ pub fn claude_project_dir(worktree_path: &Path) -> Option<PathBuf> {
 /// Currently only Claude stores file-based conversations; other agents
 /// always return false.
 pub fn has_agent_conversation(agent: &str, worktree_path: &Path) -> bool {
-    match agent {
-        "claude" => has_claude_conversation(worktree_path),
-        _ => false,
-    }
+    config::agent_capabilities(agent)
+        .and_then(|caps| caps.workspace.as_ref())
+        .is_some_and(|hooks| (hooks.has_conversation)(worktree_path))
 }
 
 /// Clear agent conversation state for a worktree.
 /// Used when starting a new workspace to prevent resuming stale conversations
 /// from a previous workspace with the same name.
 pub fn clear_agent_conversations(worktree_path: &Path) {
-    // Currently only Claude stores file-based conversation state
-    clear_claude_conversations(worktree_path);
+    // Every agent's, not just the configured one's: a previous workspace of
+    // this name may have run a different agent.
+    for hooks in config::all_agent_capabilities().filter_map(|caps| caps.workspace.as_ref()) {
+        (hooks.clear_conversations)(worktree_path);
+    }
 }
 
 /// Check if a Claude conversation exists for a worktree (has .jsonl files).
-fn has_claude_conversation(worktree_path: &Path) -> bool {
+pub(crate) fn has_claude_conversation(worktree_path: &Path) -> bool {
     let dir = match claude_project_dir(worktree_path) {
         Some(d) => d,
         None => return false,
@@ -91,7 +93,7 @@ fn has_claude_conversation(worktree_path: &Path) -> bool {
 }
 
 /// Clear the Claude conversation directory for a worktree.
-fn clear_claude_conversations(worktree_path: &Path) {
+pub(crate) fn clear_claude_conversations(worktree_path: &Path) {
     if let Some(dir) = claude_project_dir(worktree_path)
         && dir.exists()
     {
@@ -269,11 +271,17 @@ pub fn setup_agent_hooks(
     agent: &str,
     context: Option<&str>,
 ) -> Result<()> {
-    match agent {
-        "claude" => setup_claude(worktree_path, source_path, project, name, context),
-        // Codex permissions are handled via CLI flags in build_agent_command.
-        // No config file setup needed since .codex/config.toml is tracked in git.
-        _ => Ok(()),
+    // An agent with nothing to set up — Codex, say, whose permissions are CLI
+    // flags — has no `workspace` hooks.
+    match config::agent_capabilities(agent).and_then(|caps| caps.workspace.as_ref()) {
+        Some(hooks) => (hooks.setup)(&config::WorkspaceSetup {
+            worktree_path,
+            source_path,
+            project,
+            name,
+            context,
+        }),
+        None => Ok(()),
     }
 }
 
@@ -366,13 +374,14 @@ fn settings_are_repo_supplied(source_path: &Path, settings_path: &Path) -> bool 
 
 /// Claude-specific setup: create .claude/settings.local.json with status
 /// tracking hooks and worktree-scoped permissions.
-fn setup_claude(
-    worktree_path: &Path,
-    source_path: &Path,
-    project: &str,
-    name: &str,
-    context: Option<&str>,
-) -> Result<()> {
+pub(crate) fn setup_claude(setup: &config::WorkspaceSetup) -> Result<()> {
+    let config::WorkspaceSetup {
+        worktree_path,
+        source_path,
+        project,
+        name,
+        context,
+    } = *setup;
     let status_path = crate::agent_status::status_file_path(project, name, "claude")?;
     let status_path_str = status_path.to_string_lossy();
 

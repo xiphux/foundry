@@ -6,8 +6,8 @@ pub mod types;
 mod validation;
 
 pub use agents::{
-    AgentCapabilities, AgentInvocation, agent_capabilities, agent_in_command_warnings,
-    build_agent_command, check_agent_available,
+    AgentCapabilities, AgentInvocation, WorkspaceHooks, WorkspaceSetup, agent_capabilities,
+    agent_in_command_warnings, all_agent_capabilities, build_agent_command, check_agent_available,
 };
 pub use global::GlobalConfig;
 pub use project::ProjectConfig;
