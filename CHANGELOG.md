@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- `foundry history` says "1 commit" rather than "1 commits" for a discarded branch that was archived.
 - A project's `agent` setting takes effect when the global config defines `[[panes]]` with agents. It only reached the default layout, so `agent = "codex"` in `.foundry.toml` was ignored and the global layout's agent launched. It now replaces the first agent pane's agent, as `--agent` does; a project pane override that names an agent still wins for that pane.
 - `foundry start` with neither a name nor `--issue` fails without first auto-registering the current repository as a project.
 - `foundry restore` sets a workspace up the way `start` does. It skipped the agent setup — so a restored Claude workspace had no status in `foundry status` and none of the worktree permission rules — and it skipped deferred setup scripts, printing a note instead. It also checks that the agents are installed and the layout is valid before creating the worktree.

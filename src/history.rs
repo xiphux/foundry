@@ -7,182 +7,6 @@ use std::path::Path;
 
 use crate::config;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn history_event_started_serializes() {
-        let event = HistoryEvent::started("myapp", "fix-auth", "fix-auth", Some("42"));
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("\"event\":\"started\""));
-        assert!(json.contains("\"from_issue\":\"42\""));
-        // Should not contain None fields
-        assert!(!json.contains("commits"));
-        assert!(!json.contains("archived_as"));
-    }
-
-    #[test]
-    fn history_event_finished_serializes() {
-        let event = HistoryEvent::finished("myapp", "fix-auth", "fix-auth", 3, "ff-only");
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("\"commits\":3"));
-        assert!(json.contains("\"merge_strategy\":\"ff-only\""));
-    }
-
-    #[test]
-    fn history_event_discarded_with_archive() {
-        let event = HistoryEvent::discarded(
-            "myapp",
-            "experiment",
-            "experiment",
-            5,
-            Some("archive/experiment-20260322"),
-        );
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("\"archived_as\":\"archive/experiment-20260322\""));
-        assert!(json.contains("\"commits\":5"));
-    }
-
-    #[test]
-    fn history_event_discarded_without_archive() {
-        let event = HistoryEvent::discarded("myapp", "experiment", "experiment", 0, None);
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(!json.contains("archived_as"));
-    }
-
-    #[test]
-    fn history_event_restored_serializes() {
-        let event = HistoryEvent::restored(
-            "myapp",
-            "experiment",
-            "experiment",
-            "archive/experiment-20260322",
-        );
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("\"from_branch\":\"archive/experiment-20260322\""));
-    }
-
-    #[test]
-    fn history_event_roundtrip() {
-        let event = HistoryEvent::started("myapp", "feat", "feat", None);
-        let json = serde_json::to_string(&event).unwrap();
-        let parsed: HistoryEvent = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.event, "started");
-        assert_eq!(parsed.project, "myapp");
-        assert_eq!(parsed.name, "feat");
-    }
-
-    #[test]
-    fn history_event_pr_created_serializes() {
-        let event = HistoryEvent::pr_created(
-            "myapp",
-            "fix-auth",
-            "fix-auth",
-            42,
-            "https://github.com/user/repo/pull/42",
-        );
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("\"event\":\"pr_created\""));
-        assert!(json.contains("\"pr_number\":42"));
-        assert!(json.contains("\"pr_url\":\"https://github.com/user/repo/pull/42\""));
-    }
-
-    /// Write `count` events to a temp log, named "ws-0".."ws-N" in order.
-    fn write_log(count: usize) -> (tempfile::TempDir, std::path::PathBuf) {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("history.jsonl");
-        let mut out = String::new();
-        for i in 0..count {
-            let event = HistoryEvent::started("proj", &format!("ws-{i}"), "branch", None);
-            out.push_str(&serde_json::to_string(&event).unwrap());
-            out.push('\n');
-        }
-        std::fs::write(&path, out).unwrap();
-        (dir, path)
-    }
-
-    #[test]
-    fn read_recent_returns_newest_first() {
-        let (_dir, path) = write_log(5);
-        let events = read_recent_from(&path, 3).unwrap();
-        let names: Vec<&str> = events.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, ["ws-4", "ws-3", "ws-2"]);
-    }
-
-    #[test]
-    fn read_recent_handles_missing_file() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let events = read_recent_from(&dir.path().join("nope.jsonl"), 10).unwrap();
-        assert!(events.is_empty());
-    }
-
-    #[test]
-    fn read_recent_limit_zero_returns_empty() {
-        let (_dir, path) = write_log(5);
-        assert!(read_recent_from(&path, 0).unwrap().is_empty());
-    }
-
-    #[test]
-    fn read_recent_limit_exceeding_file_returns_all() {
-        let (_dir, path) = write_log(3);
-        let events = read_recent_from(&path, 100).unwrap();
-        assert_eq!(events.len(), 3);
-        assert_eq!(events[2].name, "ws-0");
-    }
-
-    /// The window must grow past TAIL_WINDOW rather than truncating the result.
-    #[test]
-    fn read_recent_grows_window_past_first_read() {
-        // Each event is ~150 bytes, so 2000 of them far exceed the 64 KiB window.
-        let (_dir, path) = write_log(2000);
-        let events = read_recent_from(&path, 1500).unwrap();
-        assert_eq!(events.len(), 1500);
-        assert_eq!(events[0].name, "ws-1999");
-        assert_eq!(events[1499].name, "ws-500");
-    }
-
-    /// A record split by the window boundary must not surface as a partial event.
-    #[test]
-    fn read_recent_discards_record_split_by_window() {
-        let (_dir, path) = write_log(1000);
-        // Ask for few events so the first window is used and its leading line
-        // is almost certainly a partial record.
-        let events = read_recent_from(&path, 5).unwrap();
-        assert_eq!(events.len(), 5);
-        assert_eq!(events[0].name, "ws-999");
-        assert!(events.iter().all(|e| e.event == "started"));
-    }
-
-    #[test]
-    fn read_recent_skips_corrupt_lines() {
-        let (_dir, path) = write_log(4);
-        let mut content = std::fs::read_to_string(&path).unwrap();
-        content.push_str("{ not valid json\n\n");
-        std::fs::write(&path, content).unwrap();
-
-        let events = read_recent_from(&path, 3).unwrap();
-        assert_eq!(events.len(), 3);
-        assert_eq!(events[0].name, "ws-3");
-    }
-
-    #[test]
-    fn read_recent_handles_empty_file() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("history.jsonl");
-        std::fs::write(&path, "").unwrap();
-        assert!(read_recent_from(&path, 10).unwrap().is_empty());
-    }
-
-    #[test]
-    fn history_event_pr_merged_serializes() {
-        let event = HistoryEvent::pr_merged("myapp", "fix-auth", "fix-auth", 42);
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("\"event\":\"pr_merged\""));
-        assert!(json.contains("\"pr_number\":42"));
-    }
-}
-
 /// A workspace lifecycle event recorded in the history log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEvent {
@@ -431,65 +255,235 @@ pub fn display(limit: usize) -> Result<()> {
         let ts = event.timestamp.format("%Y-%m-%d %H:%M");
         let workspace = format!("{}/{}", event.project, event.name);
 
-        let detail = match event.event.as_str() {
-            "started" => {
-                if let Some(ref issue) = event.from_issue {
-                    format!(" (issue {issue})")
-                } else {
-                    String::new()
-                }
-            }
-            "finished" => {
-                let commits = event.commits.unwrap_or(0);
-                let strategy = event.merge_strategy.as_deref().unwrap_or("unknown");
-                let s = if commits == 1 { "" } else { "s" };
-                format!(" ({commits} commit{s}, {strategy})")
-            }
+        let commits = |n: u64| format!("{n} commit{}", if n == 1 { "" } else { "s" });
+        let (color, label, detail) = match event.event.as_str() {
+            "started" => (
+                "\x1b[32m",
+                "started",
+                event
+                    .from_issue
+                    .as_ref()
+                    .map(|issue| format!(" (issue {issue})")),
+            ),
+            "finished" => (
+                "\x1b[34m",
+                "finished",
+                Some(format!(
+                    " ({}, {})",
+                    commits(event.commits.unwrap_or(0)),
+                    event.merge_strategy.as_deref().unwrap_or("unknown")
+                )),
+            ),
             "discarded" => {
-                let commits = event.commits.unwrap_or(0);
-                if let Some(ref archived) = event.archived_as {
-                    format!(" ({commits} commits, archived as {archived})")
-                } else {
-                    let s = if commits == 1 { "" } else { "s" };
-                    format!(" ({commits} commit{s})")
-                }
+                let n = commits(event.commits.unwrap_or(0));
+                let detail = match event.archived_as {
+                    Some(ref archived) => format!(" ({n}, archived as {archived})"),
+                    None => format!(" ({n})"),
+                };
+                ("\x1b[33m", "discarded", Some(detail))
             }
-            "restored" => {
-                if let Some(ref from) = event.from_branch {
-                    format!(" (from {from})")
-                } else {
-                    String::new()
-                }
-            }
-            "pr_created" => {
-                if let Some(ref url) = event.pr_url {
-                    format!(" (PR {url})")
-                } else {
-                    String::new()
-                }
-            }
-            "pr_merged" => {
-                if let Some(pr) = event.pr_number {
-                    format!(" (PR #{pr})")
-                } else {
-                    String::new()
-                }
-            }
-            _ => String::new(),
+            "restored" => (
+                "\x1b[36m",
+                "restored",
+                event
+                    .from_branch
+                    .as_ref()
+                    .map(|from| format!(" (from {from})")),
+            ),
+            "pr_created" => (
+                "\x1b[35m",
+                "pr",
+                event.pr_url.as_ref().map(|url| format!(" (PR {url})")),
+            ),
+            "pr_merged" => (
+                "\x1b[34m",
+                "merged",
+                event.pr_number.map(|pr| format!(" (PR #{pr})")),
+            ),
+            // An event a newer foundry wrote: show its name, nothing more.
+            other => ("", other, None),
         };
-
-        let (color, label) = match event.event.as_str() {
-            "started" => ("\x1b[32m", "started   "),
-            "finished" => ("\x1b[34m", "finished  "),
-            "discarded" => ("\x1b[33m", "discarded "),
-            "restored" => ("\x1b[36m", "restored  "),
-            "pr_created" => ("\x1b[35m", "pr        "),
-            "pr_merged" => ("\x1b[34m", "merged    "),
-            _ => ("", &*format!("{:<10}", event.event)),
-        };
+        let detail = detail.unwrap_or_default();
+        let label = format!("{label:<10}");
 
         println!("  {ts}  {color}{label}\x1b[0m {workspace}{detail}");
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_event_started_serializes() {
+        let event = HistoryEvent::started("myapp", "fix-auth", "fix-auth", Some("42"));
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"event\":\"started\""));
+        assert!(json.contains("\"from_issue\":\"42\""));
+        // Should not contain None fields
+        assert!(!json.contains("commits"));
+        assert!(!json.contains("archived_as"));
+    }
+
+    #[test]
+    fn history_event_finished_serializes() {
+        let event = HistoryEvent::finished("myapp", "fix-auth", "fix-auth", 3, "ff-only");
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"commits\":3"));
+        assert!(json.contains("\"merge_strategy\":\"ff-only\""));
+    }
+
+    #[test]
+    fn history_event_discarded_with_archive() {
+        let event = HistoryEvent::discarded(
+            "myapp",
+            "experiment",
+            "experiment",
+            5,
+            Some("archive/experiment-20260322"),
+        );
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"archived_as\":\"archive/experiment-20260322\""));
+        assert!(json.contains("\"commits\":5"));
+    }
+
+    #[test]
+    fn history_event_discarded_without_archive() {
+        let event = HistoryEvent::discarded("myapp", "experiment", "experiment", 0, None);
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(!json.contains("archived_as"));
+    }
+
+    #[test]
+    fn history_event_restored_serializes() {
+        let event = HistoryEvent::restored(
+            "myapp",
+            "experiment",
+            "experiment",
+            "archive/experiment-20260322",
+        );
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"from_branch\":\"archive/experiment-20260322\""));
+    }
+
+    #[test]
+    fn history_event_roundtrip() {
+        let event = HistoryEvent::started("myapp", "feat", "feat", None);
+        let json = serde_json::to_string(&event).unwrap();
+        let parsed: HistoryEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.event, "started");
+        assert_eq!(parsed.project, "myapp");
+        assert_eq!(parsed.name, "feat");
+    }
+
+    #[test]
+    fn history_event_pr_created_serializes() {
+        let event = HistoryEvent::pr_created(
+            "myapp",
+            "fix-auth",
+            "fix-auth",
+            42,
+            "https://github.com/user/repo/pull/42",
+        );
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"event\":\"pr_created\""));
+        assert!(json.contains("\"pr_number\":42"));
+        assert!(json.contains("\"pr_url\":\"https://github.com/user/repo/pull/42\""));
+    }
+
+    /// Write `count` events to a temp log, named "ws-0".."ws-N" in order.
+    fn write_log(count: usize) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("history.jsonl");
+        let mut out = String::new();
+        for i in 0..count {
+            let event = HistoryEvent::started("proj", &format!("ws-{i}"), "branch", None);
+            out.push_str(&serde_json::to_string(&event).unwrap());
+            out.push('\n');
+        }
+        std::fs::write(&path, out).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn read_recent_returns_newest_first() {
+        let (_dir, path) = write_log(5);
+        let events = read_recent_from(&path, 3).unwrap();
+        let names: Vec<&str> = events.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["ws-4", "ws-3", "ws-2"]);
+    }
+
+    #[test]
+    fn read_recent_handles_missing_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let events = read_recent_from(&dir.path().join("nope.jsonl"), 10).unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn read_recent_limit_zero_returns_empty() {
+        let (_dir, path) = write_log(5);
+        assert!(read_recent_from(&path, 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn read_recent_limit_exceeding_file_returns_all() {
+        let (_dir, path) = write_log(3);
+        let events = read_recent_from(&path, 100).unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[2].name, "ws-0");
+    }
+
+    /// The window must grow past TAIL_WINDOW rather than truncating the result.
+    #[test]
+    fn read_recent_grows_window_past_first_read() {
+        // Each event is ~150 bytes, so 2000 of them far exceed the 64 KiB window.
+        let (_dir, path) = write_log(2000);
+        let events = read_recent_from(&path, 1500).unwrap();
+        assert_eq!(events.len(), 1500);
+        assert_eq!(events[0].name, "ws-1999");
+        assert_eq!(events[1499].name, "ws-500");
+    }
+
+    /// A record split by the window boundary must not surface as a partial event.
+    #[test]
+    fn read_recent_discards_record_split_by_window() {
+        let (_dir, path) = write_log(1000);
+        // Ask for few events so the first window is used and its leading line
+        // is almost certainly a partial record.
+        let events = read_recent_from(&path, 5).unwrap();
+        assert_eq!(events.len(), 5);
+        assert_eq!(events[0].name, "ws-999");
+        assert!(events.iter().all(|e| e.event == "started"));
+    }
+
+    #[test]
+    fn read_recent_skips_corrupt_lines() {
+        let (_dir, path) = write_log(4);
+        let mut content = std::fs::read_to_string(&path).unwrap();
+        content.push_str("{ not valid json\n\n");
+        std::fs::write(&path, content).unwrap();
+
+        let events = read_recent_from(&path, 3).unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].name, "ws-3");
+    }
+
+    #[test]
+    fn read_recent_handles_empty_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("history.jsonl");
+        std::fs::write(&path, "").unwrap();
+        assert!(read_recent_from(&path, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn history_event_pr_merged_serializes() {
+        let event = HistoryEvent::pr_merged("myapp", "fix-auth", "fix-auth", 42);
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"event\":\"pr_merged\""));
+        assert!(json.contains("\"pr_number\":42"));
+    }
 }
