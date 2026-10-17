@@ -24,6 +24,20 @@ pub fn runtime_subdir(name: &str) -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// Make the default foundry home, `~/.foundry`, owner-only, creating it if need be.
+///
+/// Its files hold nothing secret, but the agent status files carry the agent's
+/// last message and the context files its instructions, which can quote the
+/// code being worked on — not something to leave world-readable on a shared
+/// machine. Only the default location: a `FOUNDRY_HOME` the user chose is
+/// theirs to set permissions on.
+pub fn secure_default_home() -> Result<()> {
+    if std::env::var_os("FOUNDRY_HOME").is_some_and(|d| !d.is_empty()) {
+        return Ok(());
+    }
+    create_private_dir(&crate::config::foundry_dir()?)
+}
+
 /// Create a directory that only its owner may access.
 ///
 /// The mode is applied after creation rather than relying on the process

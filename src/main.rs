@@ -108,6 +108,7 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    foundry::fs_util::secure_default_home()?;
     let (registry_path, state_path) = workflow::foundry_paths()?;
 
     match cli.command {
