@@ -9,7 +9,7 @@ const HOOK_SCRIPT: &str = include_str!("hook_script.js");
 /// Install the Node.js hook script to `~/.foundry/hooks/status-update.js`.
 /// Skips if the file already contains the current version marker.
 /// Returns the path to the installed script.
-pub fn install_hook_script() -> Result<PathBuf> {
+fn install_hook_script() -> Result<PathBuf> {
     let base_dir = config::foundry_dir()?;
     install_hook_script_to(&base_dir)
 }
@@ -41,7 +41,7 @@ fn install_hook_script_to(base_dir: &Path) -> Result<PathBuf> {
 /// Compute the Claude project directory path for a worktree.
 /// Claude stores conversations at ~/.claude/projects/<mangled-path>/
 /// where the path has slashes replaced with dashes.
-pub fn claude_project_dir(worktree_path: &Path) -> Option<PathBuf> {
+fn claude_project_dir(worktree_path: &Path) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     let abs_path = if worktree_path.is_absolute() {
         worktree_path.to_path_buf()

@@ -84,7 +84,7 @@ fn status_dir(project: &str, name: &str) -> Result<PathBuf> {
 }
 
 /// Get the path to the status file for a specific agent in a workspace.
-pub fn status_file_path(project: &str, name: &str, agent: &str) -> Result<PathBuf> {
+pub(crate) fn status_file_path(project: &str, name: &str, agent: &str) -> Result<PathBuf> {
     Ok(status_dir(project, name)?.join(format!("{agent}.json")))
 }
 

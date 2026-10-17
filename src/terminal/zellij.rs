@@ -42,7 +42,7 @@ impl ZellijBackend {
     }
 
     /// Check if we're currently inside a Zellij session.
-    pub fn inside_zellij() -> bool {
+    fn inside_zellij() -> bool {
         std::env::var("ZELLIJ").is_ok()
     }
 

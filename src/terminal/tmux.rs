@@ -21,7 +21,7 @@ impl TmuxBackend {
 
     /// Check if we're currently inside a tmux session.
     /// Used to prevent nesting (opening a new session inside an existing one).
-    pub fn inside_tmux() -> bool {
+    fn inside_tmux() -> bool {
         std::env::var("TMUX").is_ok()
     }
 

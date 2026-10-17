@@ -45,7 +45,7 @@ pub fn truncate_on_char_boundary(s: &str, max_bytes: usize) -> &str {
 /// which draw anything — so escaping them cannot make legitimate text less
 /// readable. The list is an enumeration rather than a category test because
 /// std has no `Cf` predicate; general category `Cf` is what it approximates.
-pub fn is_display_control(c: char) -> bool {
+fn is_display_control(c: char) -> bool {
     c.is_control()
         || matches!(c,
             '\u{00AD}'                       // soft hyphen

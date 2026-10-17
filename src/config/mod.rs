@@ -320,7 +320,7 @@ fn resolve_unrestricted_permissions(global: bool, project: Option<bool>) -> bool
 }
 
 /// Expand ~ to home directory.
-pub fn expand_tilde(path: &str) -> PathBuf {
+fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/")
         && let Some(home) = dirs::home_dir()
     {
