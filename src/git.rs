@@ -505,10 +505,21 @@ pub fn remote_url(repo_path: &Path, remote: &str) -> Result<String> {
 }
 
 /// Delete `branch` on `remote`.
+///
+/// Never prompts for credentials: callers treat this as best effort, and a
+/// prompt would hang a command whose real work is already done.
 pub fn delete_remote_branch(repo_path: &Path, remote: &str, branch: &str) -> Result<()> {
     reject_option_like(remote, "remote name")?;
     reject_option_like(branch, "branch name")?;
-    run_git(repo_path, &["push", remote, "--delete", branch])?;
+    let args = ["push", remote, "--delete", branch];
+    crate::process::run_checked(
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .args(args)
+            .env("GIT_TERMINAL_PROMPT", "0"),
+        &format!("git {} failed", args.join(" ")),
+    )?;
     Ok(())
 }
 
