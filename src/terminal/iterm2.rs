@@ -117,6 +117,44 @@ impl Iterm2Backend {
 
         Ok(lines.join("\n"))
     }
+
+    /// Wrap `body` in the search for the session whose unique id is `tab_id`.
+    /// `body` runs with `t` as that session's tab; the script returns
+    /// "not_found" if there is none. The analogue of Ghostty's `with_tab`, for
+    /// the three scripts that used to spell the nested loops out each time.
+    fn with_session(tab_id: &str, body: &str) -> String {
+        let escaped_id = escape_applescript(tab_id);
+        format!(
+            r#"tell application "iTerm2"
+    repeat with w in windows
+        repeat with t in tabs of w
+            repeat with s in sessions of t
+                if unique id of s is "{escaped_id}" then
+{body}
+                end if
+            end repeat
+        end repeat
+    end repeat
+    return "not_found"
+end tell"#
+        )
+    }
+
+    fn build_run_in_pane_script(tab_id: &str, pane_index: usize, command: &str) -> String {
+        let escaped_cmd = escape_typed_input(command);
+        // AppleScript uses 1-based indexing
+        let as_index = pane_index + 1;
+        Self::with_session(
+            tab_id,
+            &format!(
+                r#"                    set targetSession to item {as_index} of sessions of t
+                    tell targetSession
+                        write text "{escaped_cmd}"
+                    end tell
+                    return "found""#
+            ),
+        )
+    }
 }
 
 impl TerminalBackend for Iterm2Backend {
@@ -151,26 +189,10 @@ impl TerminalBackend for Iterm2Backend {
         if tab_id.is_empty() {
             return Ok(());
         }
-
-        let escaped_id = escape_applescript(tab_id);
-        let script = format!(
-            r#"tell application "iTerm2"
-    try
-        repeat with w in windows
-            repeat with t in tabs of w
-                repeat with s in sessions of t
-                    if unique id of s is "{escaped_id}" then
-                        close t
-                        return
-                    end if
-                end repeat
-            end repeat
-        end repeat
-    end try
-end tell"#
-        );
-
-        let _ = run_applescript(&script);
+        let _ = run_applescript(&Self::with_session(
+            tab_id,
+            "                    close t\n                    return \"found\"",
+        ));
         Ok(())
     }
 
@@ -178,31 +200,7 @@ end tell"#
         if tab_id.is_empty() {
             return Ok(());
         }
-
-        let escaped_id = escape_applescript(tab_id);
-        let escaped_cmd = escape_typed_input(command);
-        // AppleScript uses 1-based indexing
-        let as_index = pane_index + 1;
-
-        let script = format!(
-            r#"tell application "iTerm2"
-    repeat with w in windows
-        repeat with t in tabs of w
-            repeat with s in sessions of t
-                if unique id of s is "{escaped_id}" then
-                    set targetSession to item {as_index} of sessions of t
-                    tell targetSession
-                        write text "{escaped_cmd}"
-                    end tell
-                    return
-                end if
-            end repeat
-        end repeat
-    end repeat
-end tell"#
-        );
-
-        run_applescript(&script)?;
+        run_applescript(&Self::build_run_in_pane_script(tab_id, pane_index, command))?;
         Ok(())
     }
 
@@ -210,33 +208,25 @@ end tell"#
         if tab_id.is_empty() {
             return Ok(false);
         }
-
-        let escaped_id = escape_applescript(tab_id);
-        let script = format!(
-            r#"tell application "iTerm2"
-    activate
-    repeat with w in windows
-        repeat with t in tabs of w
-            repeat with s in sessions of t
-                if unique id of s is "{escaped_id}" then
-                    select t
-                    return "found"
-                end if
-            end repeat
-        end repeat
-    end repeat
-    return "not_found"
-end tell"#
-        );
-
-        let result = run_applescript(&script)?;
-        Ok(result.contains("found") && !result.contains("not_found"))
+        let result = run_applescript(&Self::with_session(
+            tab_id,
+            "                    select t\n                    activate\n                    return \"found\"",
+        ))?;
+        Ok(result == "found")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_in_pane_script_targets_the_session_by_one_based_index() {
+        let script = Iterm2Backend::build_run_in_pane_script("ABC-123", 1, "pnpm install");
+        assert!(script.contains(r#"if unique id of s is "ABC-123" then"#));
+        assert!(script.contains("item 2 of sessions of t"));
+        assert!(script.contains(r#"write text "pnpm install""#));
+    }
     use std::collections::HashMap;
 
     fn pane_with_env(k: &str, v: &str) -> PaneSpec {
