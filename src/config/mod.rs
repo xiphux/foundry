@@ -240,14 +240,30 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
     // that names its agents, `agent = "codex"` in `.foundry.toml` was ignored
     // and the global agent launched. A project override naming that pane's
     // agent directly is more specific, and wins.
+    //
+    // Unless that agent already has a pane of its own: putting it in a second
+    // would make a layout `validate_panes` rejects, and every start and open in
+    // the repo would fail over a setting the repo's authors may have written
+    // for the default layout.
     if let Some(project_agent) = project.and_then(|p| p.agent.as_deref())
-        && let Some(primary) = panes.iter_mut().find(|p| p.agent.is_some())
+        && let Some(primary_index) = panes.iter().position(|p| p.agent.is_some())
     {
+        let primary_name = panes[primary_index].name.clone();
         let pane_overridden = project
-            .and_then(|p| p.panes.get(&primary.name))
+            .and_then(|p| p.panes.get(&primary_name))
             .is_some_and(|ov| ov.agent.is_some());
-        if !pane_overridden {
-            primary.agent = Some(project_agent.to_string());
+        let elsewhere = panes
+            .iter()
+            .enumerate()
+            .find(|(i, p)| *i != primary_index && p.agent.as_deref() == Some(project_agent));
+        if let Some((_, other)) = elsewhere {
+            eprintln!(
+                "Warning: the project config sets agent = \"{project_agent}\", but your layout \
+                 already runs it in pane '{}'. Keeping pane '{primary_name}' as it is.",
+                other.name
+            );
+        } else if !pane_overridden {
+            panes[primary_index].agent = Some(project_agent.to_string());
         }
     }
 
@@ -452,6 +468,15 @@ mod tests {
             toml::from_str("agent = \"codex\"\n[panes.main]\nagent = \"crush\"").unwrap();
         let resolved = merge_configs(&global_with_claude_pane(), Some(&project));
         assert_eq!(resolved.panes[0].agent.as_deref(), Some("crush"));
+    }
+
+    #[test]
+    fn a_project_agent_already_in_another_pane_leaves_the_layout_valid() {
+        let project: ProjectConfig = toml::from_str("agent = \"gemini\"").unwrap();
+        let resolved = merge_configs(&global_with_claude_pane(), Some(&project));
+        assert_eq!(resolved.panes[0].agent.as_deref(), Some("claude"));
+        assert_eq!(resolved.panes[1].agent.as_deref(), Some("gemini"));
+        assert!(validate_panes(&resolved.panes).is_ok());
     }
 
     #[test]

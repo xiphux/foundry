@@ -359,7 +359,7 @@ Only a known name in braces is substituted. Other braces are left as they are, s
 ### Config Merging Rules
 
 - **Scalar values** (branch_prefix, agent_command, etc.): project overrides global
-- **Agent**: a project's `agent` replaces the agent in the layout's first agent pane, whether the layout is the default or your own `[[panes]]`. A project `[panes.<name>]` override that sets `agent` wins for its pane, and `--agent` wins over both.
+- **Agent**: a project's `agent` replaces the agent in the layout's first agent pane, whether the layout is the default or your own `[[panes]]`. A project `[panes.<name>]` override that sets `agent` wins for its pane, and `--agent` wins over both. If your layout already runs that agent in another pane, the layout is kept as it is, with a warning.
 - **Pane layout**: global defines the structure; project can override `command` and `env` for existing panes by name, and opt in to optional panes
 - **Scripts**: project-only (no global scripts)
 
