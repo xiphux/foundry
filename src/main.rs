@@ -254,6 +254,7 @@ fn run() -> Result<()> {
                     // this is cheap.
                     let settle = foundry::terminal::detect_terminal()?.settle_delay();
 
+                    let mut failed = 0;
                     for (i, (ws_name, worktree_path)) in workspaces.iter().enumerate() {
                         if !worktree_path.exists() {
                             eprintln!("Warning: worktree '{ws_name}' no longer exists, skipping.");
@@ -265,12 +266,22 @@ fn run() -> Result<()> {
                         }
 
                         let mut c = env.ctx(&project_name, &source_path, &resolved, &mut state);
-                        let opened = workflow::open::open_workspace(
+                        // One workspace that cannot be opened — a running
+                        // session Zellij will not switch to from inside
+                        // itself, say — should not keep the rest closed.
+                        let opened = match workflow::open::open_workspace(
                             &mut c,
                             ws_name,
                             worktree_path,
                             &Default::default(),
-                        )?;
+                        ) {
+                            Ok(opened) => opened,
+                            Err(e) => {
+                                eprintln!("Warning: could not open '{ws_name}': {e:#}");
+                                failed += 1;
+                                continue;
+                            }
+                        };
 
                         // Brief pause between opens to let the terminal settle.
                         // Focusing a tab that already exists creates nothing to
@@ -281,6 +292,12 @@ fn run() -> Result<()> {
                         {
                             std::thread::sleep(settle);
                         }
+                    }
+                    if failed > 0 {
+                        anyhow::bail!(
+                            "{failed} of {} workspace(s) could not be opened",
+                            workspaces.len()
+                        );
                     }
                     eprintln!("Opened {} workspace(s).", workspaces.len());
                 }
