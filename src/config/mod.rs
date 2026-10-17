@@ -422,12 +422,9 @@ mod tests {
         PaneConfig {
             name: name.into(),
             agent: Some(agent.into()),
-            command: None,
             split_from: split_from.map(Into::into),
             direction: split_from.map(|_| SplitDirection::Right),
-            optional: false,
-            env: Default::default(),
-            deferred: false,
+            ..Default::default()
         }
     }
 
@@ -484,22 +481,14 @@ mod tests {
                 PaneConfig {
                     name: "agent".into(),
                     agent: Some("claude".into()),
-                    command: None,
-                    split_from: None,
-                    direction: None,
-                    optional: false,
-                    env: Default::default(),
-                    deferred: false,
+                    ..Default::default()
                 },
                 PaneConfig {
                     name: "helper".into(),
                     agent: Some("codex".into()),
-                    command: None,
                     split_from: Some("agent".into()),
                     direction: Some(SplitDirection::Right),
-                    optional: false,
-                    env: Default::default(),
-                    deferred: false,
+                    ..Default::default()
                 },
             ],
             ..Default::default()

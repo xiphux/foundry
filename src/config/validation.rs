@@ -353,13 +353,9 @@ mod tests {
     fn pane(name: &str, split_from: Option<&str>) -> PaneConfig {
         PaneConfig {
             name: name.into(),
-            agent: None,
-            command: None,
             split_from: split_from.map(Into::into),
             direction: split_from.map(|_| SplitDirection::Right),
-            optional: false,
-            env: Default::default(),
-            deferred: false,
+            ..Default::default()
         }
     }
 

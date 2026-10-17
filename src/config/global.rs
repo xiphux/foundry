@@ -46,22 +46,13 @@ fn default_panes() -> Vec<PaneConfig> {
         PaneConfig {
             name: "agent".into(),
             agent: None, // filled from global agent field at merge time
-            command: None,
-            split_from: None,
-            direction: None,
-            optional: false,
-            env: Default::default(),
-            deferred: false,
+            ..Default::default()
         },
         PaneConfig {
             name: "shell".into(),
-            agent: None,
-            command: None,
             split_from: Some("agent".into()),
             direction: Some(SplitDirection::Right),
-            optional: false,
-            env: Default::default(),
-            deferred: false,
+            ..Default::default()
         },
     ]
 }

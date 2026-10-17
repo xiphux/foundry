@@ -26,7 +26,7 @@ pub enum SplitDirection {
     Down,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct PaneConfig {
     pub name: String,
     /// Agent to run in this pane (e.g., "claude", "codex", "every-code").

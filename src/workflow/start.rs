@@ -539,9 +539,8 @@ mod tests {
             command: command.map(Into::into),
             split_from: (name != "agent").then(|| "agent".to_string()),
             direction: (name != "agent").then_some(SplitDirection::Right),
-            optional: false,
-            env: Default::default(),
             deferred,
+            ..Default::default()
         }
     }
 

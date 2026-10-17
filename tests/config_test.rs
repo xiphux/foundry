@@ -87,22 +87,15 @@ fn test_config_merge_optional_pane_skipped() {
             foundry::config::PaneConfig {
                 name: "agent".into(),
                 agent: Some("claude".into()),
-                command: None,
-                split_from: None,
-                direction: None,
-                optional: false,
-                env: Default::default(),
-                deferred: false,
+                ..Default::default()
             },
             foundry::config::PaneConfig {
                 name: "server".into(),
-                agent: None,
                 command: Some("npm run dev".into()),
                 split_from: Some("agent".into()),
                 direction: Some(foundry::config::SplitDirection::Right),
                 optional: true,
-                env: Default::default(),
-                deferred: false,
+                ..Default::default()
             },
         ],
         ..Default::default()
@@ -119,22 +112,15 @@ fn test_config_merge_optional_pane_opted_in() {
             foundry::config::PaneConfig {
                 name: "agent".into(),
                 agent: Some("claude".into()),
-                command: None,
-                split_from: None,
-                direction: None,
-                optional: false,
-                env: Default::default(),
-                deferred: false,
+                ..Default::default()
             },
             foundry::config::PaneConfig {
                 name: "server".into(),
-                agent: None,
                 command: Some("npm run dev".into()),
                 split_from: Some("agent".into()),
                 direction: Some(foundry::config::SplitDirection::Right),
                 optional: true,
-                env: Default::default(),
-                deferred: false,
+                ..Default::default()
             },
         ],
         ..Default::default()
@@ -255,22 +241,13 @@ fn test_custom_panes_with_agent_override_global() {
             foundry::config::PaneConfig {
                 name: "dev".into(),
                 agent: Some("codex".into()),
-                command: None,
-                split_from: None,
-                direction: None,
-                optional: false,
-                env: Default::default(),
-                deferred: false,
+                ..Default::default()
             },
             foundry::config::PaneConfig {
                 name: "shell".into(),
-                agent: None,
-                command: None,
                 split_from: Some("dev".into()),
                 direction: Some(foundry::config::SplitDirection::Right),
-                optional: false,
-                env: Default::default(),
-                deferred: false,
+                ..Default::default()
             },
         ],
         ..Default::default()

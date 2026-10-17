@@ -858,13 +858,8 @@ mod tests {
     fn warn_agent_in_command_detects_agent_commands() {
         let panes = vec![super::super::PaneConfig {
             name: "test".into(),
-            agent: None,
             command: Some("claude --dangerously-skip-permissions".into()),
-            split_from: None,
-            direction: None,
-            optional: false,
-            env: Default::default(),
-            deferred: false,
+            ..Default::default()
         }];
         let warnings = agent_in_command_warnings(&panes);
         assert_eq!(warnings.len(), 1);
@@ -877,11 +872,7 @@ mod tests {
             name: "test".into(),
             agent: Some("claude".into()),
             command: Some("claude".into()),
-            split_from: None,
-            direction: None,
-            optional: false,
-            env: Default::default(),
-            deferred: false,
+            ..Default::default()
         }];
         assert!(agent_in_command_warnings(&panes).is_empty());
     }
