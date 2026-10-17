@@ -103,7 +103,23 @@ fn ctx<'a>(
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> std::process::ExitCode {
+    match run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        // A declined prompt is the user's answer, not a failure to report.
+        Err(e) if e.is::<foundry::prompt::Aborted>() => {
+            eprintln!("Aborted.");
+            std::process::ExitCode::FAILURE
+        }
+        // The same report `fn main() -> Result` would print.
+        Err(e) => {
+            eprintln!("Error: {e:?}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> Result<()> {
     restore_sigpipe();
 
     let cli = Cli::parse();

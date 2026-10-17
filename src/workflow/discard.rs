@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::io::{self, Write};
 
 use crate::git;
 use crate::history;
@@ -42,15 +41,9 @@ pub fn run(
         && git::has_uncommitted_changes(&ws.worktree_path)?
         && !skip_confirm
         && !force
+        && !crate::prompt::confirm("Worktree has uncommitted changes. Discard anyway?")?
     {
-        print!("Worktree has uncommitted changes. Discard anyway? [y/N] ");
-        io::stdout().flush()?;
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        if !input.trim().eq_ignore_ascii_case("y") {
-            eprintln!("Aborted.");
-            return Ok(());
-        }
+        return Err(crate::prompt::Aborted.into());
     }
 
     if !worktree_present {

@@ -16,7 +16,7 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::io::{IsTerminal, Write};
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use crate::config::ProjectConfig;
@@ -230,12 +230,7 @@ pub fn ensure_trusted(repo_root: &Path, contents: &str, config: &ProjectConfig) 
         "This file comes from the repository, not from your own configuration. \
          Only approve it if you trust this repo."
     );
-    eprint!("Trust this project config? [y/N] ");
-    std::io::stderr().flush()?;
-
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    if !input.trim().eq_ignore_ascii_case("y") {
+    if !crate::prompt::confirm("Trust this project config?")? {
         bail!(
             "project config not approved. Review {} and re-run, or approve it with:\n  \
              foundry trust {}",

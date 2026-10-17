@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- Answering no to a `finish` or `discard` confirmation exits with status 1, so `foundry finish x && deploy` no longer carries on after a decline. The discard prompt is also on stderr now, like the others.
 - A `foundry start` whose worktree cannot be created no longer leaves its new branch behind, which made every retry fail with "branch already exists".
 - `start` and `restore` refuse, before creating anything, when no block of free ports is left in the range. They used to hand out ports past the end of it — duplicates of ports already in use, or a crash with `port_range_start` near 65535.
 - Commands in scripts and panes can use shell braces — `awk '{print $1}'`, `${HOME}`, `docker ps --format '{{.Names}}'`, `{a,b}`. Any `{` used to start a template variable, so these failed config loading with "unknown template variable". Only `{name}`-style identifiers are variables now, and an unknown one is still reported.

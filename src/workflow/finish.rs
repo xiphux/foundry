@@ -1,7 +1,5 @@
 use anyhow::{Context, Result};
 
-use std::io::{self, Write as _};
-
 use crate::config::MergeStrategy;
 use crate::forge;
 use crate::git;
@@ -80,17 +78,13 @@ fn do_pr_merge(
         match checks {
             Ok(status) if !status.checks.is_empty() && !status.all_passed() => {
                 super::checks::print_checks(pr_number, &status);
-                if status.has_failures() {
-                    eprint!("PR has failing checks. Merge anyway? [y/N] ");
+                let question = if status.has_failures() {
+                    "PR has failing checks. Merge anyway?"
                 } else {
-                    eprint!("PR has pending checks. Merge anyway? [y/N] ");
-                }
-                io::stderr().flush()?;
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
-                if !input.trim().eq_ignore_ascii_case("y") {
-                    eprintln!("Aborted.");
-                    return Ok(());
+                    "PR has pending checks. Merge anyway?"
+                };
+                if !crate::prompt::confirm(question)? {
+                    return Err(crate::prompt::Aborted.into());
                 }
             }
             Ok(status) if verbose && !status.checks.is_empty() => {

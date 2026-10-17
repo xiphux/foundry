@@ -349,6 +349,22 @@ fn discard_needs_force_for_unmerged_commits_then_archives() {
     assert!(discarded.archived_as.unwrap().starts_with("archive/feat-"));
 }
 
+/// Declining the prompt exits non-zero, so `foundry discard x && ...` stops,
+/// and leaves the workspace as it was.
+#[test]
+fn declining_discard_fails_and_changes_nothing() {
+    let sb = Sandbox::new();
+    sb.ok(&["start", "feat"]);
+    std::fs::write(sb.worktree("feat").join("scratch.txt"), "wip\n").unwrap();
+
+    // stdin is empty here, which reads as "no".
+    let stderr = sb.fails(&["discard", "feat"]);
+    assert!(stderr.contains("Aborted."), "{stderr}");
+    assert!(!stderr.contains("Error"), "{stderr}");
+    assert!(sb.state().find("myapp", "feat").is_some());
+    assert!(sb.worktree("feat").join("scratch.txt").exists());
+}
+
 #[test]
 fn discard_without_commits_deletes_the_branch() {
     let sb = Sandbox::new();
