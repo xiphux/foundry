@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::Path;
 
@@ -24,7 +25,8 @@ struct Row {
 /// Display a status dashboard of all active workspaces.
 pub fn run(state: &WorkspaceState, state_path: &Path, watch: bool) -> Result<()> {
     if !watch {
-        return render_dashboard(state);
+        print!("{}", render_dashboard(state));
+        return Ok(());
     }
 
     // Re-read state each tick so workspaces started or finished in another tab
@@ -32,11 +34,16 @@ pub fn run(state: &WorkspaceState, state_path: &Path, watch: bool) -> Result<()>
     // rewritten concurrently) just keeps the last good snapshot on screen.
     let mut snapshot = state.clone();
     loop {
-        print!("\x1b[2J\x1b[H"); // clear screen
-        render_dashboard(&snapshot)?;
-        std::io::stdout().flush()?;
+        let started = std::time::Instant::now();
+        let frame = render_dashboard(&snapshot);
+        // Home, clear, frame: one write, so the screen is never seen empty.
+        let mut stdout = std::io::stdout().lock();
+        write!(stdout, "\x1b[H\x1b[2J{frame}")?;
+        stdout.flush()?;
+        drop(stdout);
 
-        std::thread::sleep(WATCH_INTERVAL);
+        // The interval is between refreshes, not after them.
+        std::thread::sleep(WATCH_INTERVAL.saturating_sub(started.elapsed()));
 
         if let Ok(mut next) = WorkspaceState::load_from(state_path) {
             next.prune_stale();
@@ -126,21 +133,29 @@ fn probe_one(ws: &Workspace, main_branches: &HashMap<&str, Option<String>>) -> R
     }
 }
 
-/// Render the status dashboard once.
-fn render_dashboard(state: &WorkspaceState) -> Result<()> {
+/// Render the status dashboard once, returning the whole frame.
+///
+/// Built as one string and only after every probe has finished, so `--watch`
+/// can replace the previous frame in a single write. Printing as it went put
+/// the header on a freshly cleared screen and the rows only once the git
+/// probes returned, blanking the dashboard for that long on every refresh.
+fn render_dashboard(state: &WorkspaceState) -> String {
     let workspaces = state.list();
+    // Writing to a String cannot fail, hence the `let _ =` on every writeln.
+    let mut out = String::new();
 
     if workspaces.is_empty() {
-        println!("No active workspaces.");
-        return Ok(());
+        out.push_str("No active workspaces.\n");
+        return out;
     }
 
     // Print header
-    println!(
+    let _ = writeln!(
+        out,
         "  {:<30} {:<10} {:<14} AGENT",
         "WORKSPACE", "GIT", "COMMITS"
     );
-    println!("  {}", "\u{2500}".repeat(80));
+    let _ = writeln!(out, "  {}", "\u{2500}".repeat(80));
 
     // Every workspace in a project shares one source repo, so detect the main
     // branch once per repo rather than once per workspace. Detection costs one
@@ -166,7 +181,7 @@ fn render_dashboard(state: &WorkspaceState) -> Result<()> {
         } = row;
 
         if missing {
-            println!("  {:<30} \x1b[31m✗ missing\x1b[0m", workspace_name);
+            let _ = writeln!(out, "  {:<30} \x1b[31m✗ missing\x1b[0m", workspace_name);
             continue;
         }
 
@@ -230,18 +245,19 @@ fn render_dashboard(state: &WorkspaceState) -> Result<()> {
         // Pad visible text first, then wrap with color codes so ANSI escapes
         // don't interfere with column widths.
         let git_padded = format!("{:<10}", git_label);
-        println!(
+        let _ = writeln!(
+            out,
             "  {:<30} {}{}\x1b[0m {:<14} {}{}\x1b[0m",
             workspace_name, git_color, git_padded, commit_info, agent_color, agent_label
         );
 
         // Activity on a second indented line (only if non-empty)
         if !activity.is_empty() {
-            println!("    \x1b[90mActivity:\x1b[0m {activity}");
+            let _ = writeln!(out, "    \x1b[90mActivity:\x1b[0m {activity}");
         }
     }
 
-    Ok(())
+    out
 }
 
 /// Map agent status to display label and ANSI color.
