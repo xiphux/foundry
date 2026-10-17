@@ -157,7 +157,12 @@ fn run() -> Result<()> {
 
     let cli = Cli::parse();
 
-    foundry::fs_util::secure_default_home()?;
+    // A warning, not an error: a home that cannot be tightened — owned by root
+    // after a `sudo foundry`, say — should not stop every command, including
+    // the read-only ones. Anything that then cannot write there fails itself.
+    if let Err(e) = foundry::fs_util::secure_default_home() {
+        eprintln!("Warning: {e:#}");
+    }
     let (registry_path, state_path) = workflow::foundry_paths()?;
     let env = CommandEnv {
         project: cli.project.as_deref(),
