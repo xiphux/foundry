@@ -328,12 +328,12 @@ const AGENT_REGISTRY: &[(&str, AgentCapabilities)] = &[
     ),
 ];
 
-/// Look up capabilities for a known agent. Returns None for unknown/custom agents.
 /// Every registered agent's capabilities.
 pub fn all_agent_capabilities() -> impl Iterator<Item = &'static AgentCapabilities> {
     AGENT_REGISTRY.iter().map(|(_, caps)| caps)
 }
 
+/// Look up capabilities for a known agent. Returns None for unknown/custom agents.
 pub fn agent_capabilities(agent: &str) -> Option<&'static AgentCapabilities> {
     AGENT_REGISTRY
         .iter()
