@@ -67,24 +67,7 @@ pub fn run(
 
     // Fetch and fast-forward main if requested (via --fetch flag or auto_fetch config)
     if fetch || config.auto_fetch {
-        let remote = &config.fetch_remote;
-
-        if verbose {
-            eprintln!("Fetching from {remote}...");
-        }
-        git::fetch(source_path, remote)
-            .with_context(|| format!("failed to fetch from remote '{remote}'"))?;
-
-        if verbose {
-            eprintln!("Fast-forwarding {main_branch} to {remote}/{main_branch}...");
-        }
-        git::ff_to_remote(source_path, remote, &main_branch).with_context(|| {
-            format!(
-                "could not fast-forward '{main_branch}' to '{remote}/{main_branch}'. \
-                 Your local {main_branch} may have diverged from the remote. \
-                 Resolve manually with `git pull` in your source repo, then retry."
-            )
-        })?;
+        super::sync_main_from_remote(source_path, &config.fetch_remote, &main_branch, verbose)?;
     }
 
     // Allocate ports for this workspace. Before the branch and worktree exist,

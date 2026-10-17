@@ -168,23 +168,7 @@ fn do_local_merge(ctx: &mut super::WorkflowCtx, ws: &super::ActiveWorkspace) -> 
 
     // Fetch and fast-forward main before merging (same logic as start)
     if config.auto_fetch {
-        let remote = &config.fetch_remote;
-        if verbose {
-            eprintln!("Fetching from {remote}...");
-        }
-        git::fetch(source_path, remote)
-            .with_context(|| format!("failed to fetch from remote '{remote}'"))?;
-
-        if verbose {
-            eprintln!("Fast-forwarding {main_branch} to {remote}/{main_branch}...");
-        }
-        git::ff_to_remote(source_path, remote, &main_branch).with_context(|| {
-            format!(
-                "could not fast-forward '{main_branch}' to '{remote}/{main_branch}'. \
-                 Your local {main_branch} may have diverged from the remote. \
-                 Resolve manually with `git pull` in your source repo, then retry."
-            )
-        })?;
+        super::sync_main_from_remote(source_path, &config.fetch_remote, &main_branch, verbose)?;
     }
 
     let commit_count = git::commit_count(source_path, branch, &main_branch)?;

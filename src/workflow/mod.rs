@@ -270,6 +270,33 @@ pub fn validate_workspace_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Fetch `remote` and fast-forward local `main_branch` to it — `--fetch` and
+/// `auto_fetch` in `start`, `auto_fetch` before a local merge in `finish`.
+pub fn sync_main_from_remote(
+    source_path: &Path,
+    remote: &str,
+    main_branch: &str,
+    verbose: bool,
+) -> Result<()> {
+    if verbose {
+        eprintln!("Fetching from {remote}...");
+    }
+    git::fetch(source_path, remote)
+        .with_context(|| format!("failed to fetch from remote '{remote}'"))?;
+
+    if verbose {
+        eprintln!("Fast-forwarding {main_branch} to {remote}/{main_branch}...");
+    }
+    git::ff_to_remote(source_path, remote, main_branch).with_context(|| {
+        format!(
+            "could not fast-forward '{main_branch}' to '{remote}/{main_branch}'. \
+             Your local {main_branch} may have diverged from the remote. \
+             Resolve manually with `git pull` in your source repo, then retry."
+        )
+    })?;
+    Ok(())
+}
+
 pub fn compute_branch_name(name: &str, prefix: Option<&str>) -> String {
     match prefix {
         Some(p) if !p.is_empty() => format!("{p}/{name}"),
