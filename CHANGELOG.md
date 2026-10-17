@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.7.0
+
 ### Security
 
 - The default `--issue` prompt fences the issue text in `<github_issue>` tags and tells the agent to treat it as a task description, not instructions. A custom `issue_prompt` is used as written.
