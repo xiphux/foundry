@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- A workspace opened in bare mode, tmux or Zellij no longer overwrites state recorded while it was open. Those backends hold `start`/`open` until the session ends, and saving afterwards wrote back the state as it was beforehand — dropping a PR recorded by `foundry pr` (so `finish` merged locally and left the PR open) or resurrecting a workspace that had been finished.
+
 ## v0.6.1
 
 ### Fixed

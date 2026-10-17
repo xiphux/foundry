@@ -130,7 +130,12 @@ pub fn open_workspace(
     // Open the workspace — the backend builds the entire layout in one shot
     let tab_id = backend.open_workspace(worktree_path, &pane_specs, verbose)?;
 
-    // Persist tab ID in state for later close_tab
+    // Persist tab ID in state for later close_tab. Re-read the file first:
+    // the bare, tmux and Zellij backends only return once the session ends,
+    // and in the meantime another foundry process may have recorded a PR or
+    // finished the workspace outright. Saving the snapshot loaded before the
+    // session would undo either. If the entry is gone, it stays gone.
+    *state = WorkspaceState::load_from(state_path)?;
     state.set_terminal_tab_id(project_name, name, tab_id);
     state.save_to(state_path)?;
 

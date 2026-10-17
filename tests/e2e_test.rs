@@ -366,6 +366,30 @@ fn restore_recreates_a_workspace_from_its_archive() {
     assert_eq!(restored.from_branch.as_deref(), Some(archived.as_str()));
 }
 
+/// The bare backend blocks until the pane command exits, as tmux and Zellij
+/// do until the session ends. Whatever another foundry process records in
+/// that time has to survive the blocked process saving its tab id.
+#[test]
+fn a_change_made_while_the_session_runs_is_not_overwritten() {
+    let sb = Sandbox::new();
+    std::fs::write(
+        sb.home.path().join("config.toml"),
+        format!(
+            "worktree_dir = {}\n\n[[panes]]\nname = \"main\"\ncommand = 'cd {{source}} && \"{}\" discard {{name}} --force'\n",
+            toml_path(sb.worktrees.path()),
+            env!("CARGO_BIN_EXE_foundry"),
+        ),
+    )
+    .unwrap();
+
+    sb.ok(&["start", "feat"]);
+    assert!(
+        sb.state().find("myapp", "feat").is_none(),
+        "the discard made during the session must stand"
+    );
+    assert_eq!(sb.registered_worktrees(), 1);
+}
+
 #[test]
 fn open_reopens_an_existing_workspace() {
     let sb = Sandbox::new();
