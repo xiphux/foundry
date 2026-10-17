@@ -256,12 +256,25 @@ impl TerminalBackend for ZellijBackend {
             return Ok(false);
         }
 
+        // Zellij refuses to attach from inside a session and exits non-zero,
+        // which used to read as success — the workspace was neither opened
+        // nor switched to.
+        if Self::inside_zellij() {
+            anyhow::bail!(
+                "workspace session '{tab_id}' is already running, but foundry cannot \
+                 switch to it from inside Zellij. Detach first (Ctrl+O, D) and run \
+                 foundry from outside Zellij."
+            );
+        }
+
         // Attach to the session (takes over the current terminal)
-        let mut child = Command::new("zellij")
+        let status = Command::new("zellij")
             .args(["attach", tab_id])
-            .spawn()
+            .status()
             .context("failed to attach to zellij session")?;
-        let _ = child.wait();
+        if !status.success() {
+            anyhow::bail!("zellij attach {tab_id} failed ({status})");
+        }
 
         Ok(true)
     }

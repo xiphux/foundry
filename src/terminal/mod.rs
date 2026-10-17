@@ -195,6 +195,9 @@ pub trait TerminalBackend {
 
     /// Focus/switch to the tab identified by the given tab_id.
     /// Returns true if the tab was found and focused, false if not found.
+    /// An error means the tab may exist but could not be reached, and callers
+    /// treat it as such rather than as "not found". Attaching backends (tmux
+    /// and Zellij outside a session) block here until the user detaches.
     fn focus_tab(&self, tab_id: &str) -> Result<bool>;
 
     /// Run a command in a specific pane of an already-open workspace.

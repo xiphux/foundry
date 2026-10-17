@@ -230,12 +230,21 @@ impl TerminalBackend for TmuxBackend {
             return Ok(false);
         }
 
-        // Attach to the session
-        let mut child = Command::new("tmux")
+        // Inside tmux, `attach` refuses to nest and exits non-zero; switching
+        // the current client is the in-session way to get there.
+        if Self::inside_tmux() {
+            Self::run_tmux(&["switch-client", "-t", tab_id])?;
+            return Ok(true);
+        }
+
+        // Attach to the session. Blocks until the user detaches.
+        let status = Command::new("tmux")
             .args(["attach-session", "-t", tab_id])
-            .spawn()
+            .status()
             .context("failed to attach to tmux session")?;
-        let _ = child.wait();
+        if !status.success() {
+            anyhow::bail!("tmux attach-session -t {tab_id} failed ({status})");
+        }
 
         Ok(true)
     }

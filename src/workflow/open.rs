@@ -47,11 +47,15 @@ pub fn open_workspace(
 
     let backend = terminal::detect_terminal()?;
 
-    // If the workspace already has an open tab, just focus it instead of opening a duplicate
+    // If the workspace already has an open tab, just focus it instead of opening
+    // a duplicate. A focus *error* is not "no tab": every backend reports a
+    // closed tab as `Ok(false)`, so an error means the tab is there and could
+    // not be reached — tmux or Zellij refusing to attach from inside a session,
+    // say. Opening anyway would only start a duplicate or fail less clearly.
     let workspace = state.find_by_worktree_path(&worktree_path.to_string_lossy());
     if let Some(ws) = workspace
         && !ws.terminal_tab_id.is_empty()
-        && let Ok(true) = backend.focus_tab(&ws.terminal_tab_id)
+        && backend.focus_tab(&ws.terminal_tab_id)?
     {
         if verbose {
             eprintln!("Workspace '{name}' is already open, switching to it.");

@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- `foundry open` and `foundry switch` to a workspace that is already running work from inside tmux, by switching the client to its session. They used to try `tmux attach`, which refuses to nest, and report success having done nothing; inside Zellij, which has no equivalent, they now say so instead.
 - Commands run without a workspace name inside a workspace (`finish`, `discard`, `pr`, `diff` and the rest) find it when `worktree_dir` goes through a symlink — a symlinked home or volume, or macOS's `/var`. They compared the spelled path against the resolved current directory and reported "could not infer workspace".
 - `foundry start --project <name> --issue <n>` fetches the issue from that project's repository. gh was run in whatever directory foundry was started from, so outside a repo it failed, and inside a different one it fetched that repository's issue `<n>`.
 - `foundry open --all` no longer pauses half a second after each workspace that was already open. The pause lets Ghostty, iTerm2 and Windows Terminal finish creating a tab, and is now skipped when the workspace was only brought forward.
