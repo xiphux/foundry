@@ -256,13 +256,16 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
             .iter()
             .enumerate()
             .find(|(i, p)| *i != primary_index && p.agent.as_deref() == Some(project_agent));
-        if let Some((_, other)) = elsewhere {
+        if pane_overridden {
+            // The project names this pane's agent itself; `agent` has nothing
+            // to apply, so nothing to warn about either.
+        } else if let Some((_, other)) = elsewhere {
             eprintln!(
                 "Warning: the project config sets agent = \"{project_agent}\", but your layout \
                  already runs it in pane '{}'. Keeping pane '{primary_name}' as it is.",
                 other.name
             );
-        } else if !pane_overridden {
+        } else {
             panes[primary_index].agent = Some(project_agent.to_string());
         }
     }
