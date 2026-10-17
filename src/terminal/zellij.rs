@@ -123,13 +123,7 @@ impl ZellijBackend {
         if let Some(ref cmd) = pane.command
             && !cmd.is_empty()
         {
-            let mut full_cmd = String::new();
-            for (k, v) in &pane.env {
-                full_cmd.push_str(&super::shell_export(k, v));
-                full_cmd.push_str("; ");
-            }
-            full_cmd.push_str(cmd);
-            let escaped = escape_kdl(&full_cmd);
+            let escaped = escape_kdl(&super::with_exports(&pane.env, cmd));
             return vec![
                 format!("{pad}pane command=\"bash\" name=\"{escaped_name}\" {{"),
                 format!("{pad}    args \"-c\" \"{escaped}\""),

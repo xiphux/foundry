@@ -32,6 +32,22 @@ pub(crate) fn shell_export(key: &str, value: &str) -> String {
     format!("export {key}='{}'", escape_single_quoted(value))
 }
 
+/// `command` preceded by an `export` for each of `env`, as one shell line.
+///
+/// Keys are sorted, so the same pane always yields the same line rather than
+/// one in `HashMap` order.
+pub(crate) fn with_exports(env: &HashMap<String, String>, command: &str) -> String {
+    let mut keys: Vec<&String> = env.keys().collect();
+    keys.sort();
+    let mut line = String::new();
+    for key in keys {
+        line.push_str(&shell_export(key, &env[key]));
+        line.push_str("; ");
+    }
+    line.push_str(command);
+    line
+}
+
 /// Render `cd 'path'` for a POSIX shell.
 ///
 /// The AppleScript backends type this into a live shell rather than passing the
@@ -226,6 +242,19 @@ pub trait TerminalBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn with_exports_sorts_and_quotes() {
+        let env = HashMap::from([
+            ("B".to_string(), "two words".to_string()),
+            ("A".to_string(), "it's".to_string()),
+        ]);
+        assert_eq!(
+            with_exports(&env, "run"),
+            "export A='it'\\''s'; export B='two words'; run"
+        );
+        assert_eq!(with_exports(&HashMap::new(), "run"), "run");
+    }
 
     #[test]
     fn every_documented_backend_name_resolves() {

@@ -75,22 +75,9 @@ impl TerminalBackend for TmuxBackend {
             .and_then(|p| p.command.as_deref())
             .unwrap_or(&user_shell);
 
-        // Build env exports for the first pane
-        let first_env = panes
-            .first()
-            .map(|p| {
-                p.env
-                    .iter()
-                    .map(|(k, v)| super::shell_export(k, v))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            })
-            .unwrap_or_default();
-
-        let first_full_cmd = if first_env.is_empty() {
-            first_cmd.to_string()
-        } else {
-            format!("{first_env}; {first_cmd}")
+        let first_full_cmd = match panes.first() {
+            Some(p) => super::with_exports(&p.env, first_cmd),
+            None => first_cmd.to_string(),
         };
 
         Self::run_tmux(&[
@@ -140,20 +127,8 @@ impl TerminalBackend for TmuxBackend {
                 SplitDirection::Down => "-v",
             };
 
-            // Build command with env vars
             let pane_cmd = pane.command.as_deref().unwrap_or(&user_shell);
-            let env_exports: String = pane
-                .env
-                .iter()
-                .map(|(k, v)| super::shell_export(k, v))
-                .collect::<Vec<_>>()
-                .join("; ");
-
-            let full_cmd = if env_exports.is_empty() {
-                pane_cmd.to_string()
-            } else {
-                format!("{env_exports}; {pane_cmd}")
-            };
+            let full_cmd = super::with_exports(&pane.env, pane_cmd);
 
             let new_pane_id = Self::run_tmux(&[
                 "split-window",
