@@ -6,8 +6,8 @@ pub mod types;
 mod validation;
 
 pub use agents::{
-    AgentCapabilities, AgentInvocation, agent_capabilities, build_agent_command,
-    check_agent_available, warn_agent_in_command,
+    AgentCapabilities, AgentInvocation, agent_capabilities, agent_in_command_warnings,
+    build_agent_command, check_agent_available,
 };
 pub use global::GlobalConfig;
 pub use project::ProjectConfig;
@@ -275,7 +275,9 @@ pub fn merge_configs(global: &GlobalConfig, project: Option<&ProjectConfig>) -> 
         context: project.and_then(|p| p.context.clone()),
     };
 
-    warn_agent_in_command(&resolved.panes);
+    for warning in agent_in_command_warnings(&resolved.panes) {
+        eprintln!("Warning: {warning}");
+    }
 
     resolved
 }

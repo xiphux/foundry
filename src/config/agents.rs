@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 /// multiple match arms across the codebase.
 pub struct AgentCapabilities {
     /// All executable names this agent might be invoked as in a pane command.
-    /// Used by `warn_agent_in_command` to detect when users should use the
+    /// Used by `agent_in_command_warnings` to detect when users should use the
     /// `agent` field instead of `command`.
     pub names: &'static [&'static str],
     /// The primary executable to check for on $PATH (e.g., "claude", "kiro-cli").
@@ -339,9 +339,10 @@ pub fn build_agent_command(
     (caps.build_command)(&invocation)
 }
 
-/// Check if a pane command looks like it's invoking a known agent, and warn
-/// that the `agent` field should be used instead.
-pub fn warn_agent_in_command(panes: &[super::PaneConfig]) {
+/// Find panes whose command looks like it's invoking a known agent, returning
+/// a warning for each that the `agent` field should be used instead.
+pub fn agent_in_command_warnings(panes: &[super::PaneConfig]) -> Vec<String> {
+    let mut warnings = Vec::new();
     for pane in panes {
         if pane.agent.is_some() {
             continue;
@@ -350,17 +351,18 @@ pub fn warn_agent_in_command(panes: &[super::PaneConfig]) {
             let first_word = cmd.split_whitespace().next().unwrap_or("");
             for (agent_id, caps) in AGENT_REGISTRY {
                 if first_word == *agent_id || caps.names.contains(&first_word) {
-                    eprintln!(
-                        "Warning: pane '{}' uses command '{cmd}' which looks like a known agent. \
+                    warnings.push(format!(
+                        "pane '{}' uses command '{cmd}' which looks like a known agent. \
                          Use `agent = \"{agent_id}\"` instead of `command` so foundry can set up \
                          permissions, status tracking, and prompt passthrough.",
                         pane.name
-                    );
+                    ));
                     break;
                 }
             }
         }
     }
+    warnings
 }
 
 #[cfg(test)]
@@ -819,7 +821,9 @@ mod tests {
             env: Default::default(),
             deferred: false,
         }];
-        warn_agent_in_command(&panes);
+        let warnings = agent_in_command_warnings(&panes);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("agent = \"claude\""), "{warnings:?}");
     }
 
     #[test]
@@ -834,6 +838,6 @@ mod tests {
             env: Default::default(),
             deferred: false,
         }];
-        warn_agent_in_command(&panes);
+        assert!(agent_in_command_warnings(&panes).is_empty());
     }
 }
