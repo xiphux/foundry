@@ -9,6 +9,38 @@ use crate::history;
 use crate::state::Workspace;
 use crate::terminal;
 
+/// Decide a new workspace's name and agent prompt.
+///
+/// An explicit name wins; otherwise one is derived from the issue. `--prompt`
+/// wins over `--prompt-file`, and either replaces the issue's prompt. The name
+/// is validated here, wherever it came from.
+pub fn name_and_prompt(
+    name: Option<String>,
+    issue: Option<&crate::github::GitHubIssue>,
+    prompt: Option<String>,
+    prompt_file: Option<&std::path::Path>,
+    issue_template: Option<&str>,
+) -> Result<(String, Option<String>)> {
+    let name = match (name, issue) {
+        (Some(name), _) => name,
+        (None, Some(issue)) => crate::github::issue_to_worktree_name(issue),
+        (None, None) => anyhow::bail!(
+            "a name is required. Usage: foundry start <name> or foundry start --issue <number>"
+        ),
+    };
+    super::validate_workspace_name(&name)?;
+
+    let prompt = match (prompt, prompt_file) {
+        (Some(prompt), _) => Some(prompt),
+        (None, Some(path)) => Some(
+            std::fs::read_to_string(path)
+                .with_context(|| format!("failed to read prompt file: {}", path.display()))?,
+        ),
+        (None, None) => issue.map(|issue| crate::github::issue_to_prompt(issue, issue_template)),
+    };
+    Ok((name, prompt))
+}
+
 pub fn run(
     ctx: &mut super::WorkflowCtx,
     name: &str,
@@ -450,6 +482,54 @@ fn build_agent_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn issue() -> crate::github::GitHubIssue {
+        crate::github::GitHubIssue {
+            number: 7,
+            title: "Fix the thing".into(),
+            body: "It is broken.".into(),
+        }
+    }
+
+    #[test]
+    fn name_and_prompt_derives_both_from_an_issue() {
+        let (name, prompt) = name_and_prompt(None, Some(&issue()), None, None, None).unwrap();
+        assert_eq!(name, "7-fix-the-thing");
+        assert!(prompt.unwrap().contains("It is broken."));
+    }
+
+    #[test]
+    fn name_and_prompt_prefers_explicit_name_and_prompt_over_the_issue() {
+        let (name, prompt) = name_and_prompt(
+            Some("mine".into()),
+            Some(&issue()),
+            Some("do this".into()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            (name.as_str(), prompt.as_deref()),
+            ("mine", Some("do this"))
+        );
+    }
+
+    #[test]
+    fn name_and_prompt_reads_a_prompt_file_in_place_of_the_issue() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("prompt.md");
+        std::fs::write(&file, "from file").unwrap();
+        let (_, prompt) = name_and_prompt(None, Some(&issue()), None, Some(&file), None).unwrap();
+        assert_eq!(prompt.as_deref(), Some("from file"));
+    }
+
+    #[test]
+    fn name_and_prompt_needs_a_name_from_somewhere_and_validates_it() {
+        assert!(name_and_prompt(None, None, None, None, None).is_err());
+        assert!(name_and_prompt(Some("../x".into()), None, None, None, None).is_err());
+        let (_, prompt) = name_and_prompt(Some("ok".into()), None, None, None, None).unwrap();
+        assert_eq!(prompt, None);
+    }
     use crate::config::{GlobalConfig, PaneConfig, SplitDirection, merge_configs};
 
     fn pane(name: &str, agent: Option<&str>, command: Option<&str>, deferred: bool) -> PaneConfig {

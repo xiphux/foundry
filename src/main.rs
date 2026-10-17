@@ -181,6 +181,14 @@ fn run() -> Result<()> {
             plan,
             agent,
         } => {
+            // Before resolving the project, which auto-registers it: a command
+            // that cannot run should change nothing.
+            if name.is_none() && issue.is_none() {
+                anyhow::bail!(
+                    "a name is required. Usage: foundry start <name> or foundry start --issue <number>"
+                );
+            }
+
             let mut registry = Registry::load_from(&registry_path)?;
             let (project_name, source_path) =
                 workflow::resolve_project(cli.project.as_deref(), &mut registry, &registry_path)?;
@@ -193,41 +201,17 @@ fn run() -> Result<()> {
 
             let mut state = WorkspaceState::load_from(&state_path)?;
 
-            // Resolve name and prompt from --issue, --prompt, or --prompt-file
-            let (resolved_name, prompt_text) = if let Some(ref issue_ref) = issue {
-                let gh_issue = foundry::github::fetch_issue(&source_path, issue_ref)?;
-                let auto_name =
-                    name.unwrap_or_else(|| foundry::github::issue_to_worktree_name(&gh_issue));
-                // Use issue as prompt unless --prompt or --prompt-file explicitly provided
-                let issue_prompt = if prompt.is_some() || prompt_file.is_some() {
-                    None
-                } else {
-                    Some(foundry::github::issue_to_prompt(
-                        &gh_issue,
-                        resolved.issue_prompt.as_deref(),
-                    ))
-                };
-                (auto_name, issue_prompt)
-            } else {
-                let n = name.ok_or_else(|| {
-                    anyhow::anyhow!("a name is required. Usage: foundry start <name> or foundry start --issue <number>")
-                })?;
-                (n, None)
-            };
-
-            // --prompt or --prompt-file override the issue prompt
-            let prompt_text =
-                if let Some(p) = prompt {
-                    Some(p)
-                } else if let Some(ref path) = prompt_file {
-                    Some(std::fs::read_to_string(path).with_context(|| {
-                        format!("failed to read prompt file: {}", path.display())
-                    })?)
-                } else {
-                    prompt_text
-                };
-
-            workflow::validate_workspace_name(&resolved_name)?;
+            let gh_issue = issue
+                .as_deref()
+                .map(|issue_ref| foundry::github::fetch_issue(&source_path, issue_ref))
+                .transpose()?;
+            let (resolved_name, prompt_text) = workflow::start::name_and_prompt(
+                name,
+                gh_issue.as_ref(),
+                prompt,
+                prompt_file.as_deref(),
+                resolved.issue_prompt.as_deref(),
+            )?;
 
             let mut c = ctx(
                 &project_name,

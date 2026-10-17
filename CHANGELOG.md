@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- `foundry start` with neither a name nor `--issue` fails without first auto-registering the current repository as a project.
 - `foundry restore` sets a workspace up the way `start` does. It skipped the agent setup — so a restored Claude workspace had no status in `foundry status` and none of the worktree permission rules — and it skipped deferred setup scripts, printing a note instead. It also checks that the agents are installed and the layout is valid before creating the worktree.
 - A layout that puts the same agent in two panes is refused before `start` creates anything. It used to be caught only after the branch, worktree and state entry existed, leaving them to clean up with `discard`.
 - Answering no to a `finish` or `discard` confirmation exits with status 1, so `foundry finish x && deploy` no longer carries on after a decline. The discard prompt is also on stderr now, like the others.
