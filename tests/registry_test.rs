@@ -105,7 +105,7 @@ fn test_registry_rejects_unsafe_project_names() {
         foundry::registry::Registry::load_from(std::path::Path::new("/nonexistent/registry.toml"))
             .unwrap();
     for bad in [
-        "", "..", ".hidden", "-flag", "a/b", "a\\b", "it's", "a;b", "a\nb",
+        "", "..", ".hidden", "-flag", "a/b", "a\\b", "it's", "a;b", "a\nb", "C:x",
     ] {
         assert!(
             registry.add(bad, PathBuf::from("/tmp/x")).is_err(),

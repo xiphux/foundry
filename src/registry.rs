@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 /// an auto-registered name is the repository's directory name, and spaces in
 /// one are harmless here.
 pub fn validate_project_name(name: &str) -> Result<()> {
-    const FORBIDDEN: &[char] = &['/', '\\', '\'', '"', ';', '&', '|', '$', '`'];
+    // `:` too: on Windows `worktree_dir.join("C:x")` is drive-relative and
+    // replaces `worktree_dir` entirely.
+    const FORBIDDEN: &[char] = &['/', '\\', ':', '\'', '"', ';', '&', '|', '$', '`'];
     if name.is_empty() {
         bail!("project name cannot be empty");
     }
