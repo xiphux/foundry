@@ -502,3 +502,22 @@ fn main_start_point_falls_back_to_the_remote_copy() {
     );
     assert!(foundry::git::main_start_point(clone.path(), "trunk", "origin").is_err());
 }
+
+/// Local main ahead of the remote — a local finish not yet pushed — is up to
+/// date, whether or not main is the branch checked out.
+#[test]
+fn ff_to_remote_accepts_a_main_already_ahead_of_the_remote() {
+    let (_origin, clone) = clone_behind_on_another_branch();
+    foundry::git::ff_to_remote(clone.path(), "origin", "main").unwrap();
+    git(clone.path(), &["checkout", "-q", "main"]);
+    git(
+        clone.path(),
+        &["commit", "--allow-empty", "-q", "-m", "local only"],
+    );
+    git(clone.path(), &["checkout", "-q", "wip"]);
+    let ahead = rev(clone.path(), "main");
+
+    foundry::git::ff_to_remote(clone.path(), "origin", "main").unwrap();
+
+    assert_eq!(rev(clone.path(), "main"), ahead);
+}

@@ -177,7 +177,20 @@ pub fn ff_to_remote(repo_path: &Path, remote: &str, branch: &str) -> Result<()> 
     if current_branch(repo_path)? == branch {
         run_git(repo_path, &["merge", "--ff-only", &remote_ref])?;
     } else {
-        let refspec = format!("refs/remotes/{remote}/{branch}:refs/heads/{branch}");
+        // Already containing the remote — as after a local `finish` that has
+        // not been pushed — is up to date, as `merge --ff-only` treats it. The
+        // fetch would refuse it as a non-fast-forward.
+        let remote_ref = format!("refs/remotes/{remote}/{branch}");
+        let local_ref = format!("refs/heads/{branch}");
+        if run_git(
+            repo_path,
+            &["merge-base", "--is-ancestor", &remote_ref, &local_ref],
+        )
+        .is_ok()
+        {
+            return Ok(());
+        }
+        let refspec = format!("{remote_ref}:{local_ref}");
         run_git(repo_path, &["fetch", "--", ".", &refspec])?;
     }
     Ok(())
