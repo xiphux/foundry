@@ -39,7 +39,7 @@
 # baseline's it warns: see findings below). And an index it cannot open at
 # all is reported nowhere under --json, and the whole check is skipped; so a
 # canary lock holding a version known to be yanked is audited too, and the
-# run fails unless that yank is reported. The audit job builds nothing, so
+# run fails unless that yank is reported. The audit's job builds nothing, so
 # the index is usually fetched fresh, and an outage there would otherwise
 # pass silently.
 #

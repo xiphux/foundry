@@ -936,19 +936,20 @@ fn steps(job: &str) -> Vec<String> {
     steps
 }
 
-/// Every audit job: ci.yml's, on pushes and pull requests, and ci-gate.yml's,
-/// on releases.
-const AUDIT_JOBS: [&str; 2] = ["ci.yml", "ci-gate.yml"];
+/// Every job that runs the audit, as (workflow, job): ci.yml's `checks`, on
+/// pushes and pull requests, which also carries the secret scan and the
+/// workflow lint, and ci-gate.yml's `audit`, on releases.
+const AUDIT_JOBS: [(&str, &str); 2] = [("ci.yml", "checks"), ("ci-gate.yml", "audit")];
 
 #[test]
 fn the_audit_job_never_skips_and_never_fails_quietly() {
-    for workflow in AUDIT_JOBS {
-        let job = job(workflow, "audit");
+    for (workflow, name) in AUDIT_JOBS {
+        let job = job(workflow, name);
         for key in job_keys(&job) {
             for forbidden in ["if:", "needs:", "continue-on-error:"] {
                 assert!(
                     !key.starts_with(forbidden),
-                    "{workflow}'s audit job has `{key}`"
+                    "{workflow}'s {name} job has `{key}`"
                 );
             }
         }
@@ -964,23 +965,54 @@ fn the_audit_job_never_skips_and_never_fails_quietly() {
     }
 }
 
+/// ci.yml's audit shares its job with the secret scan and the workflow
+/// linters, to bill one minute instead of three. Sharing must not let a red
+/// audit hide their findings: every step after the audit runs under
+/// `!cancelled()`, and each of them is still there.
+#[test]
+fn the_checks_after_the_audit_run_even_when_it_fails() {
+    let steps = steps(&job("ci.yml", "checks"));
+    let audit = steps
+        .iter()
+        .position(|s| s.contains("\nrun: scripts/audit-new-advisories.sh\n"))
+        .expect("ci.yml's checks job has no audit step");
+    let after = &steps[audit + 1..];
+    for step in after {
+        assert!(
+            step.contains("\nif: ${{ !cancelled() }}\n"),
+            "a step after the audit in ci.yml's checks job can be hidden by it:\n{step}"
+        );
+    }
+    for tool in [
+        "\nrun: cargo machete\n",
+        "ghcr.io/gitleaks/gitleaks:",
+        "/actionlint\" -color",
+        "uses: zizmorcore/zizmor-action@",
+    ] {
+        assert!(
+            after.iter().any(|s| s.contains(tool)),
+            "ci.yml's checks job no longer runs `{tool}` after the audit"
+        );
+    }
+}
+
 #[test]
 fn the_audit_job_reports_under_the_name_branch_protection_requires() {
     // Required by its job id: a `name:` would rename the check, and a
     // required check that never reports blocks every merge.
-    for workflow in AUDIT_JOBS {
-        let job = job(workflow, "audit");
+    for (workflow, name) in AUDIT_JOBS {
+        let job = job(workflow, name);
         assert!(
             !job_keys(&job).iter().any(|key| key.starts_with("name:")),
-            "{workflow}'s audit job has a name: {job}"
+            "{workflow}'s {name} job has a name: {job}"
         );
     }
 }
 
 #[test]
 fn the_audit_job_checks_out_the_full_history() {
-    for workflow in AUDIT_JOBS {
-        let job = job(workflow, "audit");
+    for (workflow, name) in AUDIT_JOBS {
+        let job = job(workflow, name);
         let checkout = steps(&job)
             .into_iter()
             .find(|s| s.contains("uses: actions/checkout@"))
@@ -994,8 +1026,8 @@ fn the_audit_job_checks_out_the_full_history() {
 
 #[test]
 fn the_audit_job_may_look_up_earlier_runs() {
-    for workflow in AUDIT_JOBS {
-        let job = job(workflow, "audit");
+    for (workflow, name) in AUDIT_JOBS {
+        let job = job(workflow, name);
         let permissions: Vec<&str> = job
             .lines()
             .skip_while(|l| *l != "    permissions:")
@@ -1023,8 +1055,8 @@ fn release_yml_grants_the_release_audit_its_lookup() {
 
 #[test]
 fn the_audit_compares_against_the_baseline_ci_found() {
-    for workflow in AUDIT_JOBS {
-        let steps = steps(&job(workflow, "audit"));
+    for (workflow, name) in AUDIT_JOBS {
+        let steps = steps(&job(workflow, name));
         let baseline = steps
             .iter()
             .position(|s| s.contains("\nid: audit-baseline\n"))

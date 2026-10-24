@@ -2,7 +2,8 @@
 //! generated — so any hand edit above an ignored line silently re-points it.
 //!
 //! That has now happened twice, and both times the only thing that noticed was
-//! a red `workflow-lint` job after a push: once when `custom-ci-gate` gained a
+//! a red workflow lint (then its own `workflow-lint` job, now steps of
+//! `checks`) after a push: once when `custom-ci-gate` gained a
 //! `permissions:` block (+9 lines), and once when `host` gained its dependency
 //! on that gate plus the comment explaining it (+20). The findings themselves
 //! were unchanged in kind each time; only their positions moved.

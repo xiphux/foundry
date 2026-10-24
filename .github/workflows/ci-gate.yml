@@ -117,8 +117,8 @@ jobs:
 
   # The dependency audit, on every release and never inherited -- the one
   # check that a pass on this exact commit does not settle, since advisories
-  # are published while the commit stands still. It is ci.yml's audit (see
-  # the job there): on a tag, the lock against the last commit a successful
+  # are published while the commit stands still. It is ci.yml's audit (the
+  # first steps of its `checks` job; see there): on a tag, the lock against the last commit a successful
   # ci.yml run passed on the default branch, other than this one
   # (scripts/audit-baseline.sh). So a finding published since then against
   # what the last change added -- which no earlier audit could have seen --
@@ -130,6 +130,15 @@ jobs:
   # release.yml also calls this workflow on every pull request, so a pull
   # request is audited here as well as in ci.yml: the same comparison, run
   # twice.
+  #
+  # Still a job of its own, where ci.yml folds its audit, secret scan and
+  # workflow lint into one `checks` job to bill one minute instead of three.
+  # There is nothing quick here to fold it with: the secret scan and the
+  # linters have never run on the release path, and adding them is a
+  # different change. Nor does it go into `ci-gate`, which would save a
+  # runner start but put the audit inside a job that skips whenever `gate`
+  # finds an earlier pass, which on a tag is nearly always. A tag must audit
+  # whatever `gate` decides, and keeping the two apart is what guarantees it.
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 15

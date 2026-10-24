@@ -268,15 +268,34 @@ jobs:
       - name: Check coverage
         run: cargo llvm-cov --locked --summary-only --fail-under-lines 72
 
-  # Unlike every other check here, this never defers to `gate`. An inherited
-  # pass vouches for content, and the audit's answer changes while the
-  # content stands still, as advisories are published. The pull request's run
-  # also audited GitHub's merge with main as it was then; a direct push
-  # reverting a fix in between leaves the merge's tree identical to the
-  # branch's and the finding back in it, and that merge would become the
-  # audit's next baseline (scripts/audit-baseline.sh) without ever having been
-  # audited. It builds nothing, so it is cheap to run every time.
-  audit:
+  # The checks that build nothing — the dependency audit and the unused-crate
+  # check, the secret scan, and the workflow linters — in one job. Each
+  # finishes in seconds, and billing rounds every job up to a whole minute, so
+  # as three jobs (`audit`, `secrets`, `workflow-lint`) they billed three
+  # minutes a run for well under one of work. Minutes are free on a public
+  # repository; this is for consistency with the private ones, where they are
+  # not.
+  #
+  # Unlike every other check here, this never defers to `gate`, because of
+  # the audit. An inherited pass vouches for content, and the audit's answer
+  # changes while the content stands still, as advisories are published. The
+  # pull request's run also audited GitHub's merge with main as it was then;
+  # a direct push reverting a fix in between leaves the merge's tree
+  # identical to the branch's and the finding back in it, and that merge
+  # would become the audit's next baseline (scripts/audit-baseline.sh)
+  # without ever having been audited. The secret scan and the linters used to
+  # skip on an inherited pass; here they ride along, since the job runs
+  # regardless.
+  #
+  # The audit comes first and its steps carry no condition. Every step after
+  # it runs under `!cancelled()`, so one tool's findings never hide another's
+  # for a whole run.
+  #
+  # Required by its job id, with no `name:`: a red audit blocks a merge only
+  # because branch protection names this check, and a required check that
+  # never reports blocks every merge, so renaming it means updating the
+  # required checks with it.
+  checks:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -287,8 +306,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # Full history: the audit compares against the last commit CI passed
-          # on this branch, which can be any number of commits back.
+          # Full history, for two steps: the audit compares against the last
+          # commit CI passed on this branch, which can be any number of
+          # commits back, and gitleaks scans the tested commit's history.
           fetch-depth: 0
 
       # rustup is preinstalled on the runner; see ci.yml's test job for why
@@ -355,9 +375,9 @@ jobs:
           AUDIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: scripts/audit-baseline.sh
 
-      # Checks Cargo.lock against the RustSec advisory database. Runs as its
-      # own job so a new advisory against a dependency does not read as a test
-      # failure, and so it reports even when the build matrix is red.
+      # Checks Cargo.lock against the RustSec advisory database. Outside the
+      # test matrix, so a new advisory against a dependency does not read as a
+      # test failure, and so it reports even when the build matrix is red.
       #
       # A vulnerability or warning (unmaintained, unsound, yanked) this change
       # ADDS fails the run, so an auto-merged update cannot bring one in
@@ -377,13 +397,12 @@ jobs:
 
       # The other half of dependency hygiene: a crate still declared after the
       # code that used it went away. Nothing else notices — it builds, it
-      # locks, it passes clippy, and Dependabot keeps proposing updates for it
+      # locks, it passes clippy, and Renovate keeps proposing updates for it
       # (and auto-merging them) forever.
       #
-      # In this job rather than its own: both read Cargo.toml/Cargo.lock rather
-      # than the build, and a second job would spend a runner start on a check
-      # that takes under a second. `!cancelled()` so an advisory does not hide
-      # an unused crate, or the reverse.
+      # Beside the audit: both read Cargo.toml/Cargo.lock rather than the
+      # build, and take under a second. `!cancelled()` so an advisory does not
+      # hide an unused crate, or the reverse.
       - name: Install cargo-machete
         if: ${{ !cancelled() }}
         uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
@@ -399,61 +418,40 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo machete
 
-  # Backstop for GitHub's secret scanning and push protection, and the check
-  # that runs on the PR itself. Pinned by digest; bump the tag and digest
-  # together. --redact keeps a real hit out of the public job log.
-  # --log-opts=HEAD scans the history of the commit under test only: gitleaks
-  # defaults to `git log --all`, and fetch-depth 0 fetches every remote branch,
-  # so a finding on a stale, unrelated branch would otherwise fail every PR.
-  # Reviewed false positives go in .gitleaksignore (history) or as an inline
-  # `gitleaks:allow` comment (current tree).
-  secrets:
-    name: Secret scan
-    needs: gate
-    if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
+      # Backstop for GitHub's secret scanning and push protection, and the
+      # check that runs on the PR itself. Pinned by digest; bump the tag and
+      # digest together. --redact keeps a real hit out of the public job log.
+      # --log-opts=HEAD scans the history of the commit under test only:
+      # gitleaks defaults to `git log --all`, and fetch-depth 0 fetches every
+      # remote branch, so a finding on a stale, unrelated branch would
+      # otherwise fail every PR. Reviewed false positives go in
+      # .gitleaksignore (history) or as an inline `gitleaks:allow` comment
+      # (current tree).
       - name: gitleaks
+        if: ${{ !cancelled() }}
         run: >-
           docker run --rm -v "$PWD:/repo" -w /repo
           ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
           git . --redact --no-banner --verbose --log-opts=HEAD
 
-  # The workflows themselves. actionlint catches mistakes GitHub only reports
-  # by failing a run — bad expressions, `needs` typos, unknown runner labels,
-  # shellcheck findings inside `run:` blocks. zizmor catches security ones —
-  # unpinned actions, template injection, permissions wider than a job needs,
-  # credentials left behind by a checkout. Both matter more here than the
-  # linting of any one script: these files hold the release tokens, and a
-  # green run here is what lets an automated update merge.
-  #
-  # Each tool's intentional exceptions live in its own config, with the
-  # reasoning next to them: .github/actionlint.yaml and .github/zizmor.yml.
-  #
-  # No Rust and no build, so it finishes in seconds and does not queue behind
-  # the matrix.
-  workflow-lint:
-    name: Workflow lint
-    needs: gate
-    if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
+      # The workflows themselves. actionlint catches mistakes GitHub only
+      # reports by failing a run — bad expressions, `needs` typos, unknown
+      # runner labels, shellcheck findings inside `run:` blocks. zizmor
+      # catches security ones — unpinned actions, template injection,
+      # permissions wider than a job needs, credentials left behind by a
+      # checkout. Both matter more here than the linting of any one script:
+      # these files hold the release tokens, and a green run here is what lets
+      # an automated update merge.
+      #
+      # Each tool's intentional exceptions live in its own config, with the
+      # reasoning next to them: .github/actionlint.yaml and .github/zizmor.yml.
+      #
       # The release binary from GitHub, checksum-pinned: this job gates what
       # auto-merge may merge, so the tool that judges it is fetched by a hash
       # rather than a tag someone else can move. Bump the version and the
       # checksum together (the release publishes a checksums.txt).
       - name: actionlint
+        if: ${{ !cancelled() }}
         env:
           ACTIONLINT_VERSION: 1.7.12
           ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
@@ -465,9 +463,6 @@ jobs:
           tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color
 
-      # `if: !cancelled()` so a finding from one tool still lets the other
-      # report, rather than fixing them one CI run at a time.
-      #
       # Online audits use the job's read-only token to check that each SHA pin
       # is a real commit of the repository named, and that it matches the
       # `# vX.Y.Z` comment beside it. Annotations rather than a SARIF upload,

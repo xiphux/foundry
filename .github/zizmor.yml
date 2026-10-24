@@ -1,4 +1,4 @@
-# zizmor (GitHub Actions security linter) — run by the `workflow-lint` job in
+# zizmor (GitHub Actions security linter) — run by the `checks` job in
 # ci.yml. Every exception below is a finding that was read and judged, not
 # silenced to get green. Add a new one only with the same kind of reason.
 #
@@ -20,7 +20,7 @@
 # explaining it -- so only the two entries BELOW host moved, and the findings
 # are dist's same expressions at new positions, re-read and unchanged in kind.
 #
-# That drift is now caught by tests/zizmor_config_test.rs rather than by a red
+# That drift is now caught by tests/zizmor_ignores_test.rs rather than by a red
 # CI run on a tag-shaped change nobody could test locally: every
 # template-injection line below must still be a line that interpolates.
 #
