@@ -40,7 +40,7 @@ jobs:
   # 'true' runs the checks.
   gate:
     name: Check for an earlier pass
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     continue-on-error: true
     timeout-minutes: 5
     permissions:
@@ -85,7 +85,7 @@ jobs:
   ci-gate:
     needs: gate
     if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -140,7 +140,7 @@ jobs:
   # finds an earlier pass, which on a tag is nearly always. A tag must audit
   # whatever `gate` decides, and keeping the two apart is what guarantees it.
   audit:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
