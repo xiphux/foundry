@@ -55,7 +55,7 @@ jobs:
   gate:
     name: Check for an earlier pass
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     continue-on-error: true
     timeout-minutes: 5
     permissions:
@@ -141,9 +141,9 @@ jobs:
         # `runs-on` labels (see customManagers in xiphux/renovate-config).
         os:
           # renovate: github-runner
-          - ubuntu-24.04
+          - ubuntu-26.04
           # renovate: github-runner
-          - ubuntu-24.04-arm
+          - ubuntu-26.04-arm
           - macos-latest
           - windows-latest
     steps:
@@ -229,7 +229,7 @@ jobs:
   test-result:
     needs: [gate, test]
     if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Every platform passed, or the gate stood them down
@@ -248,7 +248,7 @@ jobs:
   coverage:
     needs: gate
     if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -305,7 +305,7 @@ jobs:
   # never reports blocks every merge, so renaming it means updating the
   # required checks with it.
   checks:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
