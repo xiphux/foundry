@@ -354,13 +354,19 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          # cargo-audit is compiled here against the runner's glibc, so a
+          # binary from a newer image does not run on an older one, and
+          # runner.os ("Linux") cannot tell them apart. ImageOS (ubuntu24,
+          # ubuntu26) is the runner's own variable, out of reach of the env
+          # context, so it goes into the key through this step.
+          echo "image=$ImageOS" >> "$GITHUB_OUTPUT"
 
       - name: Cache cargo-audit
         id: cargo-audit-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-audit
-          key: ${{ runner.os }}-cargo-audit-${{ steps.cargo-audit.outputs.version }}
+          key: ${{ runner.os }}-${{ steps.cargo-audit.outputs.image }}-cargo-audit-${{ steps.cargo-audit.outputs.version }}
 
       # The version goes through the environment rather than being expanded
       # into the script: `${{ }}` is substituted as text before bash sees the
