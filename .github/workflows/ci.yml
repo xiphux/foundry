@@ -137,9 +137,15 @@ jobs:
         # aarch64-unknown-linux-gnu, and the macOS leg (arm64) also builds
         # x86_64-apple-darwin below.
         #
-        # Renovate updates `runs-on` labels but not matrix values, so the
-        # Ubuntu legs here are bumped by hand alongside its runner PRs.
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-latest, windows-latest]
+        # The marker comments let Renovate update these alongside the
+        # `runs-on` labels (see customManagers in xiphux/renovate-config).
+        os:
+          # renovate: github-runner
+          - ubuntu-24.04
+          # renovate: github-runner
+          - ubuntu-24.04-arm
+          - macos-latest
+          - windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
