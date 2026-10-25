@@ -55,7 +55,7 @@ jobs:
   gate:
     name: Check for an earlier pass
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     timeout-minutes: 5
     permissions:
@@ -136,7 +136,10 @@ jobs:
         # release. Windows ships via Scoop; ubuntu-24.04-arm covers
         # aarch64-unknown-linux-gnu, and the macOS leg (arm64) also builds
         # x86_64-apple-darwin below.
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        #
+        # Renovate updates `runs-on` labels but not matrix values, so the
+        # Ubuntu legs here are bumped by hand alongside its runner PRs.
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -198,7 +201,7 @@ jobs:
 
   # A stable check name for "did the platform matrix pass?", which is what a
   # required status check needs and what `test` cannot provide. GitHub names a
-  # matrix job's check runs after its values — `test (ubuntu-latest)`,
+  # matrix job's check runs after its values — `test (ubuntu-24.04)`,
   # `test (ubuntu-24.04-arm)`, and so on — while a required check names one
   # fixed string, configured in the repository settings where nothing links it
   # back to this file. So the day the matrix moves, and `ubuntu-24.04-arm`
@@ -220,7 +223,7 @@ jobs:
   test-result:
     needs: [gate, test]
     if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Every platform passed, or the gate stood them down
@@ -239,7 +242,7 @@ jobs:
   coverage:
     needs: gate
     if: ${{ !cancelled() && needs.gate.outputs.passed != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -296,7 +299,7 @@ jobs:
   # never reports blocks every merge, so renaming it means updating the
   # required checks with it.
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
