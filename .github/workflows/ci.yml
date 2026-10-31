@@ -178,7 +178,7 @@ jobs:
       # compiler when Cargo.lock changes; and caches dependency artifacts
       # rather than this crate's own, which every run rebuilds anyway.
       - name: Cache cargo
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Configure git
         run: |
           git config --global user.email "ci@foundry.dev"
@@ -265,7 +265,7 @@ jobs:
           echo CARGO_INCREMENTAL=0 >> "$GITHUB_ENV"
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-llvm-cov
 
@@ -420,7 +420,7 @@ jobs:
       # hide an unused crate, or the reverse.
       - name: Install cargo-machete
         if: ${{ !cancelled() }}
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-machete
 
@@ -489,7 +489,7 @@ jobs:
       # bumped too.
       - name: zizmor
         if: ${{ !cancelled() }}
-        uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
         with:
           version: 1.30.1
           advanced-security: false
